@@ -40,6 +40,9 @@ class ProcessMediaLibrary extends Process {
 	 * with the server-rendered filter bar and table shell.
 	 */
 	public function ___execute() {
+		if ($this->wire('input')->get('debug')) {
+			return $this->renderDebug();
+		}
 		$sanitizer = $this->wire('sanitizer');
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
@@ -62,7 +65,69 @@ class ProcessMediaLibrary extends Process {
 			. $sanitizer->entities($this->_('Total image rows:'))
 			. ' <strong>' . count($rows) . '</strong></li>';
 		$out .= '</ul>';
-		$out .= '<p class="uk-text-meta">' . $sanitizer->entities($this->_('Render UI follows in Phase 3.')) . '</p>';
+		$out .= '<p class="uk-text-meta">'
+			. $sanitizer->entities($this->_('Render UI follows in Phase 3. Append ?debug=1 for a pipeline dump.'))
+			. '</p>';
+		$out .= '</div>';
+		return $out;
+	}
+
+	/**
+	 * Render a verbose dump of every pipeline intermediate for diagnostics.
+	 *
+	 * Hit /processwire/setup/media-library/?debug=1. Kept around through
+	 * Phase 3 so we can verify findRaw shape and selector output against a
+	 * real install without temporary log statements.
+	 */
+	protected function renderDebug(): string {
+		$sanitizer = $this->wire('sanitizer');
+		$pages = $this->wire('pages');
+
+		$imageFields = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		$customByField = [];
+		foreach ($imageFields as $f) {
+			$customByField[$f] = $this->discoverCustomFields($f);
+		}
+		$rawFields = $this->buildRawFields($imageFields, $customByField);
+		$selector  = $this->buildSelector($eligibleTemplates, []);
+		$pageCount = $eligibleTemplates ? $pages->count($selector) : 0;
+		$rawData   = $eligibleTemplates ? $pages->findRaw($selector, $rawFields) : [];
+		$rows      = $this->flattenRows($rawData, $imageFields);
+
+		$out  = '<div class="ml-debug">';
+		$out .= '<h2>' . $sanitizer->entities($this->_('Phase 2 pipeline debug')) . '</h2>';
+		$out .= '<dl class="uk-description-list">';
+		$out .= '<dt>Image fields</dt><dd><code>' . $sanitizer->entities(implode(', ', $imageFields)) . '</code></dd>';
+		$out .= '<dt>Eligible templates</dt><dd><code>' . $sanitizer->entities(implode(', ', $eligibleTemplates)) . '</code></dd>';
+		$out .= '<dt>Custom fields per image field</dt><dd><pre>'
+			. $sanitizer->entities(json_encode($customByField, JSON_PRETTY_PRINT)) . '</pre></dd>';
+		$out .= '<dt>Selector</dt><dd><code>' . $sanitizer->entities($selector) . '</code></dd>';
+		$out .= '<dt>$pages->count($selector)</dt><dd>' . (int) $pageCount . '</dd>';
+		$out .= '<dt>findRaw fields requested</dt><dd><code>'
+			. $sanitizer->entities(implode(', ', $rawFields)) . '</code></dd>';
+		$out .= '<dt>findRaw result — pages keyed</dt><dd>' . count($rawData) . '</dd>';
+		$out .= '<dt>flattenRows result — rows</dt><dd>' . count($rows) . '</dd>';
+		if ($rawData) {
+			$firstId = array_key_first($rawData);
+			$out .= '<dt>First findRaw entry (page ' . (int) $firstId . ')</dt>';
+			$out .= '<dd><pre>'
+				. $sanitizer->entities(json_encode(
+					$rawData[$firstId],
+					JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+				))
+				. '</pre></dd>';
+		}
+		if ($rows) {
+			$out .= '<dt>First flattened row</dt>';
+			$out .= '<dd><pre>'
+				. $sanitizer->entities(json_encode(
+					$rows[0],
+					JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+				))
+				. '</pre></dd>';
+		}
+		$out .= '</dl>';
 		$out .= '</div>';
 		return $out;
 	}
@@ -216,7 +281,10 @@ class ProcessMediaLibrary extends Process {
 			$templates = array_values(array_intersect($requested, $eligibleTemplates));
 			if (!$templates) return 'id=0';
 		}
-		return 'template=' . implode('|', $templates) . ', include=all, status<=' . Page::statusHidden;
+		// include=hidden returns published + hidden, excludes unpublished and trash.
+		// status<=hidden does NOT work for this — hidden pages have status 1025
+		// (1 | Page::statusHidden), so a numeric <= 1024 filter excludes them.
+		return 'template=' . implode('|', $templates) . ', include=hidden';
 	}
 
 	/**
