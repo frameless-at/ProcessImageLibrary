@@ -6,7 +6,7 @@ See [MediaLibrary-Konzept.md](MediaLibrary-Konzept.md) for the design document.
 
 ## Status
 
-Phase 3 — work in progress. Server-rendered table with filter bar and pagination. Basic filters (search, template, image-field, missing-description, missing-tags, galleries-only) wired up. Sort by other columns, AJAX re-render, inline edit and caching land in later phases.
+Phase 5 — work in progress. Read pipeline cached via WireCache with template-based invalidation. Server-rendered table with filter bar and pagination, including per-custom-field "Missing X" toggles. Column-driven sort, AJAX re-render, inline edit land in later phases.
 
 ## Requirements
 

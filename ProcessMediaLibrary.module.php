@@ -97,8 +97,10 @@ class ProcessMediaLibrary extends Process {
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
 		$customByField = $this->getCustomByField();
 		$rawFields = $this->buildRawFields($imageFields);
-		$selector  = $this->buildSelector($eligibleTemplates, []);
+		$selector  = $eligibleTemplates ? $this->buildSelector($eligibleTemplates) : '';
 		$pageCount = $eligibleTemplates ? $pages->count($selector) : 0;
+		$cacheKey  = $eligibleTemplates ? $this->rowCacheKey($imageFields, $eligibleTemplates) : '';
+		$cacheHit  = $cacheKey !== '' && is_array($this->wire('cache')->getFor($this, $cacheKey));
 		$rawData   = $eligibleTemplates ? $pages->findRaw($selector, $rawFields) : [];
 		$rows      = $this->flattenRows($rawData, $imageFields);
 
@@ -115,6 +117,10 @@ class ProcessMediaLibrary extends Process {
 			. $sanitizer->entities(implode(', ', $rawFields)) . '</code></dd>';
 		$out .= '<dt>findRaw result — pages keyed</dt><dd>' . count($rawData) . '</dd>';
 		$out .= '<dt>flattenRows result — rows</dt><dd>' . count($rows) . '</dd>';
+		$out .= '<dt>Row cache key</dt><dd><code>' . $sanitizer->entities($cacheKey) . '</code></dd>';
+		$out .= '<dt>Row cache</dt><dd>' . ($cacheHit
+			? '<strong style="color:#2c8c2c">HIT</strong>'
+			: '<strong style="color:#c0392b">MISS</strong>') . '</dd>';
 
 		if ($rawData) {
 			$firstId = array_key_first($rawData);
@@ -241,25 +247,59 @@ class ProcessMediaLibrary extends Process {
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
 		if (!$eligibleTemplates) return [];
 
-		// Custom-field subfields aren't returned by findRaw (they live in a
-		// separate per-field data table that findRaw doesn't join), so we
-		// don't request them here. hydrateSlice fetches them per-image for
-		// the visible slice via the Pageimage API.
-		$rawFields = $this->buildRawFields($imageFields);
-		$selector  = $this->buildSelector($eligibleTemplates, $filters);
-		$rawData   = $this->wire('pages')->findRaw($selector, $rawFields);
+		$cache    = $this->wire('cache');
+		$cacheKey = $this->rowCacheKey($imageFields, $eligibleTemplates);
+		$rows     = $cache->getFor($this, $cacheKey);
 
-		$rows = $this->flattenRows($rawData, $imageFields);
+		if (!is_array($rows)) {
+			// Custom-field subfields aren't returned by findRaw (they live in a
+			// separate per-field data table that findRaw doesn't join), so we
+			// don't request them here. hydrateSlice fetches them per-image for
+			// the visible slice via the Pageimage API.
+			$rawFields = $this->buildRawFields($imageFields);
+			$selector  = $this->buildSelector($eligibleTemplates);
+			$rawData   = $this->wire('pages')->findRaw($selector, $rawFields);
+			$rows      = $this->flattenRows($rawData, $imageFields);
+			// Selector-based invalidation: PW expires this entry whenever a
+			// page matching the eligible templates is saved — including our
+			// own inline-edit endpoint that wraps $page->save().
+			$cache->saveFor(
+				$this,
+				$cacheKey,
+				$rows,
+				'template=' . implode('|', $eligibleTemplates)
+			);
+		}
 
 		// Bulk-hydrate custom-field values onto every row only when a custom
-		// "missing X" filter is active. The default browse path keeps the
-		// cheaper findRaw-only payload and lets hydrateSlice fill custom
-		// values just for the visible page.
+		// "missing X" filter is active. Hydration is not cached so the cache
+		// stays generic (one entry per discovery state) and any custom-field
+		// edits show up immediately on the next request.
 		if (!empty($filters['no_custom']) && $this->hasAnyCustomFields()) {
 			$rows = $this->bulkHydrateCustomFields($rows);
 		}
 
 		return $rows;
+	}
+
+	/**
+	 * Cache key for the post-flatten row list.
+	 *
+	 * Includes the discovery state (image fields, eligible templates, the
+	 * custom-fields-on-images map) so that adding a field, enabling a
+	 * custom-field template, or blacklisting a template all yield a new key
+	 * — no stale cache after schema changes.
+	 *
+	 * @param array<int,string> $imageFields
+	 * @param array<int,string> $eligibleTemplates
+	 */
+	protected function rowCacheKey(array $imageFields, array $eligibleTemplates): string {
+		$keyData = [
+			'tmpls' => $eligibleTemplates,
+			'imgs'  => $imageFields,
+			'cust'  => $this->getCustomByField(),
+		];
+		return 'rows-' . substr(md5((string) json_encode($keyData)), 0, 16);
 	}
 
 	/**
@@ -368,19 +408,16 @@ class ProcessMediaLibrary extends Process {
 	/**
 	 * Build the page-level selector for findRaw.
 	 *
+	 * Always loads the full eligible-templates set so the WireCache entry is
+	 * filter-agnostic — template narrowing happens in applyRowFilters at
+	 * the PHP level, against the cached row list.
+	 *
 	 * @param array<int,string> $eligibleTemplates
-	 * @param array<string,mixed> $filters
 	 */
-	protected function buildSelector(array $eligibleTemplates, array $filters = []): string {
+	protected function buildSelector(array $eligibleTemplates): string {
 		if (!$eligibleTemplates) return 'id=0';
-		$templates = $eligibleTemplates;
-		if (!empty($filters['template'])) {
-			$requested = is_array($filters['template']) ? $filters['template'] : [$filters['template']];
-			$templates = array_values(array_intersect($requested, $eligibleTemplates));
-			if (!$templates) return 'id=0';
-		}
 		// include=hidden returns published + hidden, excludes unpublished and trash.
-		return 'template=' . implode('|', $templates) . ', include=hidden';
+		return 'template=' . implode('|', $eligibleTemplates) . ', include=hidden';
 	}
 
 	/**
@@ -469,21 +506,31 @@ class ProcessMediaLibrary extends Process {
 	protected function applyRowFilters(array $rows, array $filters): array {
 		$q        = mb_strtolower($filters['q']);
 		$hasQ     = $q !== '';
+		$tplName  = (string) ($filters['template'] ?? '');
 		$field    = $filters['field'];
 		$noDesc   = $filters['no_desc'];
 		$noTags   = $filters['no_tags'];
 		$onlyGal  = $filters['only_galleries'];
 		$noCustom = $filters['no_custom'] ?? [];
 
-		if (!$hasQ && $field === '' && !$noDesc && !$noTags && !$onlyGal && !$noCustom) {
+		if (!$hasQ && $tplName === '' && $field === '' && !$noDesc && !$noTags && !$onlyGal && !$noCustom) {
 			return $rows;
+		}
+
+		// Template filter operates at PHP level now (was SQL before caching),
+		// so we resolve the name → id once and compare to row['templateId'].
+		$tplId = 0;
+		if ($tplName !== '') {
+			$tpl = $this->wire('templates')->get($tplName);
+			if ($tpl && $tpl->id) $tplId = (int) $tpl->id;
 		}
 
 		$galleryFields = $onlyGal ? array_flip($this->galleryFieldNames()) : [];
 
 		return array_values(array_filter($rows, function ($r) use (
-			$hasQ, $q, $field, $noDesc, $noTags, $onlyGal, $galleryFields, $noCustom
+			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $onlyGal, $galleryFields, $noCustom
 		) {
+			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
 			if ($field !== '' && $r['fieldName'] !== $field) return false;
 			if ($onlyGal && !isset($galleryFields[$r['fieldName']])) return false;
 
