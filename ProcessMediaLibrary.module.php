@@ -20,6 +20,24 @@ class ProcessMediaLibrary extends Process {
 	const PAGE_SIZE = 50;
 
 	/**
+	 * Flat-row keys allowed as a sort column, mapped to compare type.
+	 * Custom-fields-on-images columns are validated separately at read time
+	 * and accessed via the 'custom:<name>' sort token.
+	 */
+	const SORTABLE_COLUMNS = [
+		'pageTitle'   => 'string',
+		'fieldName'   => 'string',
+		'basename'    => 'string',
+		'description' => 'string',
+		'tags'        => 'string',
+		'width'       => 'int',
+		'filesize'    => 'int',
+	];
+
+	const DEFAULT_SORT = 'pageTitle';
+	const DEFAULT_DIR  = 'asc';
+
+	/**
 	 * Image subfields requested from every FieldtypeImage field via findRaw.
 	 *
 	 * Note PW exposes the basename as the underlying DB column `data`, not
@@ -63,9 +81,12 @@ class ProcessMediaLibrary extends Process {
 
 		$customCols = $this->collectCustomNames();
 		$filters    = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
+		$sortState  = $this->readSortInput($customCols);
+		$sort       = $sortState['sort'];
+		$dir        = $sortState['dir'];
 		$rows       = $this->loadRows($filters);
 		$rows       = $this->applyRowFilters($rows, $filters);
-		usort($rows, fn($a, $b) => strcasecmp($a['pageTitle'], $b['pageTitle']));
+		$this->applySort($rows, $sort, $dir);
 
 		$total      = count($rows);
 		$totalPages = max(1, (int) ceil($total / self::PAGE_SIZE));
@@ -84,9 +105,9 @@ class ProcessMediaLibrary extends Process {
 		);
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
-		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols);
-		$out .= $this->renderTable($slice, $customCols);
-		$out .= $this->renderPagination($total, $page, $totalPages, $filters);
+		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir);
+		$out .= $this->renderTable($slice, $customCols, $filters, $sort, $dir);
+		$out .= $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir);
 		$out .= '</div>';
 
 		return $out;
@@ -595,6 +616,64 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
+	 * Read and validate the sort/dir GET params. Invalid sort keys fall back
+	 * to the default; this prevents users from injecting arbitrary keys into
+	 * the row arrays via the URL.
+	 *
+	 * @return array{sort:string,dir:string}
+	 */
+	protected function readSortInput(array $customCols): array {
+		$input = $this->wire('input');
+		$sort  = (string) $input->get('sort');
+		$dir   = (string) $input->get('dir');
+
+		$whitelist = array_keys(self::SORTABLE_COLUMNS);
+		foreach ($customCols as $name) $whitelist[] = 'custom:' . $name;
+
+		if (!in_array($sort, $whitelist, true)) {
+			$sort = self::DEFAULT_SORT;
+			$dir  = self::DEFAULT_DIR;
+		}
+		if ($dir !== 'desc') $dir = 'asc';
+
+		return ['sort' => $sort, 'dir' => $dir];
+	}
+
+	/**
+	 * Sort flat rows in place by the given column. Custom-fields-on-images
+	 * are addressed via the 'custom:<name>' token. Ties break on
+	 * "pageId:basename" so output is deterministic across requests.
+	 */
+	protected function applySort(array &$rows, string $sort, string $dir): void {
+		$isCustom = strncmp($sort, 'custom:', 7) === 0;
+		$type     = $isCustom ? 'string' : (self::SORTABLE_COLUMNS[$sort] ?? 'string');
+		$custom   = $isCustom ? substr($sort, 7) : '';
+
+		usort($rows, function ($a, $b) use ($sort, $dir, $type, $isCustom, $custom) {
+			if ($isCustom) {
+				$va = $a['custom'][$custom] ?? '';
+				$vb = $b['custom'][$custom] ?? '';
+				if (is_array($va)) $va = json_encode($va);
+				if (is_array($vb)) $vb = json_encode($vb);
+			} else {
+				$va = $a[$sort] ?? '';
+				$vb = $b[$sort] ?? '';
+			}
+			$cmp = $type === 'int'
+				? ((int) $va <=> (int) $vb)
+				: strcasecmp((string) $va, (string) $vb);
+			if ($cmp === 0) {
+				$cmp = strcmp(
+					$a['pageId'] . ':' . $a['basename'],
+					$b['pageId'] . ':' . $b['basename']
+				);
+				return $cmp; // tiebreaker is direction-agnostic for stability
+			}
+			return $dir === 'desc' ? -$cmp : $cmp;
+		});
+	}
+
+	/**
 	 * Apply PHP-level row filters that PW's findRaw selector can't (or shouldn't)
 	 * express. Template narrowing is already done at the selector level in
 	 * loadRows; here we handle the per-image-row filters.
@@ -855,11 +934,20 @@ class ProcessMediaLibrary extends Process {
 		return '<p class="ml-empty">' . $san->entities($msg) . '</p>';
 	}
 
-	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = []): string {
+	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = [], string $sort = '', string $dir = ''): string {
 		$san = $this->wire('sanitizer');
 		$checked = fn($k) => $filters[$k] ? ' checked' : '';
 
 		$out  = '<form method="get" class="ml-filter-bar">';
+
+		// Preserve sort state across filter submits: without these hidden
+		// inputs, applying a filter would reset the user's sort to default.
+		if ($sort !== '' && $sort !== self::DEFAULT_SORT) {
+			$out .= '<input type="hidden" name="sort" value="' . $san->entities($sort) . '">';
+		}
+		if ($dir === 'desc') {
+			$out .= '<input type="hidden" name="dir" value="desc">';
+		}
 
 		$out .= '<input type="search" name="q" value="' . $san->entities($filters['q']) . '"'
 			. ' placeholder="' . $san->entities($this->_('Search description, tags, filename')) . '"'
@@ -926,7 +1014,7 @@ class ProcessMediaLibrary extends Process {
 	 * @param array<int,array<string,mixed>> $slice hydrated slice
 	 * @param array<int,string> $customCols custom-field column names
 	 */
-	protected function renderTable(array $slice, array $customCols): string {
+	protected function renderTable(array $slice, array $customCols, array $filters = [], string $sort = '', string $dir = ''): string {
 		$san = $this->wire('sanitizer');
 
 		if (!$slice) {
@@ -934,22 +1022,25 @@ class ProcessMediaLibrary extends Process {
 				. $san->entities($this->_('No images match the current filters.')) . '</p>';
 		}
 
+		// label, sort-key (null = not sortable)
 		$headers = [
-			$this->_('Thumb'),
-			$this->_('Page'),
-			$this->_('Field'),
-			$this->_('Filename'),
-			$this->_('Description'),
-			$this->_('Tags'),
-			$this->_('Dimensions'),
-			$this->_('Size'),
+			[$this->_('Thumb'),       null],
+			[$this->_('Page'),        'pageTitle'],
+			[$this->_('Field'),       'fieldName'],
+			[$this->_('Filename'),    'basename'],
+			[$this->_('Description'), 'description'],
+			[$this->_('Tags'),        'tags'],
+			[$this->_('Dimensions'),  'width'],
+			[$this->_('Size'),        'filesize'],
 		];
 
 		$out  = '<table class="ml-table uk-table uk-table-divider uk-table-small">';
 		$out .= '<thead><tr>';
-		foreach ($headers as $h) $out .= '<th>' . $san->entities($h) . '</th>';
+		foreach ($headers as [$label, $sortKey]) {
+			$out .= $this->renderSortableHeader($label, $sortKey, $sort, $dir, $filters, false);
+		}
 		foreach ($customCols as $name) {
-			$out .= '<th><code>' . $san->entities($name) . '</code></th>';
+			$out .= $this->renderSortableHeader($name, 'custom:' . $name, $sort, $dir, $filters, true);
 		}
 		$out .= '</tr></thead><tbody>';
 
@@ -1013,7 +1104,40 @@ class ProcessMediaLibrary extends Process {
 		return $out;
 	}
 
-	protected function renderPagination(int $total, int $page, int $totalPages, array $filters): string {
+	/**
+	 * Render one <th>. If $sortKey is null the header is plain text; otherwise
+	 * it becomes a link that, when clicked, sets sort=$sortKey and toggles dir
+	 * (asc → desc → asc) while preserving the current filters. Custom-column
+	 * headers wrap the label in <code> like before.
+	 */
+	protected function renderSortableHeader(string $label, ?string $sortKey, string $currentSort, string $currentDir, array $filters, bool $codeLabel): string {
+		$san = $this->wire('sanitizer');
+		$labelHtml = $codeLabel
+			? '<code>' . $san->entities($label) . '</code>'
+			: $san->entities($label);
+
+		if ($sortKey === null) {
+			return '<th>' . $labelHtml . '</th>';
+		}
+
+		$isActive = $currentSort === $sortKey;
+		$nextDir  = ($isActive && $currentDir === 'asc') ? 'desc' : 'asc';
+		// Reset to page 1 — page numbers don't map across sort changes.
+		$href     = $this->buildUrl($filters, 1, $sortKey, $nextDir);
+		$arrow    = $isActive ? ($currentDir === 'asc' ? '▲' : '▼') : '';
+		$cls      = 'ml-th-sortable' . ($isActive ? ' ml-th-sort-active' : '');
+
+		$inner = $labelHtml;
+		if ($arrow !== '') {
+			$inner .= ' <span class="ml-sort-arrow">' . $arrow . '</span>';
+		}
+
+		return '<th class="' . $cls . '">'
+			. '<a href="' . $san->entities($href) . '">' . $inner . '</a>'
+			. '</th>';
+	}
+
+	protected function renderPagination(int $total, int $page, int $totalPages, array $filters, string $sort = '', string $dir = ''): string {
 		$san = $this->wire('sanitizer');
 
 		$summary = sprintf(
@@ -1026,11 +1150,11 @@ class ProcessMediaLibrary extends Process {
 
 		if ($totalPages > 1) {
 			if ($page > 1) {
-				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page - 1)) . '">'
+				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page - 1, $sort, $dir)) . '">'
 					. $san->entities($this->_('← Previous')) . '</a>';
 			}
 			if ($page < $totalPages) {
-				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page + 1)) . '">'
+				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page + 1, $sort, $dir)) . '">'
 					. $san->entities($this->_('Next →')) . '</a>';
 			}
 		}
@@ -1039,7 +1163,7 @@ class ProcessMediaLibrary extends Process {
 		return $out;
 	}
 
-	protected function buildUrl(array $filters, int $page): string {
+	protected function buildUrl(array $filters, int $page, string $sort = '', string $dir = ''): string {
 		$params = [
 			'q'              => $filters['q'],
 			'template'       => $filters['template'],
@@ -1048,6 +1172,8 @@ class ProcessMediaLibrary extends Process {
 			'no_tags'        => $filters['no_tags'] ? '1' : '',
 			'only_galleries' => $filters['only_galleries'] ? '1' : '',
 			'p'              => $page > 1 ? (string) $page : '',
+			'sort'           => ($sort !== '' && $sort !== self::DEFAULT_SORT) ? $sort : '',
+			'dir'            => $dir === 'desc' ? 'desc' : '',
 		];
 		foreach ($filters['no_custom'] ?? [] as $name => $on) {
 			if ($on) $params['no_custom_' . $name] = '1';
