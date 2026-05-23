@@ -59,8 +59,12 @@
 
 		td.textContent = '';
 		td.appendChild(editor);
-		editor.focus();
-		editor.select();
+		// iOS Safari sometimes drops focus() if called synchronously inside
+		// the click handler that just mutated the DOM; defer one tick.
+		setTimeout(function () {
+			editor.focus();
+			editor.select();
+		}, 0);
 
 		var committed = false;
 

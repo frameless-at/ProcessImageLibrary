@@ -75,7 +75,9 @@
 
 /* Inline edit */
 .ml-cell-editable {
-	cursor: text;
+	/* pointer (not text) so iOS Safari fires click events on non-native
+	   interactive elements — without this, taps just trigger :hover. */
+	cursor: pointer;
 	position: relative;
 }
 .ml-cell-editable:hover {
