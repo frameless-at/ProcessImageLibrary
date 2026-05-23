@@ -74,7 +74,16 @@ class ProcessMediaLibrary extends Process {
 		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
 		$slice      = $this->hydrateSlice($slice);
 
-		$out  = '<div class="ml-root">';
+		$session   = $this->wire('session');
+		$sanitizer = $this->wire('sanitizer');
+		$rootAttrs = sprintf(
+			' data-save-url="%s" data-csrf-name="%s" data-csrf-value="%s"',
+			$sanitizer->entities($this->wire('page')->url . 'save/'),
+			$sanitizer->entities($session->CSRF->getTokenName()),
+			$sanitizer->entities($session->CSRF->getTokenValue())
+		);
+
+		$out  = '<div class="ml-root"' . $rootAttrs . '>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols);
 		$out .= $this->renderTable($slice, $customCols);
 		$out .= $this->renderPagination($total, $page, $totalPages, $filters);

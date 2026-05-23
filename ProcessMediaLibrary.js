@@ -8,13 +8,29 @@
 (function () {
 	'use strict';
 
-	var config = (window.ProcessWire && window.ProcessWire.config && window.ProcessWire.config.ProcessMediaLibrary);
-	if (!config || !config.saveUrl) return;
-
 	var root = document.querySelector('.ml-root');
 	if (!root) return;
 
-	var labels = config.labels || {};
+	// Mark that the script loaded — visible CSS hook in case ProcessWire.config
+	// is empty for some reason and the user needs to debug from outside.
+	root.classList.add('ml-js-loaded');
+
+	// Two config sources: $config->js() output, falling back to data-*
+	// attributes on .ml-root. The fallback exists because some admin theme
+	// or load order issue can leave ProcessWire.config.ProcessMediaLibrary
+	// undefined while the script still loads fine.
+	var pwCfg = (window.ProcessWire && window.ProcessWire.config && window.ProcessWire.config.ProcessMediaLibrary) || {};
+	var config = {
+		saveUrl: pwCfg.saveUrl || root.dataset.saveUrl || '',
+		csrf: pwCfg.csrf || {
+			name:  root.dataset.csrfName  || '',
+			value: root.dataset.csrfValue || ''
+		},
+		labels: pwCfg.labels || {}
+	};
+	if (!config.saveUrl) return;
+
+	var labels = config.labels;
 	var saveQueues = new Map();
 
 	function enqueueSave(pageId, task) {
@@ -86,7 +102,6 @@
 				return;
 			}
 
-			// Optimistic update — show the user's input immediately, revert on error.
 			td.textContent = newValue;
 			td.classList.add('ml-cell-saving');
 			td.title = labels.saving || 'Saving…';
@@ -102,7 +117,6 @@
 			}).then(function (result) {
 				td.classList.remove('ml-cell-saving');
 				if (result && result.data && result.data.ok) {
-					// Sync to the value PW actually stored — may differ from input.
 					td.textContent = result.data.value;
 					td.title = '';
 					flashCell(td, true);
@@ -133,10 +147,20 @@
 		editor.addEventListener('blur', commit);
 	}
 
-	root.addEventListener('click', function (e) {
-		var td = e.target.closest && e.target.closest('.ml-cell-editable');
-		if (!td || td.classList.contains('ml-editing')) return;
-		if (e.target.tagName === 'A' || e.target.closest('a')) return;
+	function handleCellTap(e) {
+		var td = this;
+		if (td.classList.contains('ml-editing')) return;
+		if (e.target && e.target !== td) {
+			if (e.target.tagName === 'A' || (e.target.closest && e.target.closest('a'))) return;
+		}
 		activateEditor(td);
+	}
+
+	// Direct binding (not delegated) — iOS Safari fires click on first tap
+	// only when the tapped element itself is "interactive": has a click
+	// listener, is a native control, or has cursor:pointer. Delegation via
+	// the root sometimes misses the first tap; per-cell binding doesn't.
+	root.querySelectorAll('.ml-cell-editable').forEach(function (td) {
+		td.addEventListener('click', handleCellTap);
 	});
 })();

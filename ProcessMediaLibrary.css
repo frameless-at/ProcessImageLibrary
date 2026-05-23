@@ -79,6 +79,16 @@
 	   interactive elements — without this, taps just trigger :hover. */
 	cursor: pointer;
 	position: relative;
+	/* Eliminate the 300ms tap delay on iOS and prevent double-tap zoom on cells. */
+	touch-action: manipulation;
+}
+
+/* Diagnostic: if the JS bootstrapped, this rule applies and the .ml-root
+   gets a thin green left border. If you don't see the border, the script
+   never ran (cache, load error, or no .ml-root in DOM). */
+.ml-root.ml-js-loaded {
+	border-left: 3px solid #6abf69;
+	padding-left: 8px;
 }
 .ml-cell-editable:hover {
 	background: #fffbe6;
