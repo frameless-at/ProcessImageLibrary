@@ -38,6 +38,14 @@ class ProcessMediaLibrary extends Process {
 	];
 
 	/**
+	 * Lazily-built cache of custom-fields-on-images discovery results,
+	 * keyed by image-field name. Built once per request to avoid repeated
+	 * template lookups across execute() and hydrateSlice().
+	 * @var array<string,array<int,string>>|null
+	 */
+	protected $customByFieldCache = null;
+
+	/**
 	 * Render the main media library admin page.
 	 */
 	public function ___execute() {
@@ -64,7 +72,7 @@ class ProcessMediaLibrary extends Process {
 		$offset     = ($page - 1) * self::PAGE_SIZE;
 		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
 		$slice      = $this->hydrateSlice($slice);
-		$customCols = $this->collectCustomNames($rows);
+		$customCols = $this->collectCustomNames();
 
 		$out  = '<div class="ml-root">';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates);
@@ -87,11 +95,8 @@ class ProcessMediaLibrary extends Process {
 
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
-		$customByField = [];
-		foreach ($imageFields as $f) {
-			$customByField[$f] = $this->discoverCustomFields($f);
-		}
-		$rawFields = $this->buildRawFields($imageFields, $customByField);
+		$customByField = $this->getCustomByField();
+		$rawFields = $this->buildRawFields($imageFields);
 		$selector  = $this->buildSelector($eligibleTemplates, []);
 		$pageCount = $eligibleTemplates ? $pages->count($selector) : 0;
 		$rawData   = $eligibleTemplates ? $pages->findRaw($selector, $rawFields) : [];
@@ -236,12 +241,11 @@ class ProcessMediaLibrary extends Process {
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
 		if (!$eligibleTemplates) return [];
 
-		$customByField = [];
-		foreach ($imageFields as $f) {
-			$customByField[$f] = $this->discoverCustomFields($f);
-		}
-
-		$rawFields = $this->buildRawFields($imageFields, $customByField);
+		// Custom-field subfields aren't returned by findRaw (they live in a
+		// separate per-field data table that findRaw doesn't join), so we
+		// don't request them here. hydrateSlice fetches them per-image for
+		// the visible slice via the Pageimage API.
+		$rawFields = $this->buildRawFields($imageFields);
 		$selector  = $this->buildSelector($eligibleTemplates, $filters);
 		$rawData   = $this->wire('pages')->findRaw($selector, $rawFields);
 
@@ -317,21 +321,38 @@ class ProcessMediaLibrary extends Process {
 	/**
 	 * Build the field list passed to $pages->findRaw().
 	 *
+	 * Standard subfields only — custom-fields-on-images live in a separate
+	 * table that findRaw doesn't join through dotted notation. The visible
+	 * slice picks up custom values via the Pageimage API in hydrateSlice.
+	 *
 	 * @param array<int,string> $imageFields
-	 * @param array<string,array<int,string>> $customByField
 	 * @return array<int,string>
 	 */
-	protected function buildRawFields(array $imageFields, array $customByField): array {
+	protected function buildRawFields(array $imageFields): array {
 		$fields = ['id', 'title', 'templates_id'];
 		foreach ($imageFields as $f) {
 			foreach (self::STANDARD_SUBFIELDS as $sub) {
 				$fields[] = "$f.$sub";
 			}
-			foreach ($customByField[$f] ?? [] as $sub) {
-				$fields[] = "$f.$sub";
-			}
 		}
 		return $fields;
+	}
+
+	/**
+	 * Lazily compute the customByField map: for each image field, the list of
+	 * custom-field subfield names defined on its field-{name} template.
+	 *
+	 * @return array<string,array<int,string>>
+	 */
+	protected function getCustomByField(): array {
+		if ($this->customByFieldCache === null) {
+			$cache = [];
+			foreach ($this->discoverImageFields() as $f) {
+				$cache[$f] = $this->discoverCustomFields($f);
+			}
+			$this->customByFieldCache = $cache;
+		}
+		return $this->customByFieldCache;
 	}
 
 	/**
@@ -479,6 +500,7 @@ class ProcessMediaLibrary extends Process {
 		foreach ($this->wire('pages')->getById($pageIds) as $p) {
 			$pagesById[$p->id] = $p;
 		}
+		$customByField = $this->getCustomByField();
 
 		foreach ($slice as &$row) {
 			$row['thumbUrl']    = '';
@@ -498,8 +520,19 @@ class ProcessMediaLibrary extends Process {
 			} elseif ($fieldValue instanceof Pageimage) {
 				$img = $fieldValue;
 			}
-			if ($img instanceof Pageimage) {
-				$row['thumbUrl'] = $img->size(120, 80, ['upscaling' => false, 'quality' => 80])->url;
+			if (!$img instanceof Pageimage) continue;
+
+			$row['thumbUrl'] = $img->size(120, 80, ['upscaling' => false, 'quality' => 80])->url;
+
+			// Custom-field hydration: read each declared custom subfield off
+			// the Pageimage. Phase 6 will handle type-specific edit semantics;
+			// here we normalize to a displayable scalar.
+			foreach ($customByField[$row['fieldName']] ?? [] as $customName) {
+				$val = $img->get($customName);
+				if ($val === null || $val === '') continue;
+				if (is_object($val)) $val = (string) $val;
+				if (is_array($val)) $val = json_encode($val, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+				$row['custom'][$customName] = $val;
 			}
 		}
 		unset($row);
@@ -508,14 +541,18 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * @param array<int,array<string,mixed>> $rows
-	 * @return array<int,string> sorted unique custom-field names across all rows
+	 * Sorted unique custom-field column names across all image fields.
+	 *
+	 * Sourced from discovery (field-{name} templates), not from row data —
+	 * columns appear even if the current slice happens not to populate them.
+	 *
+	 * @return array<int,string>
 	 */
-	protected function collectCustomNames(array $rows): array {
+	protected function collectCustomNames(): array {
 		$names = [];
-		foreach ($rows as $r) {
-			foreach (array_keys($r['custom'] ?? []) as $name) {
-				$names[$name] = true;
+		foreach ($this->getCustomByField() as $list) {
+			foreach ($list as $n) {
+				$names[$n] = true;
 			}
 		}
 		ksort($names);
