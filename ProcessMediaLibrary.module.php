@@ -9,6 +9,7 @@
  *
  * Phase 1: module skeleton.
  * Phase 2: read-pipeline (field-discovery, findRaw, flatten).
+ * Phase 3: server-rendered table + filter bar + pagination.
  * See MediaLibrary-Konzept.md for the full plan.
  */
 class ProcessMediaLibrary extends Process {
@@ -16,6 +17,7 @@ class ProcessMediaLibrary extends Process {
 	const ADMIN_PAGE_NAME = 'media-library';
 	const PERMISSION_NAME = 'media-library-access';
 	const CACHE_PREFIX = 'media-library-';
+	const PAGE_SIZE = 50;
 
 	/**
 	 * Image subfields requested from every FieldtypeImage field via findRaw.
@@ -36,69 +38,72 @@ class ProcessMediaLibrary extends Process {
 	];
 
 	/**
+	 * Lazily-built cache of custom-fields-on-images discovery results,
+	 * keyed by image-field name. Built once per request to avoid repeated
+	 * template lookups across execute() and hydrateSlice().
+	 * @var array<string,array<int,string>>|null
+	 */
+	protected $customByFieldCache = null;
+
+	/**
 	 * Render the main media library admin page.
-	 *
-	 * Phase 2 only emits a pipeline smoke summary. Phase 3 will replace this
-	 * with the server-rendered filter bar and table shell.
 	 */
 	public function ___execute() {
 		if ($this->wire('input')->get('debug')) {
 			return $this->renderDebug();
 		}
-		$sanitizer = $this->wire('sanitizer');
+
+		$this->loadAssets();
+
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
-		$rows = $this->loadRows();
+		if (!$imageFields || !$eligibleTemplates) {
+			return $this->renderEmptyState($imageFields, $eligibleTemplates);
+		}
 
-		$out  = '<div class="ml-phase-status">';
-		$out .= '<h2>' . $sanitizer->entities($this->_('Media Library — Phase 2 pipeline check')) . '</h2>';
-		$out .= '<ul class="uk-list uk-list-bullet">';
-		$out .= '<li>'
-			. $sanitizer->entities($this->_('Image fields discovered:'))
-			. ' <strong>' . count($imageFields) . '</strong>'
-			. ($imageFields ? ' (' . $sanitizer->entities(implode(', ', $imageFields)) . ')' : '')
-			. '</li>';
-		$out .= '<li>'
-			. $sanitizer->entities($this->_('Eligible templates:'))
-			. ' <strong>' . count($eligibleTemplates) . '</strong>'
-			. ($eligibleTemplates ? ' (' . $sanitizer->entities(implode(', ', $eligibleTemplates)) . ')' : '')
-			. '</li>';
-		$out .= '<li>'
-			. $sanitizer->entities($this->_('Total image rows:'))
-			. ' <strong>' . count($rows) . '</strong></li>';
-		$out .= '</ul>';
-		$out .= '<p class="uk-text-meta">'
-			. $sanitizer->entities($this->_('Render UI follows in Phase 3. Append ?debug=1 for a pipeline dump.'))
-			. '</p>';
+		$customCols = $this->collectCustomNames();
+		$filters    = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
+		$rows       = $this->loadRows($filters);
+		$rows       = $this->applyRowFilters($rows, $filters);
+		usort($rows, fn($a, $b) => strcasecmp($a['pageTitle'], $b['pageTitle']));
+
+		$total      = count($rows);
+		$totalPages = max(1, (int) ceil($total / self::PAGE_SIZE));
+		$page       = min(max(1, (int) $this->wire('input')->get('p')), $totalPages);
+		$offset     = ($page - 1) * self::PAGE_SIZE;
+		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
+		$slice      = $this->hydrateSlice($slice);
+
+		$out  = '<div class="ml-root">';
+		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols);
+		$out .= $this->renderTable($slice, $customCols);
+		$out .= $this->renderPagination($total, $page, $totalPages, $filters);
 		$out .= '</div>';
+
 		return $out;
 	}
 
 	/**
 	 * Render a verbose dump of every pipeline intermediate for diagnostics.
 	 *
-	 * Hit /processwire/setup/media-library/?debug=1. Kept around through
-	 * Phase 3 so we can verify findRaw shape and selector output against a
-	 * real install without temporary log statements.
+	 * Hit /processwire/setup/media-library/?debug=1.
 	 */
 	protected function renderDebug(): string {
 		$sanitizer = $this->wire('sanitizer');
 		$pages = $this->wire('pages');
+		$input = $this->wire('input');
 
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
-		$customByField = [];
-		foreach ($imageFields as $f) {
-			$customByField[$f] = $this->discoverCustomFields($f);
-		}
-		$rawFields = $this->buildRawFields($imageFields, $customByField);
+		$customByField = $this->getCustomByField();
+		$rawFields = $this->buildRawFields($imageFields);
 		$selector  = $this->buildSelector($eligibleTemplates, []);
 		$pageCount = $eligibleTemplates ? $pages->count($selector) : 0;
 		$rawData   = $eligibleTemplates ? $pages->findRaw($selector, $rawFields) : [];
 		$rows      = $this->flattenRows($rawData, $imageFields);
 
 		$out  = '<div class="ml-debug">';
-		$out .= '<h2>' . $sanitizer->entities($this->_('Phase 2 pipeline debug')) . '</h2>';
+		$out .= '<h2>' . $sanitizer->entities($this->_('Pipeline debug')) . '</h2>';
 		$out .= '<dl class="uk-description-list">';
 		$out .= '<dt>Image fields</dt><dd><code>' . $sanitizer->entities(implode(', ', $imageFields)) . '</code></dd>';
 		$out .= '<dt>Eligible templates</dt><dd><code>' . $sanitizer->entities(implode(', ', $eligibleTemplates)) . '</code></dd>';
@@ -110,6 +115,7 @@ class ProcessMediaLibrary extends Process {
 			. $sanitizer->entities(implode(', ', $rawFields)) . '</code></dd>';
 		$out .= '<dt>findRaw result — pages keyed</dt><dd>' . count($rawData) . '</dd>';
 		$out .= '<dt>flattenRows result — rows</dt><dd>' . count($rows) . '</dd>';
+
 		if ($rawData) {
 			$firstId = array_key_first($rawData);
 			$out .= '<dt>First findRaw entry (page ' . (int) $firstId . ')</dt>';
@@ -120,6 +126,51 @@ class ProcessMediaLibrary extends Process {
 				))
 				. '</pre></dd>';
 		}
+
+		// Optionally dump a specific page id (?pid=N) for targeted inspection.
+		$requestedPid = (int) $input->get('pid');
+		if ($requestedPid > 0 && isset($rawData[$requestedPid])) {
+			$out .= '<dt>Requested page ' . $requestedPid . '</dt>';
+			$out .= '<dd><pre>'
+				. $sanitizer->entities(json_encode(
+					$rawData[$requestedPid],
+					JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+				))
+				. '</pre></dd>';
+		}
+
+		// For each image field that has custom subfields, dump the first page
+		// where that field is populated. This is where we can actually see if
+		// findRaw is returning custom-subfield values.
+		foreach ($imageFields as $fieldName) {
+			if (empty($customByField[$fieldName])) continue;
+			$firstPopulated = null;
+			$firstPopulatedId = null;
+			foreach ($rawData as $pid => $pageData) {
+				$payload = $pageData[$fieldName] ?? null;
+				if (is_array($payload) && $payload) {
+					$firstPopulated = $pageData;
+					$firstPopulatedId = $pid;
+					break;
+				}
+			}
+			$label = sprintf(
+				$this->_('First page with %s populated (custom subfields: %s)'),
+				$fieldName, implode(', ', $customByField[$fieldName])
+			);
+			$out .= '<dt>' . $sanitizer->entities($label) . '</dt>';
+			if ($firstPopulated === null) {
+				$out .= '<dd><em>' . $sanitizer->entities($this->_('— none in current dataset —')) . '</em></dd>';
+			} else {
+				$out .= '<dd><strong>page ' . (int) $firstPopulatedId . '</strong><pre>'
+					. $sanitizer->entities(json_encode(
+						$firstPopulated,
+						JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+					))
+					. '</pre></dd>';
+			}
+		}
+
 		if ($rows) {
 			$out .= '<dt>First flattened row</dt>';
 			$out .= '<dd><pre>'
@@ -128,17 +179,29 @@ class ProcessMediaLibrary extends Process {
 					JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
 				))
 				. '</pre></dd>';
+			// Also dump the first row whose `custom` key has any value.
+			foreach ($rows as $r) {
+				if (!empty($r['custom'])) {
+					$out .= '<dt>First flattened row with non-empty `custom`</dt>';
+					$out .= '<dd><pre>'
+						. $sanitizer->entities(json_encode(
+							$r,
+							JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+						))
+						. '</pre></dd>';
+					break;
+				}
+			}
 		}
+
 		$out .= '</dl>';
 		$out .= '</div>';
 		return $out;
 	}
 
 	/**
-	 * AJAX endpoint: returns paginated rows + total count + filter summaries as JSON.
-	 *
-	 * Phase 2 returns the full row list with a hard 50-row cap on the response
-	 * body; pagination, sort, and filters land in Phase 4.
+	 * AJAX endpoint: returns paginated rows + total count as JSON.
+	 * Filters, sort, AJAX-driven re-render arrive in Phase 4.
 	 */
 	public function ___executeData() {
 		$this->wire('config')->ajax = true;
@@ -146,15 +209,13 @@ class ProcessMediaLibrary extends Process {
 		$rows = $this->loadRows();
 		return json_encode([
 			'total' => count($rows),
-			'rows'  => array_slice($rows, 0, 50),
+			'rows'  => array_slice($rows, 0, self::PAGE_SIZE),
 		]);
 	}
 
 	/**
 	 * AJAX endpoint: validates and persists a single cell change.
-	 *
-	 * Expects POST: { pageId, fieldName, basename, subfield, value }
-	 * Returns JSON: { ok, value, error? }
+	 * Implemented in Phase 6.
 	 */
 	public function ___executeSave() {
 		$this->wire('config')->ajax = true;
@@ -166,9 +227,9 @@ class ProcessMediaLibrary extends Process {
 	 * Load the full flat image-row list across all pages.
 	 *
 	 * Orchestrates field-discovery → eligible-templates → custom-field-discovery
-	 * → findRaw → flatten. No caching yet (Phase 5), no row-level filtering
-	 * yet (Phase 4); the $filters argument currently only narrows the
-	 * page-level template selector.
+	 * → findRaw → flatten. Row-level filtering (q, missing-X, field, galleries)
+	 * happens in applyRowFilters after this returns; only $filters['template']
+	 * narrows the page-level selector here.
 	 *
 	 * @param array<string,mixed> $filters
 	 * @return array<int,array<string,mixed>>
@@ -180,16 +241,25 @@ class ProcessMediaLibrary extends Process {
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
 		if (!$eligibleTemplates) return [];
 
-		$customByField = [];
-		foreach ($imageFields as $f) {
-			$customByField[$f] = $this->discoverCustomFields($f);
-		}
-
-		$rawFields = $this->buildRawFields($imageFields, $customByField);
+		// Custom-field subfields aren't returned by findRaw (they live in a
+		// separate per-field data table that findRaw doesn't join), so we
+		// don't request them here. hydrateSlice fetches them per-image for
+		// the visible slice via the Pageimage API.
+		$rawFields = $this->buildRawFields($imageFields);
 		$selector  = $this->buildSelector($eligibleTemplates, $filters);
 		$rawData   = $this->wire('pages')->findRaw($selector, $rawFields);
 
-		return $this->flattenRows($rawData, $imageFields);
+		$rows = $this->flattenRows($rawData, $imageFields);
+
+		// Bulk-hydrate custom-field values onto every row only when a custom
+		// "missing X" filter is active. The default browse path keeps the
+		// cheaper findRaw-only payload and lets hydrateSlice fill custom
+		// values just for the visible page.
+		if (!empty($filters['no_custom']) && $this->hasAnyCustomFields()) {
+			$rows = $this->bulkHydrateCustomFields($rows);
+		}
+
+		return $rows;
 	}
 
 	/**
@@ -246,19 +316,32 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
+	 * @return array<int,string> names of image fields with maxFiles != 1 (galleries)
+	 */
+	protected function galleryFieldNames(): array {
+		$names = [];
+		foreach ($this->wire('fields') as $field) {
+			if ($field->type instanceof FieldtypeImage && (int) $field->maxFiles !== 1) {
+				$names[] = $field->name;
+			}
+		}
+		return $names;
+	}
+
+	/**
 	 * Build the field list passed to $pages->findRaw().
 	 *
+	 * Standard subfields only — custom-fields-on-images live in a separate
+	 * table that findRaw doesn't join through dotted notation. The visible
+	 * slice picks up custom values via the Pageimage API in hydrateSlice.
+	 *
 	 * @param array<int,string> $imageFields
-	 * @param array<string,array<int,string>> $customByField
 	 * @return array<int,string>
 	 */
-	protected function buildRawFields(array $imageFields, array $customByField): array {
+	protected function buildRawFields(array $imageFields): array {
 		$fields = ['id', 'title', 'templates_id'];
 		foreach ($imageFields as $f) {
 			foreach (self::STANDARD_SUBFIELDS as $sub) {
-				$fields[] = "$f.$sub";
-			}
-			foreach ($customByField[$f] ?? [] as $sub) {
 				$fields[] = "$f.$sub";
 			}
 		}
@@ -266,11 +349,24 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Build the page-level selector for findRaw.
+	 * Lazily compute the customByField map: for each image field, the list of
+	 * custom-field subfield names defined on its field-{name} template.
 	 *
-	 * Currently honors $filters['template'] (string or array): intersected with
-	 * the eligible set, returns 'id=0' if the intersection is empty so callers
-	 * get an empty result instead of an unbounded query.
+	 * @return array<string,array<int,string>>
+	 */
+	protected function getCustomByField(): array {
+		if ($this->customByFieldCache === null) {
+			$cache = [];
+			foreach ($this->discoverImageFields() as $f) {
+				$cache[$f] = $this->discoverCustomFields($f);
+			}
+			$this->customByFieldCache = $cache;
+		}
+		return $this->customByFieldCache;
+	}
+
+	/**
+	 * Build the page-level selector for findRaw.
 	 *
 	 * @param array<int,string> $eligibleTemplates
 	 * @param array<string,mixed> $filters
@@ -284,16 +380,11 @@ class ProcessMediaLibrary extends Process {
 			if (!$templates) return 'id=0';
 		}
 		// include=hidden returns published + hidden, excludes unpublished and trash.
-		// status<=hidden does NOT work for this — hidden pages have status 1025
-		// (1 | Page::statusHidden), so a numeric <= 1024 filter excludes them.
 		return 'template=' . implode('|', $templates) . ', include=hidden';
 	}
 
 	/**
 	 * Flatten the findRaw result into one row per (pageId, fieldName, basename).
-	 *
-	 * Handles both list-shape (multi-image) and assoc-shape (maxFiles=1) field
-	 * payloads. Skips fields that are null, empty, or shaped unexpectedly.
 	 *
 	 * @param array<int|string,mixed> $rawData
 	 * @param array<int,string> $imageFields
@@ -336,11 +427,465 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Returns the template-name blacklist from module settings, if any.
+	 * Read and validate filter input from GET params.
 	 *
-	 * Accepts both an array (modern module-config form field) and a
-	 * comma/whitespace-separated string (legacy text input). The actual
-	 * settings UI lands in a later phase; this getter is forward-compatible.
+	 * @param array<int,string> $imageFields
+	 * @param array<int,string> $eligibleTemplates
+	 * @param array<int,string> $customCols custom-field column names (whitelist for no_custom_*)
+	 * @return array<string,mixed>
+	 */
+	protected function readFilterInput(array $imageFields, array $eligibleTemplates, array $customCols = []): array {
+		$input    = $this->wire('input');
+		$template = (string) $input->get('template');
+		$field    = (string) $input->get('field');
+
+		$noCustom = [];
+		foreach ($customCols as $name) {
+			if ($input->get('no_custom_' . $name)) {
+				$noCustom[$name] = true;
+			}
+		}
+
+		return [
+			'q'              => trim((string) $input->get('q')),
+			'template'       => in_array($template, $eligibleTemplates, true) ? $template : '',
+			'field'          => in_array($field, $imageFields, true) ? $field : '',
+			'no_desc'        => (bool) $input->get('no_desc'),
+			'no_tags'        => (bool) $input->get('no_tags'),
+			'only_galleries' => (bool) $input->get('only_galleries'),
+			'no_custom'      => $noCustom,
+		];
+	}
+
+	/**
+	 * Apply PHP-level row filters that PW's findRaw selector can't (or shouldn't)
+	 * express. Template narrowing is already done at the selector level in
+	 * loadRows; here we handle the per-image-row filters.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @param array<string,mixed> $filters
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function applyRowFilters(array $rows, array $filters): array {
+		$q        = mb_strtolower($filters['q']);
+		$hasQ     = $q !== '';
+		$field    = $filters['field'];
+		$noDesc   = $filters['no_desc'];
+		$noTags   = $filters['no_tags'];
+		$onlyGal  = $filters['only_galleries'];
+		$noCustom = $filters['no_custom'] ?? [];
+
+		if (!$hasQ && $field === '' && !$noDesc && !$noTags && !$onlyGal && !$noCustom) {
+			return $rows;
+		}
+
+		$galleryFields = $onlyGal ? array_flip($this->galleryFieldNames()) : [];
+
+		return array_values(array_filter($rows, function ($r) use (
+			$hasQ, $q, $field, $noDesc, $noTags, $onlyGal, $galleryFields, $noCustom
+		) {
+			if ($field !== '' && $r['fieldName'] !== $field) return false;
+			if ($onlyGal && !isset($galleryFields[$r['fieldName']])) return false;
+
+			$desc = $this->normalizeDescription($r['description']);
+			$tags = (string) $r['tags'];
+
+			if ($noDesc && trim($desc) !== '') return false;
+			if ($noTags && trim($tags) !== '') return false;
+
+			foreach ($noCustom as $name => $_) {
+				$val = $r['custom'][$name] ?? '';
+				if (is_array($val)) $val = json_encode($val);
+				if (trim((string) $val) !== '') return false;
+			}
+
+			if ($hasQ) {
+				$hay = mb_strtolower($desc . ' ' . $tags . ' ' . ((string) $r['basename']));
+				if (mb_strpos($hay, $q) === false) return false;
+			}
+			return true;
+		}));
+	}
+
+	/**
+	 * Hydrate the visible row slice with thumbnail URLs and page links.
+	 *
+	 * Only this slice triggers Pageimage hydration — the bulk row list stays
+	 * raw arrays. Pages are loaded in one batch via $pages->getById().
+	 *
+	 * @param array<int,array<string,mixed>> $slice
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function hydrateSlice(array $slice): array {
+		if (!$slice) return [];
+
+		$pageIds = array_values(array_unique(array_column($slice, 'pageId')));
+		// Build an explicit id => Page map. PageArray inherits WireArray::get(),
+		// which treats integer keys as array indexes (0, 1, 2…), not page IDs,
+		// so $pages->get($pageId) would silently return the wrong page.
+		$pagesById = [];
+		foreach ($this->wire('pages')->getById($pageIds) as $p) {
+			$pagesById[$p->id] = $p;
+		}
+		$customByField = $this->getCustomByField();
+
+		foreach ($slice as &$row) {
+			$row['thumbUrl']    = '';
+			$row['pageUrl']     = '';
+			$row['pageEditUrl'] = '';
+
+			$page = $pagesById[$row['pageId']] ?? null;
+			if (!$page || !$page->id) continue;
+
+			$row['pageUrl']     = $page->url;
+			$row['pageEditUrl'] = $page->editUrl;
+
+			$fieldValue = $page->getUnformatted($row['fieldName']);
+			$img = null;
+			if ($fieldValue instanceof Pageimages) {
+				$img = $fieldValue->getFile($row['basename']);
+			} elseif ($fieldValue instanceof Pageimage) {
+				$img = $fieldValue;
+			}
+			if (!$img instanceof Pageimage) continue;
+
+			$row['thumbUrl'] = $img->size(120, 80, ['upscaling' => false, 'quality' => 80])->url;
+
+			// Custom-field hydration: read each declared custom subfield off
+			// the Pageimage. Phase 6 will handle type-specific edit semantics;
+			// here we normalize to a displayable scalar.
+			foreach ($customByField[$row['fieldName']] ?? [] as $customName) {
+				if (isset($row['custom'][$customName])) continue; // already filled by bulk pass
+				$val = $img->get($customName);
+				if ($val === null || $val === '') continue;
+				if (is_object($val)) $val = (string) $val;
+				if (is_array($val)) $val = json_encode($val, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+				$row['custom'][$customName] = $val;
+			}
+		}
+		unset($row);
+
+		return $slice;
+	}
+
+	/**
+	 * @return bool true if any image field has at least one custom subfield declared
+	 */
+	protected function hasAnyCustomFields(): bool {
+		foreach ($this->getCustomByField() as $list) {
+			if (!empty($list)) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Hydrate custom-field values onto every row in $rows.
+	 *
+	 * Used when a "missing X" filter targets a custom field — we can't filter
+	 * without values, and findRaw doesn't expose them. Loads all referenced
+	 * pages once via $pages->getById (single batched query), then reads each
+	 * row's image and pulls the declared custom subfields off it.
+	 *
+	 * Pages are cached in the PW Pages cache after this call, so the
+	 * subsequent hydrateSlice() pass reuses them at no extra DB cost.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function bulkHydrateCustomFields(array $rows): array {
+		if (!$rows) return $rows;
+		$customByField = $this->getCustomByField();
+
+		$pageIds = array_values(array_unique(array_column($rows, 'pageId')));
+		$pagesById = [];
+		foreach ($this->wire('pages')->getById($pageIds) as $p) {
+			$pagesById[$p->id] = $p;
+		}
+
+		foreach ($rows as &$row) {
+			$customNames = $customByField[$row['fieldName']] ?? [];
+			if (!$customNames) continue;
+			$page = $pagesById[$row['pageId']] ?? null;
+			if (!$page || !$page->id) continue;
+
+			$fieldValue = $page->getUnformatted($row['fieldName']);
+			$img = null;
+			if ($fieldValue instanceof Pageimages) {
+				$img = $fieldValue->getFile($row['basename']);
+			} elseif ($fieldValue instanceof Pageimage) {
+				$img = $fieldValue;
+			}
+			if (!$img instanceof Pageimage) continue;
+
+			foreach ($customNames as $name) {
+				$val = $img->get($name);
+				if ($val === null) continue;
+				if (is_object($val)) $val = (string) $val;
+				if (is_array($val)) $val = json_encode($val, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+				$row['custom'][$name] = $val;
+			}
+		}
+		unset($row);
+
+		return $rows;
+	}
+
+	/**
+	 * Sorted unique custom-field column names across all image fields.
+	 *
+	 * Sourced from discovery (field-{name} templates), not from row data —
+	 * columns appear even if the current slice happens not to populate them.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function collectCustomNames(): array {
+		$names = [];
+		foreach ($this->getCustomByField() as $list) {
+			foreach ($list as $n) {
+				$names[$n] = true;
+			}
+		}
+		ksort($names);
+		return array_keys($names);
+	}
+
+	/**
+	 * Multilingual descriptions arrive as assoc arrays keyed by language id.
+	 * Take the first non-empty value as the display string for now.
+	 */
+	protected function normalizeDescription($desc): string {
+		if (is_string($desc)) return $desc;
+		if (is_array($desc)) {
+			foreach ($desc as $v) {
+				if (is_string($v) && $v !== '') return $v;
+			}
+			return '';
+		}
+		return (string) $desc;
+	}
+
+	protected function formatFilesize(int $bytes): string {
+		if ($bytes <= 0) return '';
+		$units = ['B', 'KB', 'MB', 'GB'];
+		$i = 0;
+		$size = (float) $bytes;
+		while ($size >= 1024 && $i < count($units) - 1) {
+			$size /= 1024;
+			$i++;
+		}
+		$rounded = $i === 0 ? (string) $bytes : number_format($size, $size >= 10 ? 0 : 1);
+		return $rounded . ' ' . $units[$i];
+	}
+
+	protected function loadAssets(): void {
+		$config = $this->wire('config');
+		$baseUrl = $config->urls($this);
+		$version = $this->wire('modules')->getModuleInfoProperty($this, 'version');
+		$config->styles->add($baseUrl . 'ProcessMediaLibrary.css?v=' . $version);
+		$config->scripts->add($baseUrl . 'ProcessMediaLibrary.js?v=' . $version);
+	}
+
+	protected function renderEmptyState(array $imageFields, array $eligibleTemplates): string {
+		$san = $this->wire('sanitizer');
+		if (!$imageFields) {
+			$msg = $this->_('No image fields found. Create at least one FieldtypeImage field, add it to a template, and reload.');
+		} else {
+			$msg = $this->_('No template currently uses an image field. Add an image field to a template and reload.');
+		}
+		return '<p class="ml-empty">' . $san->entities($msg) . '</p>';
+	}
+
+	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = []): string {
+		$san = $this->wire('sanitizer');
+		$checked = fn($k) => $filters[$k] ? ' checked' : '';
+
+		$out  = '<form method="get" class="ml-filter-bar">';
+
+		$out .= '<input type="search" name="q" value="' . $san->entities($filters['q']) . '"'
+			. ' placeholder="' . $san->entities($this->_('Search description, tags, filename')) . '"'
+			. ' class="uk-input uk-form-small ml-filter-q">';
+
+		$out .= '<select name="template" class="uk-select uk-form-small">';
+		$out .= '<option value="">' . $san->entities($this->_('All templates')) . '</option>';
+		foreach ($eligibleTemplates as $t) {
+			$sel = $filters['template'] === $t ? ' selected' : '';
+			$out .= '<option value="' . $san->entities($t) . '"' . $sel . '>'
+				. $san->entities($t) . '</option>';
+		}
+		$out .= '</select>';
+
+		$out .= '<select name="field" class="uk-select uk-form-small">';
+		$out .= '<option value="">' . $san->entities($this->_('All image fields')) . '</option>';
+		foreach ($imageFields as $f) {
+			$sel = $filters['field'] === $f ? ' selected' : '';
+			$out .= '<option value="' . $san->entities($f) . '"' . $sel . '>'
+				. $san->entities($f) . '</option>';
+		}
+		$out .= '</select>';
+
+		$out .= '<label class="ml-filter-check">'
+			. '<input type="checkbox" name="no_desc" value="1"' . $checked('no_desc') . '> '
+			. $san->entities($this->_('Missing description')) . '</label>';
+		$out .= '<label class="ml-filter-check">'
+			. '<input type="checkbox" name="no_tags" value="1"' . $checked('no_tags') . '> '
+			. $san->entities($this->_('Missing tags')) . '</label>';
+		foreach ($customCols as $name) {
+			$key = 'no_custom_' . $name;
+			$on  = !empty($filters['no_custom'][$name]) ? ' checked' : '';
+			$out .= '<label class="ml-filter-check">'
+				. '<input type="checkbox" name="' . $san->entities($key) . '" value="1"' . $on . '> '
+				. $san->entities(sprintf($this->_('Missing %s'), $name)) . '</label>';
+		}
+		$out .= '<label class="ml-filter-check">'
+			. '<input type="checkbox" name="only_galleries" value="1"' . $checked('only_galleries') . '> '
+			. $san->entities($this->_('Galleries only')) . '</label>';
+
+		$out .= '<button type="submit" class="uk-button uk-button-primary uk-button-small">'
+			. $san->entities($this->_('Apply')) . '</button>';
+
+		if ($this->hasActiveFilter($filters)) {
+			$out .= ' <a href="./" class="uk-button uk-button-default uk-button-small">'
+				. $san->entities($this->_('Reset')) . '</a>';
+		}
+
+		$out .= '</form>';
+		return $out;
+	}
+
+	protected function hasActiveFilter(array $filters): bool {
+		return $filters['q'] !== ''
+			|| $filters['template'] !== ''
+			|| $filters['field'] !== ''
+			|| $filters['no_desc']
+			|| $filters['no_tags']
+			|| $filters['only_galleries']
+			|| !empty($filters['no_custom']);
+	}
+
+	/**
+	 * @param array<int,array<string,mixed>> $slice hydrated slice
+	 * @param array<int,string> $customCols custom-field column names
+	 */
+	protected function renderTable(array $slice, array $customCols): string {
+		$san = $this->wire('sanitizer');
+
+		if (!$slice) {
+			return '<p class="ml-empty">'
+				. $san->entities($this->_('No images match the current filters.')) . '</p>';
+		}
+
+		$headers = [
+			$this->_('Thumb'),
+			$this->_('Page'),
+			$this->_('Field'),
+			$this->_('Filename'),
+			$this->_('Description'),
+			$this->_('Tags'),
+			$this->_('Dimensions'),
+			$this->_('Size'),
+		];
+
+		$out  = '<table class="ml-table uk-table uk-table-divider uk-table-small">';
+		$out .= '<thead><tr>';
+		foreach ($headers as $h) $out .= '<th>' . $san->entities($h) . '</th>';
+		foreach ($customCols as $name) {
+			$out .= '<th><code>' . $san->entities($name) . '</code></th>';
+		}
+		$out .= '</tr></thead><tbody>';
+
+		foreach ($slice as $row) {
+			$desc = $this->normalizeDescription($row['description']);
+			$tags = (string) $row['tags'];
+			$dims = ($row['width'] && $row['height'])
+				? $row['width'] . '×' . $row['height']
+				: '';
+			$size = $this->formatFilesize((int) $row['filesize']);
+
+			$out .= '<tr>';
+
+			$out .= '<td class="ml-cell-thumb">';
+			if (!empty($row['thumbUrl'])) {
+				$out .= '<img src="' . $san->entities($row['thumbUrl']) . '"'
+					. ' alt="' . $san->entities($row['basename']) . '"'
+					. ' loading="lazy" width="120" height="80">';
+			}
+			$out .= '</td>';
+
+			$out .= '<td class="ml-cell-page">';
+			if (!empty($row['pageEditUrl'])) {
+				$out .= '<a href="' . $san->entities($row['pageEditUrl']) . '">'
+					. $san->entities((string) $row['pageTitle']) . '</a>';
+			} else {
+				$out .= $san->entities((string) $row['pageTitle']);
+			}
+			$out .= '</td>';
+
+			$out .= '<td><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
+			$out .= '<td><code>' . $san->entities((string) $row['basename']) . '</code></td>';
+			$out .= '<td class="ml-cell-desc">' . $san->entities($desc) . '</td>';
+			$out .= '<td class="ml-cell-tags">' . $san->entities($tags) . '</td>';
+			$out .= '<td class="ml-cell-nowrap">' . $san->entities($dims) . '</td>';
+			$out .= '<td class="ml-cell-nowrap">' . $san->entities($size) . '</td>';
+
+			foreach ($customCols as $name) {
+				$val = $row['custom'][$name] ?? '';
+				if (is_array($val)) $val = json_encode($val);
+				$out .= '<td>' . $san->entities((string) $val) . '</td>';
+			}
+
+			$out .= '</tr>';
+		}
+
+		$out .= '</tbody></table>';
+		return $out;
+	}
+
+	protected function renderPagination(int $total, int $page, int $totalPages, array $filters): string {
+		$san = $this->wire('sanitizer');
+
+		$summary = sprintf(
+			$this->_('Page %1$d of %2$d — %3$d image%4$s'),
+			$page, $totalPages, $total, $total === 1 ? '' : 's'
+		);
+
+		$out  = '<div class="ml-pagination">';
+		$out .= '<span class="ml-pagination-summary">' . $san->entities($summary) . '</span>';
+
+		if ($totalPages > 1) {
+			if ($page > 1) {
+				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page - 1)) . '">'
+					. $san->entities($this->_('← Previous')) . '</a>';
+			}
+			if ($page < $totalPages) {
+				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page + 1)) . '">'
+					. $san->entities($this->_('Next →')) . '</a>';
+			}
+		}
+
+		$out .= '</div>';
+		return $out;
+	}
+
+	protected function buildUrl(array $filters, int $page): string {
+		$params = [
+			'q'              => $filters['q'],
+			'template'       => $filters['template'],
+			'field'          => $filters['field'],
+			'no_desc'        => $filters['no_desc'] ? '1' : '',
+			'no_tags'        => $filters['no_tags'] ? '1' : '',
+			'only_galleries' => $filters['only_galleries'] ? '1' : '',
+			'p'              => $page > 1 ? (string) $page : '',
+		];
+		foreach ($filters['no_custom'] ?? [] as $name => $on) {
+			if ($on) $params['no_custom_' . $name] = '1';
+		}
+		$params = array_filter($params, fn($v) => $v !== '' && $v !== null);
+		return $params ? '?' . http_build_query($params) : './';
+	}
+
+	/**
+	 * Returns the template-name blacklist from module settings.
+	 * Accepts an array (modern field) or comma/whitespace string (legacy).
 	 *
 	 * @return array<int,string>
 	 */
@@ -368,9 +913,6 @@ class ProcessMediaLibrary extends Process {
 
 	/**
 	 * Uninstall: remove admin page and clear module cache entries.
-	 *
-	 * Leaves user-meta (mediaLibraryColumns) and the permission in place —
-	 * those are user-owned state, not module state.
 	 */
 	public function ___uninstall() {
 		$cache = $this->wire('cache');

@@ -1,1 +1,107 @@
-/* ProcessMediaLibrary — admin styles. Populated in later phases. */
+/* ProcessMediaLibrary — admin styles. */
+
+.ml-root {
+	margin: 0 0 1rem;
+}
+
+/* Filter bar */
+.ml-filter-bar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	margin: 0 0 1rem;
+	padding: 0.75rem;
+	background: #f5f5f5;
+	border: 1px solid #e5e5e5;
+	border-radius: 3px;
+}
+.ml-filter-bar > * {
+	margin: 0;
+}
+.ml-filter-q {
+	min-width: 16rem;
+	flex: 1 1 auto;
+}
+.ml-filter-check {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	white-space: nowrap;
+}
+.ml-filter-check input {
+	margin: 0;
+}
+
+/* Table */
+.ml-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.ml-table thead th {
+	white-space: nowrap;
+	background: #f5f5f5;
+}
+.ml-table th,
+.ml-table td {
+	padding: 0.5rem 0.75rem;
+	vertical-align: top;
+}
+.ml-table tbody tr:hover {
+	background: #fafafa;
+}
+.ml-cell-thumb img {
+	display: block;
+	max-width: 120px;
+	height: auto;
+	border: 1px solid #e5e5e5;
+	background: #fafafa;
+}
+.ml-cell-page a {
+	font-weight: 500;
+}
+.ml-table code {
+	font-size: 0.85em;
+	word-break: break-all;
+}
+.ml-cell-desc,
+.ml-cell-tags {
+	min-width: 14rem;
+	max-width: 28rem;
+}
+.ml-cell-nowrap {
+	white-space: nowrap;
+}
+
+/* Pagination */
+.ml-pagination {
+	display: flex;
+	gap: 1rem;
+	align-items: center;
+	margin: 1rem 0 0;
+}
+.ml-pagination-summary {
+	color: #555;
+}
+.ml-pagination-link {
+	text-decoration: none;
+}
+
+/* Empty / debug */
+.ml-empty {
+	padding: 2rem;
+	text-align: center;
+	color: #888;
+}
+.ml-debug dt {
+	font-weight: 600;
+	margin-top: 0.5rem;
+}
+.ml-debug pre {
+	background: #f5f5f5;
+	padding: 0.75rem;
+	border: 1px solid #e5e5e5;
+	border-radius: 3px;
+	overflow-x: auto;
+	max-height: 24rem;
+}
