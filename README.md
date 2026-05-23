@@ -6,7 +6,7 @@ See [MediaLibrary-Konzept.md](MediaLibrary-Konzept.md) for the design document.
 
 ## Status
 
-Phase 5 — work in progress. Read pipeline cached via WireCache with template-based invalidation. Server-rendered table with filter bar and pagination, including per-custom-field "Missing X" toggles. Column-driven sort, AJAX re-render, inline edit land in later phases.
+Phase 6 — work in progress. Inline edit for description, tags, and text-typed custom-fields-on-images. Click a cell to edit; blur or Enter saves via AJAX. Reads are cached via WireCache and auto-invalidate on save. Filter bar with full-text search, template / image-field selects, missing-X toggles (incl. per custom field) and galleries-only. Column-driven sort, AJAX re-render, richer custom-field input types in later phases.
 
 ## Requirements
 

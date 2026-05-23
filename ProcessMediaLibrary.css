@@ -73,6 +73,51 @@
 	white-space: nowrap;
 }
 
+/* Inline edit */
+.ml-cell-editable {
+	/* pointer (not text) so iOS Safari fires click events on non-native
+	   interactive elements — without this, taps just trigger :hover. */
+	cursor: pointer;
+	position: relative;
+	/* Eliminate the 300ms tap delay on iOS and prevent double-tap zoom on cells. */
+	touch-action: manipulation;
+}
+.ml-cell-editable:hover {
+	background: #fffbe6;
+}
+.ml-cell-editable:empty::before {
+	content: "—";
+	color: #ccc;
+}
+.ml-editing {
+	background: #fffce8;
+	padding: 4px;
+}
+.ml-cell-input {
+	width: 100%;
+	box-sizing: border-box;
+	font: inherit;
+	border: 1px solid #888;
+	border-radius: 2px;
+	padding: 4px 6px;
+	background: #fff;
+}
+textarea.ml-cell-input {
+	resize: vertical;
+	min-height: 4.5em;
+}
+.ml-cell-saving {
+	opacity: 0.6;
+}
+.ml-cell-saved {
+	background: #e6f7e1 !important;
+	transition: background 0.3s ease-out;
+}
+.ml-cell-error {
+	background: #fde2e2 !important;
+	transition: background 0.3s ease-out;
+}
+
 /* Pagination */
 .ml-pagination {
 	display: flex;
