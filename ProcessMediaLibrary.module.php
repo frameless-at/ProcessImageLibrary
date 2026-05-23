@@ -20,17 +20,19 @@ class ProcessMediaLibrary extends Process {
 	/**
 	 * Image subfields requested from every FieldtypeImage field via findRaw.
 	 *
-	 * Order is irrelevant for findRaw but is preserved when flattening so the
-	 * resulting row arrays have a predictable shape for downstream phases.
+	 * Note PW exposes the basename as the underlying DB column `data`, not
+	 * `basename` — the Pageimage API alias only exists on hydrated objects.
+	 * `ext` is derived from the basename in PHP since it isn't a column.
+	 * `tags` is only present when the field has `useTags` enabled; flatten
+	 * defaults to an empty string when missing.
 	 */
 	const STANDARD_SUBFIELDS = [
-		'basename',
+		'data',
 		'description',
 		'tags',
 		'filesize',
 		'width',
 		'height',
-		'ext',
 	];
 
 	/**
@@ -307,21 +309,24 @@ class ProcessMediaLibrary extends Process {
 			foreach ($imageFields as $fieldName) {
 				$payload = $pageData[$fieldName] ?? null;
 				if (!is_array($payload) || !$payload) continue;
-				$items = isset($payload['basename']) ? [$payload] : $payload;
+				// Single-image fields (maxFiles=1) arrive as an assoc record with a
+				// `data` key. Multi-image fields arrive as a numeric list of records.
+				$items = isset($payload['data']) ? [$payload] : $payload;
 				foreach ($items as $img) {
-					if (!is_array($img) || empty($img['basename'])) continue;
+					if (!is_array($img) || empty($img['data'])) continue;
+					$basename = (string) $img['data'];
 					$rows[] = [
 						'pageId'      => (int) $pageId,
 						'pageTitle'   => $pageTitle,
 						'templateId'  => $templateId,
 						'fieldName'   => $fieldName,
-						'basename'    => $img['basename'],
+						'basename'    => $basename,
 						'description' => $img['description'] ?? '',
 						'tags'        => $img['tags'] ?? '',
 						'filesize'    => (int) ($img['filesize'] ?? 0),
 						'width'       => (int) ($img['width'] ?? 0),
 						'height'      => (int) ($img['height'] ?? 0),
-						'ext'         => $img['ext'] ?? '',
+						'ext'         => pathinfo($basename, PATHINFO_EXTENSION),
 						'custom'      => array_diff_key($img, $standardKeys),
 					];
 				}
