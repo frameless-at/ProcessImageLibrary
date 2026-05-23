@@ -61,9 +61,10 @@ class ProcessMediaLibrary extends Process {
 			return $this->renderEmptyState($imageFields, $eligibleTemplates);
 		}
 
-		$filters = $this->readFilterInput($imageFields, $eligibleTemplates);
-		$rows    = $this->loadRows($filters);
-		$rows    = $this->applyRowFilters($rows, $filters);
+		$customCols = $this->collectCustomNames();
+		$filters    = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
+		$rows       = $this->loadRows($filters);
+		$rows       = $this->applyRowFilters($rows, $filters);
 		usort($rows, fn($a, $b) => strcasecmp($a['pageTitle'], $b['pageTitle']));
 
 		$total      = count($rows);
@@ -72,10 +73,9 @@ class ProcessMediaLibrary extends Process {
 		$offset     = ($page - 1) * self::PAGE_SIZE;
 		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
 		$slice      = $this->hydrateSlice($slice);
-		$customCols = $this->collectCustomNames();
 
 		$out  = '<div class="ml-root">';
-		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates);
+		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols);
 		$out .= $this->renderTable($slice, $customCols);
 		$out .= $this->renderPagination($total, $page, $totalPages, $filters);
 		$out .= '</div>';
@@ -249,7 +249,17 @@ class ProcessMediaLibrary extends Process {
 		$selector  = $this->buildSelector($eligibleTemplates, $filters);
 		$rawData   = $this->wire('pages')->findRaw($selector, $rawFields);
 
-		return $this->flattenRows($rawData, $imageFields);
+		$rows = $this->flattenRows($rawData, $imageFields);
+
+		// Bulk-hydrate custom-field values onto every row only when a custom
+		// "missing X" filter is active. The default browse path keeps the
+		// cheaper findRaw-only payload and lets hydrateSlice fill custom
+		// values just for the visible page.
+		if (!empty($filters['no_custom']) && $this->hasAnyCustomFields()) {
+			$rows = $this->bulkHydrateCustomFields($rows);
+		}
+
+		return $rows;
 	}
 
 	/**
@@ -421,12 +431,21 @@ class ProcessMediaLibrary extends Process {
 	 *
 	 * @param array<int,string> $imageFields
 	 * @param array<int,string> $eligibleTemplates
+	 * @param array<int,string> $customCols custom-field column names (whitelist for no_custom_*)
 	 * @return array<string,mixed>
 	 */
-	protected function readFilterInput(array $imageFields, array $eligibleTemplates): array {
-		$input = $this->wire('input');
+	protected function readFilterInput(array $imageFields, array $eligibleTemplates, array $customCols = []): array {
+		$input    = $this->wire('input');
 		$template = (string) $input->get('template');
 		$field    = (string) $input->get('field');
+
+		$noCustom = [];
+		foreach ($customCols as $name) {
+			if ($input->get('no_custom_' . $name)) {
+				$noCustom[$name] = true;
+			}
+		}
+
 		return [
 			'q'              => trim((string) $input->get('q')),
 			'template'       => in_array($template, $eligibleTemplates, true) ? $template : '',
@@ -434,6 +453,7 @@ class ProcessMediaLibrary extends Process {
 			'no_desc'        => (bool) $input->get('no_desc'),
 			'no_tags'        => (bool) $input->get('no_tags'),
 			'only_galleries' => (bool) $input->get('only_galleries'),
+			'no_custom'      => $noCustom,
 		];
 	}
 
@@ -447,21 +467,22 @@ class ProcessMediaLibrary extends Process {
 	 * @return array<int,array<string,mixed>>
 	 */
 	protected function applyRowFilters(array $rows, array $filters): array {
-		$q     = mb_strtolower($filters['q']);
-		$hasQ  = $q !== '';
-		$field = $filters['field'];
-		$noDesc = $filters['no_desc'];
-		$noTags = $filters['no_tags'];
-		$onlyGal = $filters['only_galleries'];
+		$q        = mb_strtolower($filters['q']);
+		$hasQ     = $q !== '';
+		$field    = $filters['field'];
+		$noDesc   = $filters['no_desc'];
+		$noTags   = $filters['no_tags'];
+		$onlyGal  = $filters['only_galleries'];
+		$noCustom = $filters['no_custom'] ?? [];
 
-		if (!$hasQ && $field === '' && !$noDesc && !$noTags && !$onlyGal) {
+		if (!$hasQ && $field === '' && !$noDesc && !$noTags && !$onlyGal && !$noCustom) {
 			return $rows;
 		}
 
 		$galleryFields = $onlyGal ? array_flip($this->galleryFieldNames()) : [];
 
 		return array_values(array_filter($rows, function ($r) use (
-			$hasQ, $q, $field, $noDesc, $noTags, $onlyGal, $galleryFields
+			$hasQ, $q, $field, $noDesc, $noTags, $onlyGal, $galleryFields, $noCustom
 		) {
 			if ($field !== '' && $r['fieldName'] !== $field) return false;
 			if ($onlyGal && !isset($galleryFields[$r['fieldName']])) return false;
@@ -471,6 +492,12 @@ class ProcessMediaLibrary extends Process {
 
 			if ($noDesc && trim($desc) !== '') return false;
 			if ($noTags && trim($tags) !== '') return false;
+
+			foreach ($noCustom as $name => $_) {
+				$val = $r['custom'][$name] ?? '';
+				if (is_array($val)) $val = json_encode($val);
+				if (trim((string) $val) !== '') return false;
+			}
 
 			if ($hasQ) {
 				$hay = mb_strtolower($desc . ' ' . $tags . ' ' . ((string) $r['basename']));
@@ -528,6 +555,7 @@ class ProcessMediaLibrary extends Process {
 			// the Pageimage. Phase 6 will handle type-specific edit semantics;
 			// here we normalize to a displayable scalar.
 			foreach ($customByField[$row['fieldName']] ?? [] as $customName) {
+				if (isset($row['custom'][$customName])) continue; // already filled by bulk pass
 				$val = $img->get($customName);
 				if ($val === null || $val === '') continue;
 				if (is_object($val)) $val = (string) $val;
@@ -538,6 +566,68 @@ class ProcessMediaLibrary extends Process {
 		unset($row);
 
 		return $slice;
+	}
+
+	/**
+	 * @return bool true if any image field has at least one custom subfield declared
+	 */
+	protected function hasAnyCustomFields(): bool {
+		foreach ($this->getCustomByField() as $list) {
+			if (!empty($list)) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Hydrate custom-field values onto every row in $rows.
+	 *
+	 * Used when a "missing X" filter targets a custom field — we can't filter
+	 * without values, and findRaw doesn't expose them. Loads all referenced
+	 * pages once via $pages->getById (single batched query), then reads each
+	 * row's image and pulls the declared custom subfields off it.
+	 *
+	 * Pages are cached in the PW Pages cache after this call, so the
+	 * subsequent hydrateSlice() pass reuses them at no extra DB cost.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function bulkHydrateCustomFields(array $rows): array {
+		if (!$rows) return $rows;
+		$customByField = $this->getCustomByField();
+
+		$pageIds = array_values(array_unique(array_column($rows, 'pageId')));
+		$pagesById = [];
+		foreach ($this->wire('pages')->getById($pageIds) as $p) {
+			$pagesById[$p->id] = $p;
+		}
+
+		foreach ($rows as &$row) {
+			$customNames = $customByField[$row['fieldName']] ?? [];
+			if (!$customNames) continue;
+			$page = $pagesById[$row['pageId']] ?? null;
+			if (!$page || !$page->id) continue;
+
+			$fieldValue = $page->getUnformatted($row['fieldName']);
+			$img = null;
+			if ($fieldValue instanceof Pageimages) {
+				$img = $fieldValue->getFile($row['basename']);
+			} elseif ($fieldValue instanceof Pageimage) {
+				$img = $fieldValue;
+			}
+			if (!$img instanceof Pageimage) continue;
+
+			foreach ($customNames as $name) {
+				$val = $img->get($name);
+				if ($val === null) continue;
+				if (is_object($val)) $val = (string) $val;
+				if (is_array($val)) $val = json_encode($val, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+				$row['custom'][$name] = $val;
+			}
+		}
+		unset($row);
+
+		return $rows;
 	}
 
 	/**
@@ -605,7 +695,7 @@ class ProcessMediaLibrary extends Process {
 		return '<p class="ml-empty">' . $san->entities($msg) . '</p>';
 	}
 
-	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates): string {
+	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = []): string {
 		$san = $this->wire('sanitizer');
 		$checked = fn($k) => $filters[$k] ? ' checked' : '';
 
@@ -639,6 +729,13 @@ class ProcessMediaLibrary extends Process {
 		$out .= '<label class="ml-filter-check">'
 			. '<input type="checkbox" name="no_tags" value="1"' . $checked('no_tags') . '> '
 			. $san->entities($this->_('Missing tags')) . '</label>';
+		foreach ($customCols as $name) {
+			$key = 'no_custom_' . $name;
+			$on  = !empty($filters['no_custom'][$name]) ? ' checked' : '';
+			$out .= '<label class="ml-filter-check">'
+				. '<input type="checkbox" name="' . $san->entities($key) . '" value="1"' . $on . '> '
+				. $san->entities(sprintf($this->_('Missing %s'), $name)) . '</label>';
+		}
 		$out .= '<label class="ml-filter-check">'
 			. '<input type="checkbox" name="only_galleries" value="1"' . $checked('only_galleries') . '> '
 			. $san->entities($this->_('Galleries only')) . '</label>';
@@ -661,7 +758,8 @@ class ProcessMediaLibrary extends Process {
 			|| $filters['field'] !== ''
 			|| $filters['no_desc']
 			|| $filters['no_tags']
-			|| $filters['only_galleries'];
+			|| $filters['only_galleries']
+			|| !empty($filters['no_custom']);
 	}
 
 	/**
@@ -778,6 +876,9 @@ class ProcessMediaLibrary extends Process {
 			'only_galleries' => $filters['only_galleries'] ? '1' : '',
 			'p'              => $page > 1 ? (string) $page : '',
 		];
+		foreach ($filters['no_custom'] ?? [] as $name => $on) {
+			if ($on) $params['no_custom_' . $name] = '1';
+		}
 		$params = array_filter($params, fn($v) => $v !== '' && $v !== null);
 		return $params ? '?' . http_build_query($params) : './';
 	}
