@@ -6,7 +6,7 @@ See [MediaLibrary-Konzept.md](MediaLibrary-Konzept.md) for the design document.
 
 ## Status
 
-Phase 1 — work in progress. Module skeleton only.
+Phase 2 — work in progress. Read-pipeline implemented (field-discovery, findRaw with subfield wildcards, custom-field-discovery, flatten). Render UI follows in Phase 3.
 
 ## Requirements
 
