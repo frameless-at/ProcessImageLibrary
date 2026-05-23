@@ -221,12 +221,103 @@ class ProcessMediaLibrary extends Process {
 
 	/**
 	 * AJAX endpoint: validates and persists a single cell change.
-	 * Implemented in Phase 6.
+	 *
+	 * Expects POST with: pageId, fieldName, basename, subfield, value,
+	 * plus PW's CSRF token. Returns JSON: { ok, value, error? }.
+	 *
+	 * Permission: $page->editable() on the target page. Subfield must be
+	 * `description`, `tags`, or one of the custom-fields-on-images declared
+	 * for the field.
 	 */
 	public function ___executeSave() {
-		$this->wire('config')->ajax = true;
+		$config = $this->wire('config');
+		$config->ajax = true;
 		header('Content-Type: application/json');
-		return json_encode(['ok' => false, 'error' => 'not implemented']);
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+
+		$pageId    = (int) $input->post('pageId');
+		$fieldName = $sanitizer->fieldName((string) $input->post('fieldName'));
+		$basename  = basename((string) $input->post('basename'));
+		$subfield  = $sanitizer->fieldName((string) $input->post('subfield'));
+		$value     = (string) $input->post('value');
+
+		if (!$pageId || !$fieldName || !$basename || !$subfield) {
+			return $this->jsonError('Missing required parameter');
+		}
+
+		if (!in_array($fieldName, $this->discoverImageFields(), true)) {
+			return $this->jsonError('Field is not a managed image field');
+		}
+
+		if (!in_array($subfield, $this->editableSubfields($fieldName), true)) {
+			return $this->jsonError('Subfield not editable');
+		}
+
+		$page = $this->wire('pages')->get($pageId);
+		if (!$page->id) return $this->jsonError('Page not found', 404);
+		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+
+		$fieldValue = $page->getUnformatted($fieldName);
+		$img = null;
+		if ($fieldValue instanceof Pageimages) {
+			$img = $fieldValue->getFile($basename);
+		} elseif ($fieldValue instanceof Pageimage) {
+			$img = $fieldValue;
+		}
+		if (!$img instanceof Pageimage) {
+			return $this->jsonError('Image not found in field', 404);
+		}
+
+		// Output formatting off before mutating: setters work on the raw value
+		// and avoid double-encoding for fields like description.
+		$page->of(false);
+		$img->set($subfield, $value);
+		if (!$page->save($fieldName)) {
+			return $this->jsonError('Save failed');
+		}
+
+		// Return the value PW actually stored — may differ from input after
+		// sanitization (e.g. tags lowercased, whitespace normalized, etc.).
+		$stored = $img->get($subfield);
+		if (is_object($stored)) $stored = (string) $stored;
+		if (is_array($stored)) $stored = json_encode($stored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+		return json_encode([
+			'ok'    => true,
+			'value' => (string) $stored,
+		]);
+	}
+
+	/**
+	 * @return array<int,string> subfield names that the inline editor accepts
+	 *   for the given image field. Whitelist enforced server-side.
+	 */
+	protected function editableSubfields(string $fieldName): array {
+		$list = ['description', 'tags'];
+		foreach ($this->getCustomByField()[$fieldName] ?? [] as $custom) {
+			$list[] = $custom;
+		}
+		return $list;
+	}
+
+	/**
+	 * Render an error response with an HTTP status code that JS callers can
+	 * branch on. Returned from executeSave; safe to use in any JSON endpoint.
+	 */
+	protected function jsonError(string $msg, int $status = 400): string {
+		http_response_code($status);
+		return json_encode(['ok' => false, 'error' => $msg]);
 	}
 
 	/**
@@ -726,10 +817,23 @@ class ProcessMediaLibrary extends Process {
 
 	protected function loadAssets(): void {
 		$config = $this->wire('config');
+		$session = $this->wire('session');
 		$baseUrl = $config->urls($this);
 		$version = $this->wire('modules')->getModuleInfoProperty($this, 'version');
 		$config->styles->add($baseUrl . 'ProcessMediaLibrary.css?v=' . $version);
 		$config->scripts->add($baseUrl . 'ProcessMediaLibrary.js?v=' . $version);
+		$config->js('ProcessMediaLibrary', [
+			'saveUrl' => $this->wire('page')->url . 'save/',
+			'csrf' => [
+				'name'  => $session->CSRF->getTokenName(),
+				'value' => $session->CSRF->getTokenValue(),
+			],
+			'labels' => [
+				'saving' => $this->_('Saving…'),
+				'saved'  => $this->_('Saved'),
+				'error'  => $this->_('Save failed'),
+			],
+		]);
 	}
 
 	protected function renderEmptyState(array $imageFields, array $eligibleTemplates): string {
@@ -848,6 +952,13 @@ class ProcessMediaLibrary extends Process {
 				: '';
 			$size = $this->formatFilesize((int) $row['filesize']);
 
+			$editAttrs = sprintf(
+				'data-page-id="%d" data-field="%s" data-basename="%s"',
+				(int) $row['pageId'],
+				$san->entities((string) $row['fieldName']),
+				$san->entities((string) $row['basename'])
+			);
+
 			$out .= '<tr>';
 
 			$out .= '<td class="ml-cell-thumb">';
@@ -869,15 +980,21 @@ class ProcessMediaLibrary extends Process {
 
 			$out .= '<td><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
 			$out .= '<td><code>' . $san->entities((string) $row['basename']) . '</code></td>';
-			$out .= '<td class="ml-cell-desc">' . $san->entities($desc) . '</td>';
-			$out .= '<td class="ml-cell-tags">' . $san->entities($tags) . '</td>';
+			$out .= '<td class="ml-cell-desc ml-cell-editable" ' . $editAttrs
+				. ' data-subfield="description" data-input="textarea">'
+				. $san->entities($desc) . '</td>';
+			$out .= '<td class="ml-cell-tags ml-cell-editable" ' . $editAttrs
+				. ' data-subfield="tags" data-input="text">'
+				. $san->entities($tags) . '</td>';
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($size) . '</td>';
 
 			foreach ($customCols as $name) {
 				$val = $row['custom'][$name] ?? '';
 				if (is_array($val)) $val = json_encode($val);
-				$out .= '<td>' . $san->entities((string) $val) . '</td>';
+				$out .= '<td class="ml-cell-editable" ' . $editAttrs
+					. ' data-subfield="' . $san->entities($name) . '" data-input="text">'
+					. $san->entities((string) $val) . '</td>';
 			}
 
 			$out .= '</tr>';
