@@ -6,7 +6,7 @@ See [MediaLibrary-Konzept.md](MediaLibrary-Konzept.md) for the design document.
 
 ## Status
 
-Phase 2 — work in progress. Read-pipeline implemented (field-discovery, findRaw with subfield wildcards, custom-field-discovery, flatten). Render UI follows in Phase 3.
+Phase 3 — work in progress. Server-rendered table with filter bar and pagination. Basic filters (search, template, image-field, missing-description, missing-tags, galleries-only) wired up. Sort by other columns, AJAX re-render, inline edit and caching land in later phases.
 
 ## Requirements
 
