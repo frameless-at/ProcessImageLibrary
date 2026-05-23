@@ -83,6 +83,7 @@ class ProcessMediaLibrary extends Process {
 	protected function renderDebug(): string {
 		$sanitizer = $this->wire('sanitizer');
 		$pages = $this->wire('pages');
+		$input = $this->wire('input');
 
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
@@ -109,6 +110,7 @@ class ProcessMediaLibrary extends Process {
 			. $sanitizer->entities(implode(', ', $rawFields)) . '</code></dd>';
 		$out .= '<dt>findRaw result — pages keyed</dt><dd>' . count($rawData) . '</dd>';
 		$out .= '<dt>flattenRows result — rows</dt><dd>' . count($rows) . '</dd>';
+
 		if ($rawData) {
 			$firstId = array_key_first($rawData);
 			$out .= '<dt>First findRaw entry (page ' . (int) $firstId . ')</dt>';
@@ -119,6 +121,51 @@ class ProcessMediaLibrary extends Process {
 				))
 				. '</pre></dd>';
 		}
+
+		// Optionally dump a specific page id (?pid=N) for targeted inspection.
+		$requestedPid = (int) $input->get('pid');
+		if ($requestedPid > 0 && isset($rawData[$requestedPid])) {
+			$out .= '<dt>Requested page ' . $requestedPid . '</dt>';
+			$out .= '<dd><pre>'
+				. $sanitizer->entities(json_encode(
+					$rawData[$requestedPid],
+					JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+				))
+				. '</pre></dd>';
+		}
+
+		// For each image field that has custom subfields, dump the first page
+		// where that field is populated. This is where we can actually see if
+		// findRaw is returning custom-subfield values.
+		foreach ($imageFields as $fieldName) {
+			if (empty($customByField[$fieldName])) continue;
+			$firstPopulated = null;
+			$firstPopulatedId = null;
+			foreach ($rawData as $pid => $pageData) {
+				$payload = $pageData[$fieldName] ?? null;
+				if (is_array($payload) && $payload) {
+					$firstPopulated = $pageData;
+					$firstPopulatedId = $pid;
+					break;
+				}
+			}
+			$label = sprintf(
+				$this->_('First page with %s populated (custom subfields: %s)'),
+				$fieldName, implode(', ', $customByField[$fieldName])
+			);
+			$out .= '<dt>' . $sanitizer->entities($label) . '</dt>';
+			if ($firstPopulated === null) {
+				$out .= '<dd><em>' . $sanitizer->entities($this->_('— none in current dataset —')) . '</em></dd>';
+			} else {
+				$out .= '<dd><strong>page ' . (int) $firstPopulatedId . '</strong><pre>'
+					. $sanitizer->entities(json_encode(
+						$firstPopulated,
+						JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+					))
+					. '</pre></dd>';
+			}
+		}
+
 		if ($rows) {
 			$out .= '<dt>First flattened row</dt>';
 			$out .= '<dd><pre>'
@@ -127,7 +174,21 @@ class ProcessMediaLibrary extends Process {
 					JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
 				))
 				. '</pre></dd>';
+			// Also dump the first row whose `custom` key has any value.
+			foreach ($rows as $r) {
+				if (!empty($r['custom'])) {
+					$out .= '<dt>First flattened row with non-empty `custom`</dt>';
+					$out .= '<dd><pre>'
+						. $sanitizer->entities(json_encode(
+							$r,
+							JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+						))
+						. '</pre></dd>';
+					break;
+				}
+			}
 		}
+
 		$out .= '</dl>';
 		$out .= '</div>';
 		return $out;
