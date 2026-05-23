@@ -411,14 +411,20 @@ class ProcessMediaLibrary extends Process {
 		if (!$slice) return [];
 
 		$pageIds = array_values(array_unique(array_column($slice, 'pageId')));
-		$pages   = $this->wire('pages')->getById($pageIds);
+		// Build an explicit id => Page map. PageArray inherits WireArray::get(),
+		// which treats integer keys as array indexes (0, 1, 2…), not page IDs,
+		// so $pages->get($pageId) would silently return the wrong page.
+		$pagesById = [];
+		foreach ($this->wire('pages')->getById($pageIds) as $p) {
+			$pagesById[$p->id] = $p;
+		}
 
 		foreach ($slice as &$row) {
 			$row['thumbUrl']    = '';
 			$row['pageUrl']     = '';
 			$row['pageEditUrl'] = '';
 
-			$page = $pages->get($row['pageId']);
+			$page = $pagesById[$row['pageId']] ?? null;
 			if (!$page || !$page->id) continue;
 
 			$row['pageUrl']     = $page->url;
