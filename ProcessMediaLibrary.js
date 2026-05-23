@@ -12,8 +12,7 @@
 		var root = document.querySelector('.ml-root');
 		if (!root) return;
 
-		// Mark that the script loaded — visible CSS hook in case ProcessWire.config
-		// is empty for some reason and the user needs to debug from outside.
+		// Bootstrapped marker — inspectable in DevTools if behavior regresses.
 		root.classList.add('ml-js-loaded');
 
 		// Two config sources: $config->js() output, falling back to data-*
