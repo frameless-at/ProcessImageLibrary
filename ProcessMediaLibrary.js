@@ -96,19 +96,21 @@
 				element: editor,
 				getValue: function () { return editor.value; },
 				focus: function () { editor.focus(); editor.select(); },
-				bindCommit: function (commit, cancel) {
+				bindCommit: function (commit, cancel, batch) {
 					editor.addEventListener('keydown', function (e) {
 						if (e.key === 'Escape') {
 							e.preventDefault();
 							cancel();
-						} else if (e.key === 'Enter') {
+						} else if (!batch && e.key === 'Enter') {
 							if (inputType === 'text' || e.ctrlKey || e.metaKey) {
 								e.preventDefault();
 								commit();
 							}
 						}
 					});
-					editor.addEventListener('blur', commit);
+					// In batch mode the explicit Add/Replace/Cancel buttons
+					// drive commit — blur must not auto-fire.
+					if (!batch) editor.addEventListener('blur', commit);
 				}
 			};
 		}
@@ -156,25 +158,31 @@
 					var first = wrap.querySelector('input[type="checkbox"]');
 					if (first) first.focus();
 				},
-				bindCommit: function (commit, cancel) {
-					done.addEventListener('click', function (e) {
-						e.preventDefault();
-						commit();
-					});
+				bindCommit: function (commit, cancel, batch) {
 					wrap.addEventListener('keydown', function (e) {
 						if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-						else if (e.key === 'Enter') { e.preventDefault(); commit(); }
+						else if (!batch && e.key === 'Enter') { e.preventDefault(); commit(); }
 					});
-					// Click outside the editor commits. Capture phase + microtask
-					// so the click that opened the editor doesn't fire this.
-					setTimeout(function () {
-						document.addEventListener('click', function onOutside(e) {
-							if (!wrap.contains(e.target)) {
-								document.removeEventListener('click', onOutside, true);
-								commit();
-							}
-						}, true);
-					}, 0);
+					if (batch) {
+						// Batch mode: hide Done; Add/Replace buttons outside
+						// the widget drive commit, click-outside doesn't.
+						done.style.display = 'none';
+					} else {
+						done.addEventListener('click', function (e) {
+							e.preventDefault();
+							commit();
+						});
+						// Click outside the editor commits. Capture phase + microtask
+						// so the click that opened the editor doesn't fire this.
+						setTimeout(function () {
+							document.addEventListener('click', function onOutside(e) {
+								if (!wrap.contains(e.target)) {
+									document.removeEventListener('click', onOutside, true);
+									commit();
+								}
+							}, true);
+						}, 0);
+					}
 				}
 			};
 		}
@@ -185,9 +193,36 @@
 
 			var original = td.textContent;
 			var widget   = buildEditorWidget(td, original);
+			var batch    = isBatchEdit(td);
 
 			td.textContent = '';
 			td.appendChild(widget.element);
+
+			// In batch mode, surface explicit Add / Replace / Cancel buttons
+			// so the user picks the merge semantics deliberately rather
+			// than auto-committing on blur/Enter.
+			var batchBar = null;
+			if (batch) {
+				batchBar = document.createElement('div');
+				batchBar.className = 'ml-batch-buttons';
+				var rb = document.createElement('button');
+				rb.type = 'button';
+				rb.className = 'uk-button uk-button-small uk-button-primary';
+				rb.textContent = (labels.replaceN || 'Replace in %d').replace('%d', selection.size);
+				var ab = document.createElement('button');
+				ab.type = 'button';
+				ab.className = 'uk-button uk-button-small uk-button-default';
+				ab.textContent = (labels.addN || 'Add to %d').replace('%d', selection.size);
+				var xb = document.createElement('button');
+				xb.type = 'button';
+				xb.className = 'uk-button uk-button-small uk-button-default';
+				xb.textContent = labels.cancel || 'Cancel';
+				batchBar.appendChild(rb);
+				batchBar.appendChild(ab);
+				batchBar.appendChild(xb);
+				td.appendChild(batchBar);
+			}
+
 			setTimeout(widget.focus, 0);
 
 			var committed = false;
@@ -199,44 +234,38 @@
 				td.textContent = original;
 			}
 
-			function commit() {
+			function commit(mode) {
 				if (committed) return;
 				committed = true;
 				var newValue = widget.getValue();
 				td.classList.remove('ml-editing');
 
-				if (newValue === original) {
-					td.textContent = original;
+				if (batch) {
+					td.textContent = (labels.batching || 'Applying to %d…').replace('%d', selection.size);
+					td.classList.add('ml-cell-saving');
+					runBulk('set', {
+						subfield: td.dataset.subfield,
+						value:    newValue,
+						mode:     mode || 'replace'
+					}).then(function (result) {
+						var ok = reportBulk(result);
+						replaceFromQs(location.search, false);
+						if (!ok && td.isConnected) {
+							td.textContent = original;
+							flashCell(td, false);
+						}
+					}).catch(function (err) {
+						if (!td.isConnected) return;
+						td.classList.remove('ml-cell-saving');
+						td.textContent = original;
+						td.title = (err && err.message) || labels.error || 'Network error';
+						flashCell(td, false);
+					});
 					return;
 				}
 
-				// Selection-is-a-paintbrush: if the edited row is in the
-				// active selection (and there's more than one), broadcast
-				// the change to all selected rows via the bulk endpoint
-				// instead of saving just this cell.
-				if (isBatchEdit(td)) {
-					td.textContent = newValue;
-					td.classList.add('ml-cell-saving');
-					td.title = (labels.batching || 'Applying to %d…').replace('%d', selection.size);
-					runBulk('set', { subfield: td.dataset.subfield, value: newValue })
-						.then(function (result) {
-							var ok = reportBulk(result);
-							// Re-fetch view so all affected rows reflect the
-							// stored value (could differ from input after
-							// sanitization, especially for tags).
-							replaceFromQs(location.search, false);
-							if (!ok && td.isConnected) {
-								td.textContent = original;
-								flashCell(td, false);
-							}
-						})
-						.catch(function (err) {
-							if (!td.isConnected) return;
-							td.classList.remove('ml-cell-saving');
-							td.textContent = original;
-							td.title = (err && err.message) || labels.error || 'Network error';
-							flashCell(td, false);
-						});
+				if (newValue === original) {
+					td.textContent = original;
 					return;
 				}
 
@@ -273,7 +302,14 @@
 				});
 			}
 
-			widget.bindCommit(commit, cancel);
+			if (batch) {
+				rb.addEventListener('click', function () { commit('replace'); });
+				ab.addEventListener('click', function () { commit('add'); });
+				xb.addEventListener('click', cancel);
+				widget.bindCommit(function () { commit('replace'); }, cancel, true);
+			} else {
+				widget.bindCommit(function () { commit(); }, cancel, false);
+			}
 		}
 
 		// -- AJAX re-render --------------------------------------------
