@@ -350,14 +350,47 @@
 			widget.focus();
 		}
 
-		// Open PW's per-file crop/edit dialog in a modal iframe. URL
-		// pattern matches InputfieldImage.module's getEditUrl()
-		// exactly — that's the URL the core Crop button uses, so this
-		// gets us the same drag-to-crop UI for the single image.
-		// "file" is the composite "<pageId>,<basename>" PW expects;
-		// rte=0 selects the plain editor (not the CKEditor flow).
-		// Do NOT add modal=1 here — it puts ProcessPageEditImageSelect
-		// into a different render path and the crop tool disappears.
+		// Hide every gridImage / InputfieldFileItem in the iframe
+		// EXCEPT the one whose basename matches, then auto-expand it
+		// so the user lands directly in the per-image action panel
+		// (Crop / Focus / Variations / Actions + Description / Tags /
+		// Customs). PW has no URL endpoint that renders a single
+		// file's item — this DOM filter is the only way to scope the
+		// page-edit form down to one image while keeping the native
+		// edit UI intact.
+		function focusSingleImage(doc, basename) {
+			var items = doc.querySelectorAll('.gridImage, .InputfieldFileItem');
+			var target = null;
+			Array.prototype.forEach.call(items, function (item) {
+				var matched = false;
+				var imgs = item.querySelectorAll('img');
+				for (var i = 0; i < imgs.length; i++) {
+					if (imgs[i].src.indexOf(basename) !== -1) { matched = true; break; }
+				}
+				if (matched) {
+					target = item;
+				} else {
+					item.style.display = 'none';
+				}
+			});
+			if (!target) return;
+			// Expand the panel. InputfieldImage toggles the metadata
+			// strip on a click of .gridImage__inner; falling back to
+			// the item itself for older / file-only markup.
+			if (!target.classList.contains('gridImage--text-open')) {
+				var trigger = target.querySelector('.gridImage__inner')
+					|| target.querySelector('.InputfieldFileLink')
+					|| target;
+				if (trigger && trigger.click) trigger.click();
+			}
+		}
+
+		// Open PW's per-image action panel (Crop / Focus / Variations
+		// / metadata fields) in a modal iframe. We load the normal
+		// ProcessPageEdit form scoped to the image field, then hide
+		// every image-item except the clicked one and auto-expand it
+		// — PW exposes no single-file endpoint that includes Focus
+		// and Variations, only the per-page InputfieldImage does.
 		function openImageEditor(td) {
 			if (!config.adminUrl) return;
 			var pageId    = td.dataset.pageId;
@@ -365,12 +398,10 @@
 			var basename  = td.dataset.basename || '';
 			if (!pageId || !fieldName || !basename) return;
 
-			var url = config.adminUrl + 'page/image/edit/'
+			var url = config.adminUrl + 'page/edit/'
 				+ '?id=' + encodeURIComponent(pageId)
-				+ '&file=' + encodeURIComponent(pageId + ',' + basename)
-				+ '&rte=0'
-				+ '&field=' + encodeURIComponent(fieldName)
-				+ '&version=0';
+				+ '&fields=' + encodeURIComponent(fieldName)
+				+ '&modal=1';
 
 			var dialog = document.createElement('dialog');
 			dialog.className = 'ml-image-modal';
@@ -391,6 +422,18 @@
 			var iframe = document.createElement('iframe');
 			iframe.src = url;
 			iframe.className = 'ml-image-modal-iframe';
+
+			// Re-filter on every (re)load — PW's grid scripts may
+			// touch the DOM after our first pass, and a save inside
+			// the iframe triggers a full reload that drops our hiding.
+			iframe.addEventListener('load', function () {
+				try {
+					var doc = iframe.contentDocument;
+					if (doc) focusSingleImage(doc, basename);
+				} catch (e) {
+					// Cross-origin guard — shouldn't trip for same-origin admin.
+				}
+			});
 
 			dialog.appendChild(bar);
 			dialog.appendChild(iframe);
