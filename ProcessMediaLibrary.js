@@ -253,11 +253,13 @@
 			var footer = document.createElement('footer');
 			var cancelBtn = document.createElement('button');
 			cancelBtn.type = 'button';
-			cancelBtn.className = 'ml-popup-cancel';
+			// PW admin theme is UIkit — match the rest of the admin chrome
+			// (Apply / Reset buttons in the filter bar use these classes).
+			cancelBtn.className = 'ml-popup-cancel uk-button uk-button-default uk-button-small';
 			cancelBtn.textContent = labels.cancel || 'Cancel';
 			var saveBtn = document.createElement('button');
 			saveBtn.type = 'button';
-			saveBtn.className = 'ml-popup-save';
+			saveBtn.className = 'ml-popup-save uk-button uk-button-primary uk-button-small';
 			saveBtn.textContent = labels.save || 'Save';
 			footer.appendChild(cancelBtn);
 			footer.appendChild(saveBtn);
