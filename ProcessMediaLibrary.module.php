@@ -807,11 +807,13 @@ class ProcessMediaLibrary extends Process {
 			);
 		}
 
-		// Bulk-hydrate custom-field values onto every row only when a custom
-		// "missing X" filter is active. Hydration is not cached so the cache
-		// stays generic (one entry per discovery state) and any custom-field
-		// edits show up immediately on the next request.
-		if (!empty($filters['no_custom']) && $this->hasAnyCustomFields()) {
+		// Bulk-hydrate custom-field values onto every row whenever a
+		// filter actually reads them — "missing X" toggles and free-
+		// text search both need customs in scope. Hydration is not
+		// cached so the cache stays generic (one entry per discovery
+		// state) and any custom-field edits show up immediately.
+		$qNeedsCustoms = ($filters['q'] ?? '') !== '';
+		if (($qNeedsCustoms || !empty($filters['no_custom'])) && $this->hasAnyCustomFields()) {
 			$rows = $this->bulkHydrateCustomFields($rows);
 		}
 
@@ -1217,7 +1219,22 @@ class ProcessMediaLibrary extends Process {
 			}
 
 			if ($hasQ) {
-				$hay = mb_strtolower($desc . ' ' . $tags . ' ' . ((string) $r['basename']));
+				$customHay = '';
+				if (!empty($r['custom']) && is_array($r['custom'])) {
+					foreach ($r['custom'] as $v) {
+						// Customs are pre-stringified by bulkHydrateCustomFields
+						// (object->__toString, array->json), so a defensive cast
+						// is enough here.
+						$customHay .= ' ' . (string) $v;
+					}
+				}
+				$hay = mb_strtolower(
+					$desc . ' '
+					. $tags . ' '
+					. ((string) $r['basename']) . ' '
+					. ((string) ($r['pageTitle'] ?? '')) . ' '
+					. $customHay
+				);
 				if (mb_strpos($hay, $q) === false) return false;
 			}
 			return true;
@@ -1497,7 +1514,7 @@ class ProcessMediaLibrary extends Process {
 		$q = $modules->get('InputfieldText');
 		$q->name        = 'q';
 		$q->label       = $this->_('Search');
-		$q->placeholder = $this->_('Description, tags, filename');
+		$q->placeholder = $this->_('Page title, description, tags, filename, customs');
 		$q->value       = $filters['q'];
 		$q->columnWidth = 33;
 		$outer->add($q);
