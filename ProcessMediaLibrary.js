@@ -350,39 +350,30 @@
 			widget.focus();
 		}
 
-		// Hide every gridImage / InputfieldFileItem in the iframe
-		// EXCEPT the one whose file-hash matches, then auto-expand
-		// it so the user lands directly in the per-image action
-		// panel (Crop / Focus / Variations / Actions + Description /
-		// Tags / Customs). PW labels each grid item with
-		// id="file_<md5(basename)>" via Pagefile::hash(), and our
-		// thumb cell carries the same md5 in data-file-hash, so the
-		// match is a direct getElementById — no URL-string fishing.
+		// Server-side, our module hooks InputfieldImage::renderItem
+		// and suppresses every file whose hash doesn't match the
+		// ml_focus_hash GET param, so the iframe arrives with only
+		// one gridImage. All this function still does is auto-expand
+		// the per-image action panel (Crop / Focus / Variations /
+		// Actions + Description / Tags / Customs) so the user lands
+		// directly in the editor instead of a collapsed thumbnail.
 		function focusSingleImage(doc, fileHash) {
 			if (!fileHash) return;
 			var target = doc.getElementById('file_' + fileHash);
-			if (!target) return;
-			var items = doc.querySelectorAll('.gridImage, .InputfieldFileItem');
-			Array.prototype.forEach.call(items, function (item) {
-				if (item !== target) item.style.display = 'none';
-			});
-			// Expand the panel. InputfieldImage toggles the metadata
-			// strip on a click of .gridImage__inner; falling back to
-			// the item itself for older / file-only markup.
-			if (!target.classList.contains('gridImage--text-open')) {
-				var trigger = target.querySelector('.gridImage__inner')
-					|| target.querySelector('.InputfieldFileLink')
-					|| target;
-				if (trigger && trigger.click) trigger.click();
-			}
+			if (!target || target.classList.contains('gridImage--text-open')) return;
+			var trigger = target.querySelector('.gridImage__inner')
+				|| target.querySelector('.InputfieldFileLink')
+				|| target;
+			if (trigger && trigger.click) trigger.click();
 		}
 
 		// Open PW's per-image action panel (Crop / Focus / Variations
-		// / metadata fields) in a modal iframe. We load the normal
-		// ProcessPageEdit form scoped to the image field, then hide
-		// every image-item except the clicked one and auto-expand it
-		// — PW exposes no single-file endpoint that includes Focus
-		// and Variations, only the per-page InputfieldImage does.
+		// / metadata fields) in a modal iframe. The page-edit form
+		// is scoped to one image field via fields=…; our module's
+		// InputfieldImage::renderItem hook reads ml_focus_hash and
+		// renders only the one matching file (other Pagefiles in the
+		// field don't even hit thumbnail generation). modal=1 strips
+		// the admin chrome.
 		function openImageEditor(td) {
 			if (!config.adminUrl) return;
 			var pageId    = td.dataset.pageId;
@@ -394,7 +385,8 @@
 			var url = config.adminUrl + 'page/edit/'
 				+ '?id=' + encodeURIComponent(pageId)
 				+ '&fields=' + encodeURIComponent(fieldName)
-				+ '&modal=1';
+				+ '&modal=1'
+				+ '&ml_focus_hash=' + encodeURIComponent(fileHash);
 
 			var dialog = document.createElement('dialog');
 			dialog.className = 'ml-image-modal';
