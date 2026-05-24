@@ -122,8 +122,58 @@ class ProcessMediaLibrary extends Process {
 		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
 		$slice      = $this->hydrateSlice($slice);
 
-		return $this->renderTable($slice, $customCols, $filters, $sort, $dir)
+		$tagsConfig = $this->getTagsConfig();
+		// Autocomplete pool comes from the *filtered* set, not the full cache —
+		// scoped to what the user is currently looking at to keep the datalist
+		// small and contextually relevant.
+		$usedTags   = $this->collectUsedTagsByField($rows);
+
+		return $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
+			. $this->renderTagDatalists($usedTags)
 			. $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir);
+	}
+
+	/**
+	 * Walk the (filtered) flat rows, collecting distinct tags per field for
+	 * use as native <datalist> autocomplete on free-form tag inputs.
+	 *
+	 * @return array<string,array<int,string>> fieldName => sorted unique tags
+	 */
+	protected function collectUsedTagsByField(array $rows): array {
+		$byField = [];
+		foreach ($rows as $row) {
+			$tags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			if (!$tags) continue;
+			$f = (string) $row['fieldName'];
+			if (!isset($byField[$f])) $byField[$f] = [];
+			foreach ($tags as $t) $byField[$f][$t] = true;
+		}
+		$out = [];
+		foreach ($byField as $f => $set) {
+			$keys = array_keys($set);
+			sort($keys, SORT_NATURAL | SORT_FLAG_CASE);
+			$out[$f] = $keys;
+		}
+		return $out;
+	}
+
+	/**
+	 * Render one <datalist> per image field whose tags are free-form
+	 * (useTags=1). The text input in the editor references it via
+	 * list="ml-tags-used-<field>" for native browser autocomplete.
+	 */
+	protected function renderTagDatalists(array $usedTags): string {
+		if (!$usedTags) return '';
+		$san = $this->wire('sanitizer');
+		$out = '';
+		foreach ($usedTags as $field => $tags) {
+			$out .= '<datalist id="ml-tags-used-' . $san->entities($field) . '">';
+			foreach ($tags as $t) {
+				$out .= '<option value="' . $san->entities($t) . '">';
+			}
+			$out .= '</datalist>';
+		}
+		return $out;
 	}
 
 	/**
@@ -154,6 +204,27 @@ class ProcessMediaLibrary extends Process {
 		$out .= '<dt>Eligible templates</dt><dd><code>' . $sanitizer->entities(implode(', ', $eligibleTemplates)) . '</code></dd>';
 		$out .= '<dt>Custom fields per image field</dt><dd><pre>'
 			. $sanitizer->entities(json_encode($customByField, JSON_PRETTY_PRINT)) . '</pre></dd>';
+
+		// Show what getTagsConfig() actually detects per field, plus the raw
+		// useTags / tagsList values straight off the Field, so we can tell
+		// whether the discovery or the parsing is wrong when the editor
+		// widget doesn't switch.
+		$tagsCfg = $this->getTagsConfig();
+		$rawTags = [];
+		foreach ($imageFields as $name) {
+			$f = $this->wire('fields')->get($name);
+			if (!$f) continue;
+			$rawTags[$name] = [
+				'useTags'          => $f->useTags,
+				'useTags (type)'   => gettype($f->useTags),
+				'tagsList'         => $f->tagsList,
+				'tagsList (type)'  => gettype($f->tagsList),
+			];
+		}
+		$out .= '<dt>getTagsConfig()</dt><dd><pre>'
+			. $sanitizer->entities(json_encode($tagsCfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) . '</pre></dd>';
+		$out .= '<dt>Raw $field->useTags / tagsList</dt><dd><pre>'
+			. $sanitizer->entities(json_encode($rawTags, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) . '</pre></dd>';
 		$out .= '<dt>Selector</dt><dd><code>' . $sanitizer->entities($selector) . '</code></dd>';
 		$out .= '<dt>$pages->count($selector)</dt><dd>' . (int) $pageCount . '</dd>';
 		$out .= '<dt>findRaw fields requested</dt><dd><code>'
@@ -342,6 +413,23 @@ class ProcessMediaLibrary extends Process {
 			return $this->jsonError('Image not found in field', 404);
 		}
 
+		// useTags=2 (whitelist): reject any token that isn't in the configured
+		// tagsList. Splits on whitespace + commas to match PW's own parsing.
+		if ($subfield === 'tags') {
+			$tagsCfg = $this->getTagsConfig()[$fieldName] ?? ['mode' => 0, 'allowed' => []];
+			if ($tagsCfg['mode'] === 2) {
+				$tokens = preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+				$disallowed = array_diff($tokens, $tagsCfg['allowed']);
+				if ($disallowed) {
+					return $this->jsonError(
+						'Tag(s) not in whitelist: ' . implode(', ', $disallowed)
+					);
+				}
+				// Normalize separator to single space for consistency.
+				$value = implode(' ', $tokens);
+			}
+		}
+
 		// Output formatting off before mutating: setters work on the raw value
 		// and avoid double-encoding for fields like description.
 		$page->of(false);
@@ -467,6 +555,42 @@ class ProcessMediaLibrary extends Process {
 			}
 		}
 		return $names;
+	}
+
+	/**
+	 * Per-image-field tag configuration so the inline editor can render the
+	 * right widget (whitelist checkbox group vs. free-text + autocomplete)
+	 * and the save endpoint can validate against the whitelist.
+	 *
+	 * Effective mode for our editor (NOT the raw PW useTags value):
+	 *   0 = tags disabled
+	 *   1 = free-form (useTags set but no tagsList content)
+	 *   2 = whitelist (tagsList has parseable content)
+	 *
+	 * Why we don't trust $field->useTags directly: modern PW stores useTags
+	 * as a bit-mask of feature flags (1=manual, 2=list, 4=…, 8=…), so the
+	 * value can be e.g. 8 when the user enabled a whitelist. Our editor only
+	 * cares whether a list is present, so we key off tagsList content.
+	 *
+	 * @return array<string,array{mode:int,allowed:array<int,string>}>
+	 */
+	protected function getTagsConfig(): array {
+		$out = [];
+		foreach ($this->wire('fields') as $field) {
+			if (!($field->type instanceof FieldtypeImage)) continue;
+
+			$useTagsRaw = $field->useTags;
+			$rawList    = (string) $field->tagsList;
+			$allowed    = preg_split('/[\s,]+/', $rawList, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+			$effective = 0;
+			if ($useTagsRaw) {
+				$effective = $allowed ? 2 : 1;
+			}
+
+			$out[$field->name] = ['mode' => $effective, 'allowed' => $allowed];
+		}
+		return $out;
 	}
 
 	/**
@@ -954,6 +1078,7 @@ class ProcessMediaLibrary extends Process {
 				'saving' => $this->_('Saving…'),
 				'saved'  => $this->_('Saved'),
 				'error'  => $this->_('Save failed'),
+				'done'   => $this->_('Done'),
 			],
 		]);
 	}
@@ -1047,8 +1172,9 @@ class ProcessMediaLibrary extends Process {
 	/**
 	 * @param array<int,array<string,mixed>> $slice hydrated slice
 	 * @param array<int,string> $customCols custom-field column names
+	 * @param array<string,array{mode:int,allowed:array<int,string>}> $tagsConfig per-field tag mode + whitelist
 	 */
-	protected function renderTable(array $slice, array $customCols, array $filters = [], string $sort = '', string $dir = ''): string {
+	protected function renderTable(array $slice, array $customCols, array $filters = [], string $sort = '', string $dir = '', array $tagsConfig = []): string {
 		$san = $this->wire('sanitizer');
 
 		if (!$slice) {
@@ -1117,8 +1243,18 @@ class ProcessMediaLibrary extends Process {
 			$out .= '<td class="ml-cell-desc ml-cell-editable" ' . $editAttrs
 				. ' data-subfield="description" data-input="textarea">'
 				. $san->entities($desc) . '</td>';
+			$tagCfg     = $tagsConfig[$row['fieldName']] ?? ['mode' => 0, 'allowed' => []];
+			$tagAttrs   = ' data-tags-mode="' . (int) $tagCfg['mode'] . '"';
+			if ($tagCfg['mode'] === 2) {
+				$tagAttrs .= " data-tags-allowed='" . $san->entities(
+					json_encode(array_values($tagCfg['allowed']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+				) . "'";
+			} elseif ($tagCfg['mode'] === 1) {
+				$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
+					. $san->entities((string) $row['fieldName']) . '"';
+			}
 			$out .= '<td class="ml-cell-tags ml-cell-editable" ' . $editAttrs
-				. ' data-subfield="tags" data-input="text">'
+				. ' data-subfield="tags" data-input="text"' . $tagAttrs . '>'
 				. $san->entities($tags) . '</td>';
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($size) . '</td>';

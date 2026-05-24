@@ -64,24 +64,127 @@
 			setTimeout(function () { td.classList.remove(cls); }, 1200);
 		}
 
-		function activateEditor(td) {
-			if (td.classList.contains('ml-editing')) return;
-			td.classList.add('ml-editing');
+		// Build the editor widget for a cell based on its subfield and tags
+		// mode. Returns { element, getValue, focus, bindCommit }.
+		function buildEditorWidget(td, original) {
+			var subfield = td.dataset.subfield;
+			var tagsMode = parseInt(td.dataset.tagsMode || '0', 10);
 
-			var original  = td.textContent;
+			if (subfield === 'tags' && tagsMode === 2) {
+				return buildTagCheckboxEditor(td, original);
+			}
+			if (subfield === 'tags' && tagsMode === 1) {
+				return buildTextEditor(td, original, 'text', td.dataset.tagsListId || '');
+			}
 			var inputType = td.dataset.input === 'textarea' ? 'textarea' : 'text';
-			var editor    = document.createElement(inputType === 'textarea' ? 'textarea' : 'input');
+			return buildTextEditor(td, original, inputType, '');
+		}
+
+		function buildTextEditor(td, original, inputType, datalistId) {
+			var editor = document.createElement(inputType === 'textarea' ? 'textarea' : 'input');
 			if (inputType === 'text') editor.type = 'text';
 			if (inputType === 'textarea') editor.rows = 3;
 			editor.value = original;
 			editor.className = 'ml-cell-input';
+			if (datalistId) editor.setAttribute('list', datalistId);
+
+			return {
+				element: editor,
+				getValue: function () { return editor.value; },
+				focus: function () { editor.focus(); editor.select(); },
+				bindCommit: function (commit, cancel) {
+					editor.addEventListener('keydown', function (e) {
+						if (e.key === 'Escape') {
+							e.preventDefault();
+							cancel();
+						} else if (e.key === 'Enter') {
+							if (inputType === 'text' || e.ctrlKey || e.metaKey) {
+								e.preventDefault();
+								commit();
+							}
+						}
+					});
+					editor.addEventListener('blur', commit);
+				}
+			};
+		}
+
+		function buildTagCheckboxEditor(td, original) {
+			var allowed = [];
+			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
+			catch (e) { allowed = []; }
+
+			var current = original.split(/\s+/).filter(Boolean);
+			var currentSet = {};
+			current.forEach(function (t) { currentSet[t] = true; });
+
+			var wrap = document.createElement('div');
+			wrap.className = 'ml-tag-editor';
+
+			var list = document.createElement('div');
+			list.className = 'ml-tag-editor-list';
+			wrap.appendChild(list);
+
+			allowed.forEach(function (tag) {
+				var label = document.createElement('label');
+				var cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.value = tag;
+				cb.checked = !!currentSet[tag];
+				label.appendChild(cb);
+				label.appendChild(document.createTextNode(' ' + tag));
+				list.appendChild(label);
+			});
+
+			var done = document.createElement('button');
+			done.type = 'button';
+			done.className = 'ml-tag-editor-done';
+			done.textContent = labels.done || 'Done';
+			wrap.appendChild(done);
+
+			return {
+				element: wrap,
+				getValue: function () {
+					var sel = wrap.querySelectorAll('input[type="checkbox"]:checked');
+					return Array.prototype.map.call(sel, function (cb) { return cb.value; }).join(' ');
+				},
+				focus: function () {
+					var first = wrap.querySelector('input[type="checkbox"]');
+					if (first) first.focus();
+				},
+				bindCommit: function (commit, cancel) {
+					done.addEventListener('click', function (e) {
+						e.preventDefault();
+						commit();
+					});
+					wrap.addEventListener('keydown', function (e) {
+						if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+						else if (e.key === 'Enter') { e.preventDefault(); commit(); }
+					});
+					// Click outside the editor commits. Capture phase + microtask
+					// so the click that opened the editor doesn't fire this.
+					setTimeout(function () {
+						document.addEventListener('click', function onOutside(e) {
+							if (!wrap.contains(e.target)) {
+								document.removeEventListener('click', onOutside, true);
+								commit();
+							}
+						}, true);
+					}, 0);
+				}
+			};
+		}
+
+		function activateEditor(td) {
+			if (td.classList.contains('ml-editing')) return;
+			td.classList.add('ml-editing');
+
+			var original = td.textContent;
+			var widget   = buildEditorWidget(td, original);
 
 			td.textContent = '';
-			td.appendChild(editor);
-			setTimeout(function () {
-				editor.focus();
-				editor.select();
-			}, 0);
+			td.appendChild(widget.element);
+			setTimeout(widget.focus, 0);
 
 			var committed = false;
 
@@ -95,7 +198,7 @@
 			function commit() {
 				if (committed) return;
 				committed = true;
-				var newValue = editor.value;
+				var newValue = widget.getValue();
 				td.classList.remove('ml-editing');
 
 				if (newValue === original) {
@@ -116,8 +219,6 @@
 						value:     newValue
 					});
 				}).then(function (result) {
-					// Detached node? Cell was replaced by an AJAX re-render
-					// while the save was in flight. Skip the DOM update.
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
 					if (result && result.data && result.data.ok) {
@@ -138,18 +239,7 @@
 				});
 			}
 
-			editor.addEventListener('keydown', function (e) {
-				if (e.key === 'Escape') {
-					e.preventDefault();
-					cancel();
-				} else if (e.key === 'Enter') {
-					if (inputType === 'text' || e.ctrlKey || e.metaKey) {
-						e.preventDefault();
-						commit();
-					}
-				}
-			});
-			editor.addEventListener('blur', commit);
+			widget.bindCommit(commit, cancel);
 		}
 
 		// -- AJAX re-render --------------------------------------------
