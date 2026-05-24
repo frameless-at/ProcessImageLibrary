@@ -198,28 +198,38 @@
 			td.textContent = '';
 			td.appendChild(widget.element);
 
-			// In batch mode, surface explicit Add / Replace / Cancel buttons
-			// so the user picks the merge semantics deliberately rather
-			// than auto-committing on blur/Enter.
+			// In batch mode, show two radios (Add default, Replace) under
+			// the editor. Commit fires on blur or click-outside the cell
+			// using the currently-selected mode. Esc cancels.
 			var batchBar = null;
+			function getBatchMode() {
+				if (!batchBar) return 'replace';
+				var cb = batchBar.querySelector('input[type="radio"]:checked');
+				return cb ? cb.value : 'add';
+			}
 			if (batch) {
 				batchBar = document.createElement('div');
-				batchBar.className = 'ml-batch-buttons';
-				var rb = document.createElement('button');
-				rb.type = 'button';
-				rb.className = 'uk-button uk-button-small uk-button-primary';
-				rb.textContent = (labels.replaceN || 'Replace in %d').replace('%d', selection.size);
-				var ab = document.createElement('button');
-				ab.type = 'button';
-				ab.className = 'uk-button uk-button-small uk-button-default';
-				ab.textContent = (labels.addN || 'Add to %d').replace('%d', selection.size);
-				var xb = document.createElement('button');
-				xb.type = 'button';
-				xb.className = 'uk-button uk-button-small uk-button-default';
-				xb.textContent = labels.cancel || 'Cancel';
-				batchBar.appendChild(rb);
-				batchBar.appendChild(ab);
-				batchBar.appendChild(xb);
+				batchBar.className = 'ml-batch-mode';
+				var name = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
+				var addLabel = document.createElement('label');
+				var addRadio = document.createElement('input');
+				addRadio.type = 'radio';
+				addRadio.name = name;
+				addRadio.value = 'add';
+				addRadio.checked = true;
+				addLabel.appendChild(addRadio);
+				addLabel.appendChild(document.createTextNode(' ' + (labels.addN || 'Add to %d').replace('%d', selection.size)));
+
+				var repLabel = document.createElement('label');
+				var repRadio = document.createElement('input');
+				repRadio.type = 'radio';
+				repRadio.name = name;
+				repRadio.value = 'replace';
+				repLabel.appendChild(repRadio);
+				repLabel.appendChild(document.createTextNode(' ' + (labels.replaceN || 'Replace in %d').replace('%d', selection.size)));
+
+				batchBar.appendChild(addLabel);
+				batchBar.appendChild(repLabel);
 				td.appendChild(batchBar);
 			}
 
@@ -331,10 +341,32 @@
 			}
 
 			if (batch) {
-				rb.addEventListener('click', function () { commit('replace'); });
-				ab.addEventListener('click', function () { commit('add'); });
-				xb.addEventListener('click', cancel);
-				widget.bindCommit(function () { commit('replace'); }, cancel, true);
+				// Widget only handles Esc-to-cancel in batch mode.
+				widget.bindCommit(function () {}, cancel, true);
+
+				// Blur on a text-style editor commits — unless focus moved
+				// to another element inside this cell (radio button click).
+				if (widget.element.tagName !== 'DIV') {
+					widget.element.addEventListener('blur', function (e) {
+						if (committed) return;
+						if (e.relatedTarget && td.contains(e.relatedTarget)) return;
+						commit(getBatchMode());
+					});
+				}
+				// Click outside the cell also commits. Capture phase + microtask
+				// so the click that opened the editor doesn't trigger this.
+				setTimeout(function () {
+					document.addEventListener('click', function onOutside(e) {
+						if (committed) {
+							document.removeEventListener('click', onOutside, true);
+							return;
+						}
+						if (!td.contains(e.target)) {
+							document.removeEventListener('click', onOutside, true);
+							commit(getBatchMode());
+						}
+					}, true);
+				}, 0);
 			} else {
 				widget.bindCommit(function () { commit(); }, cancel, false);
 			}

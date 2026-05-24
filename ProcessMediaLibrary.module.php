@@ -1274,7 +1274,6 @@ class ProcessMediaLibrary extends Process {
 				'saved'      => $this->_('Saved'),
 				'error'      => $this->_('Save failed'),
 				'done'       => $this->_('Done'),
-				'cancel'     => $this->_('Cancel'),
 				'addN'       => $this->_('Add to %d'),
 				'replaceN'   => $this->_('Replace in %d'),
 				'batching'   => $this->_('Applying to %d selected…'),
