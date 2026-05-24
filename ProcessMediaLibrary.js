@@ -594,6 +594,13 @@
 		// Live narrowing of the Image-field dropdown based on the chosen
 		// template — uses the {template: [fieldName, …]} map shipped via
 		// $config->js() so we don't have to round-trip to the server.
+		//
+		// "All image fields" stays a real option (it's the no-field-filter
+		// state) but gets relabelled when a template is active so the
+		// user isn't told "all" while half the fields aren't actually in
+		// scope. Specific fields the template doesn't host become
+		// hidden+disabled; a currently-selected field that's no longer
+		// valid snaps back to the blank option.
 		function applyTemplateFieldFilter() {
 			if (!filterForm) return;
 			var tplSel = filterForm.querySelector('select[name="template"]');
@@ -601,9 +608,21 @@
 			if (!tplSel || !fldSel) return;
 			var chosen  = tplSel.value;
 			var allowed = chosen ? (config.tplFields[chosen] || []) : null;
+
+			var emptyOpt = fldSel.querySelector('option[value=""]');
+			if (emptyOpt) {
+				if (!emptyOpt.dataset.defaultLabel) {
+					emptyOpt.dataset.defaultLabel = emptyOpt.textContent;
+				}
+				var scopedLabel = config.labels && config.labels.fieldEmptyScoped;
+				emptyOpt.textContent = chosen && scopedLabel
+					? scopedLabel.replace('%s', chosen)
+					: emptyOpt.dataset.defaultLabel;
+			}
+
 			var resetSelection = false;
 			Array.prototype.forEach.call(fldSel.options, function (opt) {
-				if (!opt.value) { opt.hidden = false; opt.disabled = false; return; }
+				if (!opt.value) return; // empty option handled above
 				var ok = !allowed || allowed.indexOf(opt.value) !== -1;
 				opt.hidden   = !ok;
 				opt.disabled = !ok;
@@ -625,8 +644,12 @@
 			filterForm.addEventListener('change', function (e) {
 				if (e.target && e.target.name === 'template') applyTemplateFieldFilter();
 			});
-			// Initial narrow (matches the URL state on first render).
+			// Sync initial state: narrow the field dropdown to the URL's
+			// template, then hide the Reset button if no filters apply
+			// (the wrapper renders visible by default — PW doesn't know
+			// about our visibility rule).
 			applyTemplateFieldFilter();
+			updateResetVisibility();
 
 			filterForm.addEventListener('submit', function (e) {
 				e.preventDefault();
