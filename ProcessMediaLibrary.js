@@ -559,7 +559,38 @@
 
 		// -- Filter form + reset link ----------------------------------
 
+		// Live-toggle the Reset button based on current filter form state.
+		// PHP sets the initial hidden/visible based on URL; JS keeps it in
+		// sync as the user types or toggles checkboxes (the filter bar
+		// isn't part of the AJAX re-render, so it can't rely on a server
+		// round-trip to refresh the button).
+		function hasAnyFilterActive() {
+			if (!filterForm) return false;
+			var texts = filterForm.querySelectorAll('input[type="search"], input[type="text"]');
+			for (var i = 0; i < texts.length; i++) {
+				if (texts[i].value.trim() !== '') return true;
+			}
+			if (filterForm.querySelector('input[type="checkbox"]:checked')) return true;
+			var selects = filterForm.querySelectorAll('select');
+			for (var j = 0; j < selects.length; j++) {
+				var s = selects[j];
+				if (s.multiple) {
+					if (s.selectedOptions.length > 0) return true;
+				} else if (s.selectedIndex > 0) {
+					return true;
+				}
+			}
+			return false;
+		}
+		function updateResetVisibility() {
+			var reset = filterForm && filterForm.querySelector('.ml-reset');
+			if (reset) reset.hidden = !hasAnyFilterActive();
+		}
+
 		if (filterForm) {
+			filterForm.addEventListener('input', updateResetVisibility);
+			filterForm.addEventListener('change', updateResetVisibility);
+
 			filterForm.addEventListener('submit', function (e) {
 				e.preventDefault();
 				var params = new URLSearchParams();
@@ -591,6 +622,7 @@
 						s.selectedIndex = 0;
 					}
 				});
+				updateResetVisibility();
 				replaceFromQs('', true);
 			});
 		}
