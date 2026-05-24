@@ -585,7 +585,11 @@
 					i.checked = false;
 				});
 				filterForm.querySelectorAll('select').forEach(function (s) {
-					s.selectedIndex = 0;
+					if (s.multiple) {
+						Array.prototype.forEach.call(s.options, function (o) { o.selected = false; });
+					} else {
+						s.selectedIndex = 0;
+					}
 				});
 				replaceFromQs('', true);
 			});
