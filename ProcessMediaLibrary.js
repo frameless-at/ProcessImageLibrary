@@ -210,6 +210,36 @@
 					return;
 				}
 
+				// Selection-is-a-paintbrush: if the edited row is in the
+				// active selection (and there's more than one), broadcast
+				// the change to all selected rows via the bulk endpoint
+				// instead of saving just this cell.
+				if (isBatchEdit(td)) {
+					td.textContent = newValue;
+					td.classList.add('ml-cell-saving');
+					td.title = (labels.batching || 'Applying to %d…').replace('%d', selection.size);
+					runBulk('set', { subfield: td.dataset.subfield, value: newValue })
+						.then(function (result) {
+							var ok = reportBulk(result);
+							// Re-fetch view so all affected rows reflect the
+							// stored value (could differ from input after
+							// sanitization, especially for tags).
+							replaceFromQs(location.search, false);
+							if (!ok && td.isConnected) {
+								td.textContent = original;
+								flashCell(td, false);
+							}
+						})
+						.catch(function (err) {
+							if (!td.isConnected) return;
+							td.classList.remove('ml-cell-saving');
+							td.textContent = original;
+							td.title = (err && err.message) || labels.error || 'Network error';
+							flashCell(td, false);
+						});
+					return;
+				}
+
 				td.textContent = newValue;
 				td.classList.add('ml-cell-saving');
 				td.title = labels.saving || 'Saving…';
@@ -327,50 +357,47 @@
 			});
 		}
 
-		function runBulk(action, value) {
-			if (isBulking || !config.bulkUrl) return;
+		function runBulk(action, extra) {
+			if (isBulking || !config.bulkUrl) return Promise.reject(new Error('busy'));
 			var items = selectionItems();
-			if (!items.length) return;
+			if (!items.length) return Promise.reject(new Error('empty selection'));
 			isBulking = true;
 			actionBar && actionBar.classList.add('ml-busy');
 
 			var fd = new FormData();
 			fd.append('action', action);
-			fd.append('value', value || '');
 			fd.append('items', JSON.stringify(items));
+			if (extra) Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
 			if (config.csrf && config.csrf.name) {
 				fd.append(config.csrf.name, config.csrf.value);
 			}
 
-			fetch(config.bulkUrl, {
+			return fetch(config.bulkUrl, {
 				method: 'POST',
 				body: fd,
 				credentials: 'same-origin'
 			}).then(function (res) {
 				return res.json().then(function (data) { return { status: res.status, data: data }; });
-			}).then(function (result) {
-				var d = result.data || {};
-				if (d.ok) {
-					var msg = (labels.bulkResult || 'Succeeded: %1$d  ·  Failed: %2$d')
-						.replace('%1$d', d.succeeded)
-						.replace('%2$d', (d.failed || []).length);
-					if (d.failed && d.failed.length) {
-						msg += '\n\n' + d.failed.join('\n');
-					}
-					alert(msg);
-					selection.clear();
-					updateActionBar();
-					// Re-fetch current view to reflect server-side changes.
-					replaceFromQs(location.search, false);
-				} else {
-					alert(d.error || labels.error || 'Bulk action failed');
-				}
-			}).catch(function (err) {
-				alert((err && err.message) || labels.error || 'Network error');
 			}).finally(function () {
 				isBulking = false;
 				actionBar && actionBar.classList.remove('ml-busy');
 			});
+		}
+
+		function reportBulk(result) {
+			var d = (result && result.data) || {};
+			if (!d.ok) {
+				alert(d.error || labels.error || 'Bulk action failed');
+				return false;
+			}
+			var failedCount = (d.failed || []).length;
+			if (failedCount) {
+				var msg = (labels.bulkResult || 'Succeeded: %1$d  ·  Failed: %2$d')
+					.replace('%1$d', d.succeeded)
+					.replace('%2$d', failedCount);
+				alert(msg + '\n\n' + d.failed.join('\n'));
+			}
+			return true;
 		}
 
 		if (actionBar) {
@@ -383,25 +410,28 @@
 					syncCheckboxes();
 					return;
 				}
-				if (action === 'add_tags') {
-					var add = prompt(labels.addTagsPrompt || 'Tags to add:');
-					if (add === null || add.trim() === '') return;
-					runBulk('add_tags', add.trim());
-					return;
-				}
-				if (action === 'remove_tags') {
-					var rm = prompt(labels.removeTagsPrompt || 'Tags to remove:');
-					if (rm === null || rm.trim() === '') return;
-					runBulk('remove_tags', rm.trim());
-					return;
-				}
 				if (action === 'delete') {
 					var msg = (labels.deleteConfirm || 'Delete %d image(s)?').replace('%d', selection.size);
 					if (!confirm(msg)) return;
-					runBulk('delete', '');
-					return;
+					runBulk('delete', {}).then(function (result) {
+						if (reportBulk(result)) {
+							selection.clear();
+							updateActionBar();
+							replaceFromQs(location.search, false);
+						}
+					}).catch(function (err) {
+						alert((err && err.message) || labels.error || 'Network error');
+					});
 				}
 			});
+		}
+
+		function rowKey(td) {
+			return td.dataset.pageId + ':' + td.dataset.field + ':' + td.dataset.basename;
+		}
+
+		function isBatchEdit(td) {
+			return selection.size > 1 && selection.has(rowKey(td));
 		}
 
 		// -- Delegated click handler on the persistent .ml-results -----

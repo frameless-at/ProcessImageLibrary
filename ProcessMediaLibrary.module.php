@@ -168,11 +168,8 @@ class ProcessMediaLibrary extends Process {
 		$san = $this->wire('sanitizer');
 		$out  = '<div class="ml-action-bar">';
 		$out .= '<span class="ml-action-bar-text"><span class="ml-selection-count">0</span> '
-			. $san->entities($this->_('selected')) . '</span>';
-		$out .= '<button type="button" class="uk-button uk-button-small uk-button-default" data-action="add_tags">'
-			. $san->entities($this->_('Add tags…')) . '</button>';
-		$out .= '<button type="button" class="uk-button uk-button-small uk-button-default" data-action="remove_tags">'
-			. $san->entities($this->_('Remove tags…')) . '</button>';
+			. $san->entities($this->_('selected — edits on a selected row apply to all'))
+			. '</span>';
 		$out .= '<button type="button" class="uk-button uk-button-small uk-button-danger" data-action="delete">'
 			. $san->entities($this->_('Delete')) . '</button>';
 		$out .= '<button type="button" class="uk-button uk-button-small uk-button-default" data-action="clear">'
@@ -496,16 +493,23 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * AJAX endpoint: apply a single action to a batch of selected images.
+	 * AJAX endpoint: apply one action to a batch of selected images.
 	 *
-	 * Expects POST with: action (add_tags|remove_tags|set_description|delete),
-	 * items (JSON array of {pageId,fieldName,basename}), value (string —
-	 * empty for delete), plus CSRF token.
+	 * Actions:
+	 *   set    — same as a single-cell save (subfield + value), but applied
+	 *            to every item in the selection. Used by the "selection is
+	 *            a paintbrush" inline edit: when the user edits a cell on a
+	 *            selected row, the change is broadcast to all selected rows.
+	 *   delete — remove the image from its field; for single-image fields
+	 *            the field value is cleared.
 	 *
-	 * Items get grouped by pageId so each page is loaded and saved at most
-	 * once per field touched, regardless of how many images are selected on
-	 * it. Per-page `$page->editable()` is enforced; failures are reported in
-	 * the response rather than aborting the batch.
+	 * POST: action, items (JSON array of {pageId,fieldName,basename}),
+	 * value (string, only for `set`), subfield (string, only for `set`),
+	 * plus CSRF token.
+	 *
+	 * Items grouped by pageId → each page is loaded and saved at most once
+	 * per field touched. $page->editable() enforced per page; failures
+	 * accumulate in the response instead of aborting the batch.
 	 *
 	 * Returns JSON: { ok, succeeded:int, failed:string[] }.
 	 */
@@ -528,14 +532,14 @@ class ProcessMediaLibrary extends Process {
 
 		$action    = (string) $input->post('action');
 		$value     = (string) $input->post('value');
+		$subfield  = $sanitizer->fieldName((string) $input->post('subfield'));
 		$itemsJson = (string) $input->post('items');
 
-		if (!in_array($action, ['add_tags', 'remove_tags', 'set_description', 'delete'], true)) {
+		if (!in_array($action, ['set', 'delete'], true)) {
 			return $this->jsonError('Unknown action');
 		}
-		if (in_array($action, ['add_tags', 'remove_tags'], true)) {
-			$tokens = preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-			if (!$tokens) return $this->jsonError('No tags specified');
+		if ($action === 'set' && !$subfield) {
+			return $this->jsonError('Subfield required for set');
 		}
 
 		$items = json_decode($itemsJson, true);
@@ -580,6 +584,10 @@ class ProcessMediaLibrary extends Process {
 					$failed[] = sprintf('Field %s not managed', $fn);
 					continue;
 				}
+				if ($action === 'set' && !in_array($subfield, $this->editableSubfields($fn), true)) {
+					$failed[] = sprintf('Subfield %s not editable on %s', $subfield, $fn);
+					continue;
+				}
 
 				$fieldValue = $page->getUnformatted($fn);
 				$img = null;
@@ -593,45 +601,32 @@ class ProcessMediaLibrary extends Process {
 					continue;
 				}
 
-				switch ($action) {
-					case 'add_tags':
-						$tagCfg  = $tagsCfg[$fn] ?? ['mode' => 0, 'allowed' => []];
-						$newTags = preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+				if ($action === 'set') {
+					$itemValue = $value;
+					// Whitelist gate per item: the tag whitelist can differ
+					// per field, so we check at the per-item level rather
+					// than rejecting the whole batch up front.
+					if ($subfield === 'tags') {
+						$tagCfg = $tagsCfg[$fn] ?? ['mode' => 0, 'allowed' => []];
 						if ($tagCfg['mode'] === 2) {
-							$disallowed = array_diff($newTags, $tagCfg['allowed']);
+							$tokens = preg_split('/[\s,]+/', $itemValue, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+							$disallowed = array_diff($tokens, $tagCfg['allowed']);
 							if ($disallowed) {
 								$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $disallowed));
-								continue 2;
+								continue;
 							}
+							$itemValue = implode(' ', $tokens);
 						}
-						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-						$merged   = array_values(array_unique(array_merge($existing, $newTags)));
-						$img->tags = implode(' ', $merged);
-						$fieldsTouched[$fn] = true;
-						break;
-
-					case 'remove_tags':
-						$rmTags   = preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-						$kept     = array_values(array_diff($existing, $rmTags));
-						$img->tags = implode(' ', $kept);
-						$fieldsTouched[$fn] = true;
-						break;
-
-					case 'set_description':
-						$img->description = $value;
-						$fieldsTouched[$fn] = true;
-						break;
-
-					case 'delete':
-						if ($fieldValue instanceof Pageimages) {
-							$fieldValue->delete($img);
-						} else {
-							// Single-image field: clear the field value.
-							$page->set($fn, null);
-						}
-						$fieldsTouched[$fn] = true;
-						break;
+					}
+					$img->set($subfield, $itemValue);
+					$fieldsTouched[$fn] = true;
+				} else { // delete
+					if ($fieldValue instanceof Pageimages) {
+						$fieldValue->delete($img);
+					} else {
+						$page->set($fn, null);
+					}
+					$fieldsTouched[$fn] = true;
 				}
 				$succeeded++;
 			}
@@ -1255,14 +1250,13 @@ class ProcessMediaLibrary extends Process {
 				'value' => $session->CSRF->getTokenValue(),
 			],
 			'labels' => [
-				'saving'         => $this->_('Saving…'),
-				'saved'          => $this->_('Saved'),
-				'error'          => $this->_('Save failed'),
-				'done'           => $this->_('Done'),
-				'addTagsPrompt'  => $this->_('Tags to add (space-separated):'),
-				'removeTagsPrompt' => $this->_('Tags to remove (space-separated):'),
-				'deleteConfirm'  => $this->_('Delete %d image(s)? This cannot be undone.'),
-				'bulkResult'     => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
+				'saving'        => $this->_('Saving…'),
+				'saved'         => $this->_('Saved'),
+				'error'         => $this->_('Save failed'),
+				'done'          => $this->_('Done'),
+				'batching'      => $this->_('Applying to %d selected…'),
+				'deleteConfirm' => $this->_('Delete %d image(s) from their pages? The image file(s) will be removed. This cannot be undone.'),
+				'bulkResult'    => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
 			],
 		]);
 	}
