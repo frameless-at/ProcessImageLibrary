@@ -1,9 +1,11 @@
 /* ProcessMediaLibrary — admin script.
  *
- * Inline-edit for table cells marked with .ml-cell-editable. One save in
- * flight per page (saveQueues) to avoid concurrent $page->save() races
- * on the server. Optimistic UI: cell flips to the new value immediately
- * and reverts on error.
+ * Inline-edit for cells marked with .ml-cell-editable + AJAX re-render
+ * of the results region (.ml-results) on filter / sort / pagination.
+ *
+ * Save queue per pageId serializes saves to the same page; AJAX
+ * re-render preserves the filter form (it lives outside .ml-results),
+ * and event delegation on .ml-results survives the innerHTML swaps.
  */
 (function () {
 	'use strict';
@@ -12,16 +14,12 @@
 		var root = document.querySelector('.ml-root');
 		if (!root) return;
 
-		// Bootstrapped marker — inspectable in DevTools if behavior regresses.
 		root.classList.add('ml-js-loaded');
 
-		// Two config sources: $config->js() output, falling back to data-*
-		// attributes on .ml-root. The fallback exists because some admin theme
-		// or load order issue can leave ProcessWire.config.ProcessMediaLibrary
-		// undefined while the script still loads fine.
 		var pwCfg = (window.ProcessWire && window.ProcessWire.config && window.ProcessWire.config.ProcessMediaLibrary) || {};
 		var config = {
-			saveUrl: pwCfg.saveUrl || root.dataset.saveUrl || '',
+			saveUrl:   pwCfg.saveUrl   || root.dataset.saveUrl   || '',
+			renderUrl: pwCfg.renderUrl || root.dataset.renderUrl || '',
 			csrf: pwCfg.csrf || {
 				name:  root.dataset.csrfName  || '',
 				value: root.dataset.csrfValue || ''
@@ -30,8 +28,13 @@
 		};
 		if (!config.saveUrl) return;
 
-		var labels = config.labels;
+		var labels     = config.labels;
 		var saveQueues = new Map();
+		var results    = root.querySelector('.ml-results');
+		var filterForm = root.querySelector('.ml-filter-bar');
+		var isReplacing = false;
+
+		// -- Inline edit ------------------------------------------------
 
 		function enqueueSave(pageId, task) {
 			var prev = saveQueues.get(pageId) || Promise.resolve();
@@ -75,8 +78,6 @@
 
 			td.textContent = '';
 			td.appendChild(editor);
-			// iOS Safari sometimes drops focus() if called synchronously inside
-			// the click handler that just mutated the DOM; defer one tick.
 			setTimeout(function () {
 				editor.focus();
 				editor.select();
@@ -115,6 +116,9 @@
 						value:     newValue
 					});
 				}).then(function (result) {
+					// Detached node? Cell was replaced by an AJAX re-render
+					// while the save was in flight. Skip the DOM update.
+					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
 					if (result && result.data && result.data.ok) {
 						td.textContent = result.data.value;
@@ -126,6 +130,7 @@
 						flashCell(td, false);
 					}
 				}).catch(function (err) {
+					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
 					td.textContent = original;
 					td.title = (err && err.message) || labels.error || 'Network error';
@@ -147,26 +152,102 @@
 			editor.addEventListener('blur', commit);
 		}
 
-		function handleCellTap(e) {
-			var td = this;
-			if (td.classList.contains('ml-editing')) return;
-			if (e.target && e.target !== td) {
-				if (e.target.tagName === 'A' || (e.target.closest && e.target.closest('a'))) return;
-			}
-			activateEditor(td);
+		// -- AJAX re-render --------------------------------------------
+
+		function replaceFromHref(href) {
+			var u = new URL(href, location.href);
+			replaceFromQs(u.search, true);
 		}
 
-		// Direct binding (not delegated) — iOS Safari fires click on first tap
-		// only when the tapped element itself is "interactive": has a click
-		// listener, is a native control, or has cursor:pointer. Delegation via
-		// the root sometimes misses the first tap; per-cell binding doesn't.
-		root.querySelectorAll('.ml-cell-editable').forEach(function (td) {
-			td.addEventListener('click', handleCellTap);
+		function replaceFromQs(qs, push) {
+			if (!config.renderUrl || !results) {
+				// Degraded path: full reload to the URL with the query string.
+				location.href = location.pathname + qs;
+				return;
+			}
+			if (isReplacing) return;
+			isReplacing = true;
+			results.classList.add('ml-loading');
+
+			fetch(config.renderUrl + qs, {
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' }
+			}).then(function (res) {
+				if (!res.ok) throw new Error('HTTP ' + res.status);
+				return res.text();
+			}).then(function (html) {
+				results.innerHTML = html;
+				if (push) {
+					history.pushState({ ml: qs }, '', location.pathname + qs);
+				}
+			}).catch(function (err) {
+				// On network/server error, fall back to a full reload so the
+				// user still gets the navigation they asked for.
+				location.href = location.pathname + qs;
+				throw err;
+			}).finally(function () {
+				results.classList.remove('ml-loading');
+				isReplacing = false;
+			});
+		}
+
+		// -- Delegated click handler on the persistent .ml-results -----
+
+		if (results) {
+			results.addEventListener('click', function (e) {
+				if (e.target && e.target.closest) {
+					var sortLink = e.target.closest('.ml-th-sortable a');
+					if (sortLink) {
+						e.preventDefault();
+						replaceFromHref(sortLink.href);
+						return;
+					}
+					var pagLink = e.target.closest('.ml-pagination-link');
+					if (pagLink) {
+						e.preventDefault();
+						replaceFromHref(pagLink.href);
+						return;
+					}
+					// Editable cell — but ignore clicks that landed on an
+					// internal anchor (e.g. Page-link in the Page column).
+					if (e.target.tagName === 'A' || e.target.closest('a')) return;
+				}
+				var td = e.target.closest && e.target.closest('.ml-cell-editable');
+				if (!td) return;
+				if (td.classList.contains('ml-editing')) return;
+				activateEditor(td);
+			});
+		}
+
+		// -- Filter form + reset link ----------------------------------
+
+		if (filterForm) {
+			filterForm.addEventListener('submit', function (e) {
+				e.preventDefault();
+				var params = new URLSearchParams();
+				new FormData(filterForm).forEach(function (v, k) {
+					if (v !== '') params.append(k, v);
+				});
+				var qs = params.toString() ? '?' + params.toString() : '';
+				replaceFromQs(qs, true);
+			});
+
+			// "Reset" is an <a href="./">; intercept so it clears via AJAX too.
+			filterForm.addEventListener('click', function (e) {
+				var reset = e.target.closest && e.target.closest('a[href="./"]');
+				if (!reset) return;
+				e.preventDefault();
+				replaceFromQs('', true);
+			});
+		}
+
+		// -- Browser back/forward --------------------------------------
+
+		window.addEventListener('popstate', function () {
+			replaceFromQs(location.search, false);
 		});
 	}
 
-	// PW admin loads <script> in <head>, so the IIFE runs before <body>
-	// is parsed and .ml-root doesn't exist yet. Wait for DOM.
 	if (document.readyState === 'loading') {
 		document.addEventListener('DOMContentLoaded', init);
 	} else {
