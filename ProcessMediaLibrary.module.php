@@ -1320,14 +1320,19 @@ class ProcessMediaLibrary extends Process {
 				'value' => $session->CSRF->getTokenValue(),
 			],
 			'labels' => [
-				'saving'     => $this->_('Saving…'),
-				'saved'      => $this->_('Saved'),
-				'error'      => $this->_('Save failed'),
-				'done'       => $this->_('Done'),
-				'add'        => $this->_('Add'),
-				'replace'    => $this->_('Replace'),
-				'batching'   => $this->_('Applying to %d selected…'),
-				'bulkResult' => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
+				'saving'           => $this->_('Saving…'),
+				'saved'            => $this->_('Saved'),
+				'error'            => $this->_('Save failed'),
+				'done'             => $this->_('Done'),
+				'add'              => $this->_('Add'),
+				'replace'          => $this->_('Replace'),
+				'batching'         => $this->_('Applying to %d selected…'),
+				'bulkResult'       => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
+				// Field-dropdown label when a template is active — %s is
+				// the template name. The JS swaps "All image fields" for
+				// this so the user isn't told "all" while non-template
+				// fields are greyed out below.
+				'fieldEmptyScoped' => $this->_('All fields of %s'),
 			],
 		]);
 	}
@@ -1526,6 +1531,21 @@ class ProcessMediaLibrary extends Process {
 	protected function renderTable(array $slice, array $customCols, array $filters = [], string $sort = '', string $dir = '', array $tagsConfig = []): string {
 		$san = $this->wire('sanitizer');
 
+		// Per-subfield editor type — Textarea-backed customs render a
+		// <textarea> in the inline editor, everything else falls back to
+		// <input type="text">. Built once across every image field's
+		// declared subfields so the per-row loop is just a lookup.
+		$fieldsApi  = $this->wire('fields');
+		$customInputTypes = [];
+		foreach ($this->getCustomByField() as $names) {
+			foreach ($names as $n) {
+				if (isset($customInputTypes[$n])) continue;
+				$f = $fieldsApi->get($n);
+				$customInputTypes[$n] = ($f && $f->type instanceof FieldtypeTextarea)
+					? 'textarea' : 'text';
+			}
+		}
+
 		if (!$slice) {
 			return '<p class="ml-empty">'
 				. $san->entities($this->_('No images match the current filters.')) . '</p>';
@@ -1640,8 +1660,10 @@ class ProcessMediaLibrary extends Process {
 			foreach ($customCols as $name) {
 				$val = $row['custom'][$name] ?? '';
 				if (is_array($val)) $val = json_encode($val);
+				$inputType = $customInputTypes[$name] ?? 'text';
 				$out .= '<td class="ml-cell-editable" ' . $editAttrs
-					. ' data-subfield="' . $san->entities($name) . '" data-input="text">'
+					. ' data-subfield="' . $san->entities($name) . '"'
+					. ' data-input="' . $san->entities($inputType) . '">'
 					. $san->entities((string) $val) . '</td>';
 			}
 
