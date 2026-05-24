@@ -21,6 +21,7 @@
 			saveUrl:   pwCfg.saveUrl   || root.dataset.saveUrl   || '',
 			renderUrl: pwCfg.renderUrl || root.dataset.renderUrl || '',
 			bulkUrl:   pwCfg.bulkUrl   || root.dataset.bulkUrl   || '',
+			tplFields: pwCfg.tplFields || {},
 			csrf: pwCfg.csrf || {
 				name:  root.dataset.csrfName  || '',
 				value: root.dataset.csrfValue || ''
@@ -583,18 +584,56 @@
 			return false;
 		}
 		function updateResetVisibility() {
-			var reset = filterForm && filterForm.querySelector('.ml-reset');
-			if (reset) reset.hidden = !hasAnyFilterActive();
+			if (!filterForm) return;
+			// PW wraps every Inputfield in a <li class="Inputfield_<name>">;
+			// hiding the wrapper removes both link AND its layout cell.
+			var wrap = filterForm.querySelector('.Inputfield_reset');
+			if (wrap) wrap.hidden = !hasAnyFilterActive();
+		}
+
+		// Live narrowing of the Image-field dropdown based on the chosen
+		// template — uses the {template: [fieldName, …]} map shipped via
+		// $config->js() so we don't have to round-trip to the server.
+		function applyTemplateFieldFilter() {
+			if (!filterForm) return;
+			var tplSel = filterForm.querySelector('select[name="template"]');
+			var fldSel = filterForm.querySelector('select[name="field"]');
+			if (!tplSel || !fldSel) return;
+			var chosen  = tplSel.value;
+			var allowed = chosen ? (config.tplFields[chosen] || []) : null;
+			var resetSelection = false;
+			Array.prototype.forEach.call(fldSel.options, function (opt) {
+				if (!opt.value) { opt.hidden = false; opt.disabled = false; return; }
+				var ok = !allowed || allowed.indexOf(opt.value) !== -1;
+				opt.hidden   = !ok;
+				opt.disabled = !ok;
+				if (!ok && opt.selected) {
+					opt.selected = false;
+					resetSelection = true;
+				}
+			});
+			if (resetSelection) {
+				fldSel.value = '';
+				// Surface to the rest of the form (reset-visibility etc.).
+				fldSel.dispatchEvent(new Event('change', { bubbles: true }));
+			}
 		}
 
 		if (filterForm) {
 			filterForm.addEventListener('input', updateResetVisibility);
 			filterForm.addEventListener('change', updateResetVisibility);
+			filterForm.addEventListener('change', function (e) {
+				if (e.target && e.target.name === 'template') applyTemplateFieldFilter();
+			});
+			// Initial narrow (matches the URL state on first render).
+			applyTemplateFieldFilter();
 
 			filterForm.addEventListener('submit', function (e) {
 				e.preventDefault();
 				var params = new URLSearchParams();
 				new FormData(filterForm).forEach(function (v, k) {
+					// "apply" is the submit-button name; not a filter value.
+					if (k === 'apply') return;
 					if (v !== '') params.append(k, v);
 				});
 				var qs = params.toString() ? '?' + params.toString() : '';
