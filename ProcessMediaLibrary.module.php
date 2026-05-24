@@ -1326,6 +1326,8 @@ class ProcessMediaLibrary extends Process {
 				'done'             => $this->_('Done'),
 				'add'              => $this->_('Add'),
 				'replace'          => $this->_('Replace'),
+				'save'             => $this->_('Save'),
+				'cancel'           => $this->_('Cancel'),
 				'batching'         => $this->_('Applying to %d selected…'),
 				'bulkResult'       => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
 				// Field-dropdown label when a template is active — %s is

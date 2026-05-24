@@ -187,8 +187,208 @@
 			};
 		}
 
+		// Column header text for the cell, used as the popup dialog's
+		// label. Falls back to the raw subfield name if the <th> isn't
+		// findable (defensive — shouldn't happen with the current table).
+		function columnLabelFor(td) {
+			var row = td.parentNode;
+			if (!row) return td.dataset.subfield || '';
+			var idx = Array.prototype.indexOf.call(row.children, td);
+			var table = td.closest('table');
+			var th = table && table.querySelectorAll('thead th')[idx];
+			return th ? th.textContent.trim() : (td.dataset.subfield || '');
+		}
+
+		// Popup editor for textarea-typed subfields. Mirrors
+		// activateEditor's commit semantics (single-save vs batch
+		// Add/Replace) but hosts the textarea + controls inside a
+		// native <dialog> so the user gets a real editing canvas. The
+		// table cell stays read-only behind the modal and updates
+		// optimistically when the user saves.
+		function activatePopupEditor(td) {
+			if (td.classList.contains('ml-editing')) return;
+			td.classList.add('ml-editing');
+
+			var original = td.textContent;
+			var batch    = isBatchEdit(td);
+
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-popup-editor';
+
+			var header = document.createElement('header');
+			header.textContent = columnLabelFor(td);
+			dialog.appendChild(header);
+
+			var ta = document.createElement('textarea');
+			ta.value = original;
+			ta.rows = 12;
+			dialog.appendChild(ta);
+
+			var batchBar = null;
+			function getBatchMode() {
+				if (!batchBar) return 'replace';
+				var cb = batchBar.querySelector('input[type="radio"]:checked');
+				return cb ? cb.value : 'add';
+			}
+			if (batch) {
+				batchBar = document.createElement('div');
+				batchBar.className = 'ml-batch-mode';
+				var name = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
+				['add', 'replace'].forEach(function (mode) {
+					var lbl = document.createElement('label');
+					var rb = document.createElement('input');
+					rb.type = 'radio';
+					rb.name = name;
+					rb.value = mode;
+					if (mode === 'add') rb.checked = true;
+					lbl.appendChild(rb);
+					lbl.appendChild(document.createTextNode(
+						' ' + (mode === 'add' ? (labels.add || 'Add') : (labels.replace || 'Replace'))
+					));
+					batchBar.appendChild(lbl);
+				});
+				dialog.appendChild(batchBar);
+			}
+
+			var footer = document.createElement('footer');
+			var cancelBtn = document.createElement('button');
+			cancelBtn.type = 'button';
+			cancelBtn.className = 'ml-popup-cancel';
+			cancelBtn.textContent = labels.cancel || 'Cancel';
+			var saveBtn = document.createElement('button');
+			saveBtn.type = 'button';
+			saveBtn.className = 'ml-popup-save';
+			saveBtn.textContent = labels.save || 'Save';
+			footer.appendChild(cancelBtn);
+			footer.appendChild(saveBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+
+			var committed = false;
+
+			function teardown() {
+				td.classList.remove('ml-editing');
+				if (dialog.open) dialog.close();
+				dialog.remove();
+			}
+
+			function cancel() {
+				if (committed) return;
+				committed = true;
+				teardown();
+			}
+
+			function commit(mode) {
+				if (committed) return;
+				committed = true;
+				var newValue = ta.value;
+
+				if (batch) {
+					var sendValue = newValue;
+					if ((mode || 'replace') === 'add') {
+						// For textarea Add: strip the editor's starting prefix
+						// so the broadcast carries only the new tail. If the
+						// user edited mid-string, ship the full value as a
+						// safe fallback.
+						if (newValue.indexOf(original) === 0) {
+							sendValue = newValue.substring(original.length).replace(/^\s+/, '');
+						}
+						if (sendValue === '') { teardown(); return; }
+					}
+					teardown();
+					td.textContent = '…';
+					td.classList.add('ml-cell-saving');
+					runBulk('set', {
+						subfield: td.dataset.subfield,
+						value:    sendValue,
+						mode:     mode || 'replace'
+					}).then(function (result) {
+						var ok = reportBulk(result);
+						replaceFromQs(location.search, false);
+						if (!ok && td.isConnected) {
+							td.textContent = original;
+							flashCell(td, false);
+						}
+					}).catch(function (err) {
+						if (!td.isConnected) return;
+						td.classList.remove('ml-cell-saving');
+						td.textContent = original;
+						td.title = (err && err.message) || labels.error || 'Network error';
+						flashCell(td, false);
+					});
+					return;
+				}
+
+				if (newValue === original) { teardown(); return; }
+
+				teardown();
+				td.textContent = newValue;
+				td.classList.add('ml-cell-saving');
+				td.title = labels.saving || 'Saving…';
+
+				enqueueSave(td.dataset.pageId, function () {
+					return postSave({
+						pageId:    td.dataset.pageId,
+						fieldName: td.dataset.field,
+						basename:  td.dataset.basename,
+						subfield:  td.dataset.subfield,
+						value:     newValue
+					});
+				}).then(function (result) {
+					if (!td.isConnected) return;
+					td.classList.remove('ml-cell-saving');
+					if (result && result.data && result.data.ok) {
+						td.textContent = result.data.value;
+						td.title = '';
+						flashCell(td, true);
+					} else {
+						td.textContent = original;
+						td.title = (result && result.data && result.data.error) || labels.error || 'Save failed';
+						flashCell(td, false);
+					}
+				}).catch(function (err) {
+					if (!td.isConnected) return;
+					td.classList.remove('ml-cell-saving');
+					td.textContent = original;
+					td.title = (err && err.message) || labels.error || 'Network error';
+					flashCell(td, false);
+				});
+			}
+
+			cancelBtn.addEventListener('click', cancel);
+			saveBtn.addEventListener('click', function () { commit(getBatchMode()); });
+
+			ta.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+					e.preventDefault();
+					commit(getBatchMode());
+				}
+			});
+
+			// Native <dialog> fires "close" on Esc and on dialog.close().
+			// Treat any non-committed close as cancel so the cell never
+			// gets stuck in ml-editing.
+			dialog.addEventListener('close', function () {
+				if (!committed) cancel();
+			});
+
+			dialog.showModal();
+			ta.focus();
+			ta.select();
+		}
+
 		function activateEditor(td) {
 			if (td.classList.contains('ml-editing')) return;
+
+			// Multi-line subfields (FieldtypeTextarea + the built-in
+			// description) get a modal popup instead of a cramped 3-row
+			// inline textarea — gives the editor real estate for long
+			// descriptions and keeps the table row from jumping.
+			if (td.dataset.input === 'textarea') {
+				return activatePopupEditor(td);
+			}
+
 			td.classList.add('ml-editing');
 
 			var original = td.textContent;
