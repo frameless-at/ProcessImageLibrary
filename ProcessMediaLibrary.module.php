@@ -1314,8 +1314,8 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = [], string $sort = '', string $dir = '', array $tagFilterPool = []): string {
-		$san = $this->wire('sanitizer');
-		$checked = fn($k) => $filters[$k] ? ' checked' : '';
+		$modules = $this->wire('modules');
+		$san     = $this->wire('sanitizer');
 
 		// When the user has filtered to one image field, only show Missing-X
 		// checkboxes for subfields that field actually declares — otherwise
@@ -1324,90 +1324,123 @@ class ProcessMediaLibrary extends Process {
 			$customCols = $this->getCustomByField()[$filters['field']] ?? [];
 		}
 
-		$out  = '<form method="get" class="ml-filter-bar">';
+		/** @var \ProcessWire\InputfieldForm $form */
+		$form = $modules->get('InputfieldForm');
+		$form->method = 'get';
+		$form->action = './';
+		// Keep .ml-filter-bar so the existing JS hooks (submit interceptor,
+		// reset toggle, live visibility) find the form.
+		$form->attr('class', trim($form->attr('class') . ' ml-filter-bar'));
 
-		// Preserve sort state across filter submits: without these hidden
-		// inputs, applying a filter would reset the user's sort to default.
+		// Hidden sort/dir to persist column-sort across filter submits.
 		if ($sort !== '' && $sort !== self::DEFAULT_SORT) {
-			$out .= '<input type="hidden" name="sort" value="' . $san->entities($sort) . '">';
+			$h = $modules->get('InputfieldHidden');
+			$h->name  = 'sort';
+			$h->value = $sort;
+			$form->add($h);
 		}
 		if ($dir === 'desc') {
-			$out .= '<input type="hidden" name="dir" value="desc">';
+			$h = $modules->get('InputfieldHidden');
+			$h->name  = 'dir';
+			$h->value = 'desc';
+			$form->add($h);
 		}
 
-		$out .= '<input type="search" name="q" value="' . $san->entities($filters['q']) . '"'
-			. ' placeholder="' . $san->entities($this->_('Search description, tags, filename')) . '"'
-			. ' class="uk-input uk-form-small ml-filter-q">';
+		// Row 1: q + template + field, 33% each — what the user asked for.
+		$q = $modules->get('InputfieldText');
+		$q->name        = 'q';
+		$q->label       = $this->_('Search');
+		$q->placeholder = $this->_('Description, tags, filename');
+		$q->value       = $filters['q'];
+		$q->columnWidth = 33;
+		$form->add($q);
 
-		$out .= '<select name="template" class="uk-select uk-form-small">';
-		$out .= '<option value="">' . $san->entities($this->_('All templates')) . '</option>';
-		foreach ($eligibleTemplates as $t) {
-			$sel = $filters['template'] === $t ? ' selected' : '';
-			$out .= '<option value="' . $san->entities($t) . '"' . $sel . '>'
-				. $san->entities($t) . '</option>';
-		}
-		$out .= '</select>';
+		$tpl = $modules->get('InputfieldSelect');
+		$tpl->name        = 'template';
+		$tpl->label       = $this->_('Template');
+		$tpl->addOption('', $this->_('All templates'));
+		foreach ($eligibleTemplates as $t) $tpl->addOption($t, $t);
+		$tpl->value       = $filters['template'];
+		$tpl->columnWidth = 33;
+		$form->add($tpl);
 
-		$out .= '<select name="field" class="uk-select uk-form-small">';
-		$out .= '<option value="">' . $san->entities($this->_('All image fields')) . '</option>';
-		foreach ($imageFields as $f) {
-			$sel = $filters['field'] === $f ? ' selected' : '';
-			$out .= '<option value="' . $san->entities($f) . '"' . $sel . '>'
-				. $san->entities($f) . '</option>';
-		}
-		$out .= '</select>';
+		$fld = $modules->get('InputfieldSelect');
+		$fld->name        = 'field';
+		$fld->label       = $this->_('Image field');
+		$fld->addOption('', $this->_('All image fields'));
+		foreach ($imageFields as $f) $fld->addOption($f, $f);
+		$fld->value       = $filters['field'];
+		$fld->columnWidth = 34; // 33+33+34=100
+		$form->add($fld);
 
-		// Tag picker — AND-match against row tags. Collapsible <details>
-		// with one checkbox per used tag. Auto-opens when any tag is
-		// already picked so the user sees what's active.
+		// Tags fieldset (full width, collapsed unless something is active).
 		if ($tagFilterPool) {
 			$selectedTags = $filters['tags'] ?? [];
-			$open = !empty($selectedTags) ? ' open' : '';
-			$summaryText = $selectedTags
+			/** @var \ProcessWire\InputfieldFieldset $fs */
+			$fs = $modules->get('InputfieldFieldset');
+			$fs->label = $selectedTags
 				? sprintf($this->_('Tags (%d)'), count($selectedTags))
 				: $this->_('Tags');
-			$out .= '<details class="ml-filter-tags"' . $open . '>';
-			$out .= '<summary>' . $san->entities($summaryText) . '</summary>';
-			$out .= '<div class="ml-filter-tags-list">';
-			foreach ($tagFilterPool as $t) {
-				$sel = in_array($t, $selectedTags, true) ? ' checked' : '';
-				$out .= '<label><input type="checkbox" name="tags[]" value="'
-					. $san->entities($t) . '"' . $sel . '> '
-					. $san->entities($t) . '</label>';
-			}
-			$out .= '</div></details>';
+			$fs->collapsed   = !empty($selectedTags) ? Inputfield::collapsedNo : Inputfield::collapsedYes;
+			$fs->columnWidth = 100;
+
+			$cbs = $modules->get('InputfieldCheckboxes');
+			$cbs->name        = 'tags';
+			$cbs->label       = $this->_('Active tags');
+			$cbs->skipLabel   = Inputfield::skipLabelHeader;
+			$cbs->optionColumns = 4; // narrow columns, wraps as needed
+			foreach ($tagFilterPool as $t) $cbs->addOption($t, $t);
+			$cbs->value = $selectedTags;
+			$fs->add($cbs);
+
+			$form->add($fs);
 		}
 
-		$out .= '<label class="ml-filter-check">'
-			. '<input type="checkbox" name="no_desc" value="1"' . $checked('no_desc') . '> '
-			. $san->entities($this->_('Missing description')) . '</label>';
-		$out .= '<label class="ml-filter-check">'
-			. '<input type="checkbox" name="no_tags" value="1"' . $checked('no_tags') . '> '
-			. $san->entities($this->_('Missing tags')) . '</label>';
+		// Missing-X + galleries-only — each as InputfieldCheckbox, 25% wide.
+		$missingDef = [
+			'no_desc'        => $this->_('Missing description'),
+			'no_tags'        => $this->_('Missing tags'),
+		];
 		foreach ($customCols as $name) {
-			$key = 'no_custom_' . $name;
-			$on  = !empty($filters['no_custom'][$name]) ? ' checked' : '';
-			$out .= '<label class="ml-filter-check">'
-				. '<input type="checkbox" name="' . $san->entities($key) . '" value="1"' . $on . '> '
-				. $san->entities(sprintf($this->_('Missing %s'), $name)) . '</label>';
+			$missingDef['no_custom_' . $name] = sprintf($this->_('Missing %s'), $name);
 		}
-		$out .= '<label class="ml-filter-check">'
-			. '<input type="checkbox" name="only_galleries" value="1"' . $checked('only_galleries') . '> '
-			. $san->entities($this->_('Galleries only')) . '</label>';
+		$missingDef['only_galleries'] = $this->_('Galleries only');
 
-		$out .= '<button type="submit" class="uk-button uk-button-primary uk-button-small">'
-			. $san->entities($this->_('Apply')) . '</button>';
+		foreach ($missingDef as $name => $label) {
+			$cb = $modules->get('InputfieldCheckbox');
+			$cb->name        = $name;
+			$cb->label       = $label;
+			$cb->columnWidth = 25;
+			// readFilterInput uses bool($input->get(name)); $checked here is
+			// the rendered state, distinct from the boolean filter array.
+			if ($name === 'no_desc'        && !empty($filters['no_desc']))        $cb->attr('checked', 'checked');
+			if ($name === 'no_tags'        && !empty($filters['no_tags']))        $cb->attr('checked', 'checked');
+			if ($name === 'only_galleries' && !empty($filters['only_galleries'])) $cb->attr('checked', 'checked');
+			if (strpos($name, 'no_custom_') === 0) {
+				$key = substr($name, strlen('no_custom_'));
+				if (!empty($filters['no_custom'][$key])) $cb->attr('checked', 'checked');
+			}
+			$form->add($cb);
+		}
 
-		// JS keeps this hidden/visible live as the user toggles inputs; PHP
-		// sets the initial state from the URL filter state so the first
-		// render matches what the JS would compute.
+		// Apply + Reset on the last row. Reset is a real <a href="./"> so
+		// graceful degradation works; JS intercepts it for AJAX reset.
+		$apply = $modules->get('InputfieldSubmit');
+		$apply->name        = 'apply';
+		$apply->value       = $this->_('Apply');
+		$apply->columnWidth = 50;
+		$form->add($apply);
+
 		$initiallyHidden = $this->hasActiveFilter($filters) ? '' : ' hidden';
-		$out .= ' <a href="./" class="uk-button uk-button-default uk-button-small ml-reset"'
+		$reset = $modules->get('InputfieldMarkup');
+		$reset->skipLabel   = Inputfield::skipLabelHeader;
+		$reset->columnWidth = 50;
+		$reset->markup = '<a href="./" class="uk-button uk-button-default uk-button-small ml-reset"'
 			. $initiallyHidden . '>'
 			. $san->entities($this->_('Reset')) . '</a>';
+		$form->add($reset);
 
-		$out .= '</form>';
-		return $out;
+		return $form->render();
 	}
 
 	protected function hasActiveFilter(array $filters): bool {
