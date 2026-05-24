@@ -8,7 +8,7 @@
    layout, spacing and labels; we just trim the default top margin
    so it sits flush with the rest of the page. */
 .ml-filter-bar {
-	margin: 0 0 1rem;
+	margin: 0;
 }
 
 /* Table */
