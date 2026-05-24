@@ -821,6 +821,24 @@
 		});
 		applyColumnVisibility();
 
+		// -- Export link ----------------------------------------------
+		// Server renders the link with the filter URL it knew at
+		// render time, but AJAX filter swaps push new state into
+		// location.search without re-rendering this bar — so we
+		// always rebuild the href from the live URL at click time.
+		// Browser sees Content-Disposition: attachment on the
+		// response and triggers a download without navigating away.
+		var exportLink = document.querySelector('.ml-export-link');
+		if (exportLink) {
+			exportLink.addEventListener('click', function (e) {
+				var base = exportLink.dataset.exportBase
+					|| exportLink.href.split('?')[0];
+				if (!base) return;
+				e.preventDefault();
+				window.location.href = base + (location.search || '');
+			});
+		}
+
 		// -- Import form ----------------------------------------------
 		// Submit via fetch so the user stays on their current filter
 		// view; the import endpoint returns JSON with succeeded /
