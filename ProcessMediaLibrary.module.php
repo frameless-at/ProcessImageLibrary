@@ -1398,10 +1398,12 @@ class ProcessMediaLibrary extends Process {
 		$out .= '<button type="submit" class="uk-button uk-button-primary uk-button-small">'
 			. $san->entities($this->_('Apply')) . '</button>';
 
-		if ($this->hasActiveFilter($filters)) {
-			$out .= ' <a href="./" class="uk-button uk-button-default uk-button-small">'
-				. $san->entities($this->_('Reset')) . '</a>';
-		}
+		// Render unconditionally — the filter bar is server-rendered once
+		// per page load and AJAX submits don't replace it, so hiding it
+		// based on the initial state's hasActiveFilter() leaves it
+		// permanently hidden even after the user adds filters.
+		$out .= ' <a href="./" class="uk-button uk-button-default uk-button-small">'
+			. $san->entities($this->_('Reset')) . '</a>';
 
 		$out .= '</form>';
 		return $out;
