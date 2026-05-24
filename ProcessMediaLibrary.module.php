@@ -1314,6 +1314,9 @@ class ProcessMediaLibrary extends Process {
 			'saveUrl'   => $this->wire('page')->url . 'save/',
 			'renderUrl' => $this->wire('page')->url . 'data/',
 			'bulkUrl'   => $this->wire('page')->url . 'bulk/',
+			// Used to build the page-edit URL for the thumbnail-click
+			// modal — wraps PW's native image editor in an iframe.
+			'adminUrl'  => $config->urls->admin,
 			'tplFields' => $this->getTemplateFieldsMap($imageFields, $eligibleTemplates),
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
@@ -1328,6 +1331,8 @@ class ProcessMediaLibrary extends Process {
 				'replace'          => $this->_('Replace'),
 				'save'             => $this->_('Save'),
 				'cancel'           => $this->_('Cancel'),
+				'close'            => $this->_('Close'),
+				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'batching'         => $this->_('Applying to %d selected…'),
 				'bulkResult'       => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
 				// Field-dropdown label when a template is active — %s is
@@ -1620,7 +1625,12 @@ class ProcessMediaLibrary extends Process {
 				. '<input type="checkbox" class="ml-select-row" data-key="'
 				. $san->entities($selKey) . '"></td>';
 
-			$out .= '<td class="ml-cell-thumb">';
+			// Thumbnail cell becomes clickable when the host page is
+			// editable — JS opens the PW page editor for just this
+			// image field in a modal iframe so the user gets the
+			// native crop / focus / variations UI.
+			$thumbAttrs = !empty($row['pageEditUrl']) ? (' ' . $editAttrs) : '';
+			$out .= '<td class="ml-cell-thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
 				$out .= '<img src="' . $san->entities($row['thumbUrl']) . '"'
 					. ' alt="' . $san->entities($row['basename']) . '"'
