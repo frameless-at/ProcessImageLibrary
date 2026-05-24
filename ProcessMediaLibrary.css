@@ -214,12 +214,21 @@ textarea.ml-cell-input {
 	cursor: pointer;
 }
 
-/* Batch-edit commit buttons (Add / Replace / Cancel). Shown only when
-   the cell being edited belongs to the active selection. */
-.ml-batch-buttons {
+/* Batch-edit mode picker (Add default, Replace). Shown only when the
+   cell being edited belongs to the active selection. Commit happens on
+   blur or click-outside-cell, not on radio click. */
+.ml-batch-mode {
 	display: flex;
-	gap: 6px;
+	gap: 12px;
 	margin-top: 6px;
+	font-size: 0.9em;
+}
+.ml-batch-mode label {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	cursor: pointer;
+	font-weight: normal;
 }
 
 /* Pagination */

@@ -1,7 +1,7 @@
 {
   "name": "ProcessMediaLibrary",
   "title": "Media Library",
-  "version": "0.8.1",
+  "version": "0.8.2",
   "summary": "Central table view of all images across all pages and image fields, with inline metadata editing.",
   "author": "frameless Media",
   "href": "https://github.com/frameless-at/media-library",
