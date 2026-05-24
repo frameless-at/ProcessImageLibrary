@@ -6,7 +6,7 @@ See [MediaLibrary-Konzept.md](MediaLibrary-Konzept.md) for the design document.
 
 ## Status
 
-Phase 9a — work in progress. Smarter tags editor: image fields with `useTags=2` (whitelist) get a checkbox grid that only lets you pick allowed tags, server-validated; `useTags=1` (free-form) gets a text input with native HTML5 autocomplete from already-used tags. AJAX re-render keeps URL state via pushState/popstate. Column-driven sort, inline edit (description, tags, text custom fields), WireCache reads with template-based invalidation, filter bar (search, template / field selects, missing-X toggles, galleries-only). Richer custom-field input types and bulk operations in later phases.
+Phase 10 — work in progress. Bulk operations: checkbox per row, sticky action bar with bulk add-tags / remove-tags / delete, selection survives AJAX re-renders, per-page batching server-side so each page is saved at most once per field touched. Whitelist validation respected on bulk add. Smarter tags editor (whitelist checkboxes / free-form autocomplete), AJAX re-render with pushState/popstate, column-driven sort, inline edit (description, tags, text custom fields), WireCache reads with template-based invalidation, filter bar (search, template / field selects, missing-X toggles, galleries-only). UI polish and richer custom-field input types in later phases.
 
 ## Requirements
 

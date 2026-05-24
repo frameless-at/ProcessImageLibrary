@@ -20,6 +20,7 @@
 		var config = {
 			saveUrl:   pwCfg.saveUrl   || root.dataset.saveUrl   || '',
 			renderUrl: pwCfg.renderUrl || root.dataset.renderUrl || '',
+			bulkUrl:   pwCfg.bulkUrl   || root.dataset.bulkUrl   || '',
 			csrf: pwCfg.csrf || {
 				name:  root.dataset.csrfName  || '',
 				value: root.dataset.csrfValue || ''
@@ -32,7 +33,10 @@
 		var saveQueues = new Map();
 		var results    = root.querySelector('.ml-results');
 		var filterForm = root.querySelector('.ml-filter-bar');
+		var actionBar  = root.querySelector('.ml-action-bar');
 		var isReplacing = false;
+		var isBulking   = false;
+		var selection   = new Set();
 
 		// -- Inline edit ------------------------------------------------
 
@@ -267,6 +271,9 @@
 				return res.text();
 			}).then(function (html) {
 				results.innerHTML = html;
+				// New rows = new checkboxes; restore checked state from the
+				// persistent selection Set so it survives the swap.
+				syncCheckboxes();
 				if (push) {
 					history.pushState({ ml: qs }, '', location.pathname + qs);
 				}
@@ -278,6 +285,122 @@
 			}).finally(function () {
 				results.classList.remove('ml-loading');
 				isReplacing = false;
+			});
+		}
+
+		// -- Bulk selection --------------------------------------------
+
+		function updateActionBar() {
+			if (!actionBar) return;
+			var count = selection.size;
+			var counter = actionBar.querySelector('.ml-selection-count');
+			if (counter) counter.textContent = String(count);
+			actionBar.classList.toggle('ml-active', count > 0);
+			// Sync select-all header checkbox state.
+			var head = results && results.querySelector('.ml-select-all');
+			if (head) {
+				var rows = results.querySelectorAll('.ml-select-row');
+				var checkedRows = results.querySelectorAll('.ml-select-row:checked');
+				head.checked = rows.length > 0 && rows.length === checkedRows.length;
+				head.indeterminate = checkedRows.length > 0 && checkedRows.length < rows.length;
+			}
+		}
+
+		function syncCheckboxes() {
+			if (!results) return;
+			results.querySelectorAll('.ml-select-row').forEach(function (cb) {
+				cb.checked = selection.has(cb.dataset.key);
+			});
+			updateActionBar();
+		}
+
+		function selectionItems() {
+			return Array.from(selection).map(function (key) {
+				var parts = key.split(':');
+				// pageId : fieldName : basename — basename may itself contain
+				// colons in pathological cases, so rejoin the tail.
+				return {
+					pageId:    parts[0],
+					fieldName: parts[1],
+					basename:  parts.slice(2).join(':')
+				};
+			});
+		}
+
+		function runBulk(action, value) {
+			if (isBulking || !config.bulkUrl) return;
+			var items = selectionItems();
+			if (!items.length) return;
+			isBulking = true;
+			actionBar && actionBar.classList.add('ml-busy');
+
+			var fd = new FormData();
+			fd.append('action', action);
+			fd.append('value', value || '');
+			fd.append('items', JSON.stringify(items));
+			if (config.csrf && config.csrf.name) {
+				fd.append(config.csrf.name, config.csrf.value);
+			}
+
+			fetch(config.bulkUrl, {
+				method: 'POST',
+				body: fd,
+				credentials: 'same-origin'
+			}).then(function (res) {
+				return res.json().then(function (data) { return { status: res.status, data: data }; });
+			}).then(function (result) {
+				var d = result.data || {};
+				if (d.ok) {
+					var msg = (labels.bulkResult || 'Succeeded: %1$d  ·  Failed: %2$d')
+						.replace('%1$d', d.succeeded)
+						.replace('%2$d', (d.failed || []).length);
+					if (d.failed && d.failed.length) {
+						msg += '\n\n' + d.failed.join('\n');
+					}
+					alert(msg);
+					selection.clear();
+					updateActionBar();
+					// Re-fetch current view to reflect server-side changes.
+					replaceFromQs(location.search, false);
+				} else {
+					alert(d.error || labels.error || 'Bulk action failed');
+				}
+			}).catch(function (err) {
+				alert((err && err.message) || labels.error || 'Network error');
+			}).finally(function () {
+				isBulking = false;
+				actionBar && actionBar.classList.remove('ml-busy');
+			});
+		}
+
+		if (actionBar) {
+			actionBar.addEventListener('click', function (e) {
+				var btn = e.target.closest && e.target.closest('button[data-action]');
+				if (!btn) return;
+				var action = btn.dataset.action;
+				if (action === 'clear') {
+					selection.clear();
+					syncCheckboxes();
+					return;
+				}
+				if (action === 'add_tags') {
+					var add = prompt(labels.addTagsPrompt || 'Tags to add:');
+					if (add === null || add.trim() === '') return;
+					runBulk('add_tags', add.trim());
+					return;
+				}
+				if (action === 'remove_tags') {
+					var rm = prompt(labels.removeTagsPrompt || 'Tags to remove:');
+					if (rm === null || rm.trim() === '') return;
+					runBulk('remove_tags', rm.trim());
+					return;
+				}
+				if (action === 'delete') {
+					var msg = (labels.deleteConfirm || 'Delete %d image(s)?').replace('%d', selection.size);
+					if (!confirm(msg)) return;
+					runBulk('delete', '');
+					return;
+				}
 			});
 		}
 
@@ -298,6 +421,12 @@
 						replaceFromHref(pagLink.href);
 						return;
 					}
+					// Bulk-selection checkboxes handle their own state via the
+					// change listener below — don't open an editor for them.
+					if (e.target.classList && (
+						e.target.classList.contains('ml-select-row') ||
+						e.target.classList.contains('ml-select-all')
+					)) return;
 					// Editable cell — but ignore clicks that landed on an
 					// internal anchor (e.g. Page-link in the Page column).
 					if (e.target.tagName === 'A' || e.target.closest('a')) return;
@@ -306,6 +435,26 @@
 				if (!td) return;
 				if (td.classList.contains('ml-editing')) return;
 				activateEditor(td);
+			});
+
+			// Checkbox state changes.
+			results.addEventListener('change', function (e) {
+				var t = e.target;
+				if (!t || !t.classList) return;
+				if (t.classList.contains('ml-select-row')) {
+					var key = t.dataset.key;
+					if (t.checked) selection.add(key);
+					else selection.delete(key);
+					updateActionBar();
+				} else if (t.classList.contains('ml-select-all')) {
+					var checked = t.checked;
+					results.querySelectorAll('.ml-select-row').forEach(function (cb) {
+						cb.checked = checked;
+						if (checked) selection.add(cb.dataset.key);
+						else selection.delete(cb.dataset.key);
+					});
+					updateActionBar();
+				}
 			});
 		}
 
@@ -336,6 +485,9 @@
 		window.addEventListener('popstate', function () {
 			replaceFromQs(location.search, false);
 		});
+
+		// Initial state: hide action bar (0 selected) on page load.
+		updateActionBar();
 	}
 
 	if (document.readyState === 'loading') {

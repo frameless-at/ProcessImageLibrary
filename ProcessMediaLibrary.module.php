@@ -90,15 +90,17 @@ class ProcessMediaLibrary extends Process {
 		$session   = $this->wire('session');
 		$sanitizer = $this->wire('sanitizer');
 		$rootAttrs = sprintf(
-			' data-save-url="%s" data-render-url="%s" data-csrf-name="%s" data-csrf-value="%s"',
+			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-csrf-name="%s" data-csrf-value="%s"',
 			$sanitizer->entities($this->wire('page')->url . 'save/'),
 			$sanitizer->entities($this->wire('page')->url . 'data/'),
+			$sanitizer->entities($this->wire('page')->url . 'bulk/'),
 			$sanitizer->entities($session->CSRF->getTokenName()),
 			$sanitizer->entities($session->CSRF->getTokenValue())
 		);
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir);
+		$out .= $this->renderActionBar();
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		$out .= '</div>';
 
@@ -154,6 +156,28 @@ class ProcessMediaLibrary extends Process {
 			sort($keys, SORT_NATURAL | SORT_FLAG_CASE);
 			$out[$f] = $keys;
 		}
+		return $out;
+	}
+
+	/**
+	 * Persistent bulk-action bar between filter bar and results region.
+	 * Hidden via CSS until JS sets .ml-active when at least one row is
+	 * checked. Lives outside .ml-results so it survives AJAX re-renders.
+	 */
+	protected function renderActionBar(): string {
+		$san = $this->wire('sanitizer');
+		$out  = '<div class="ml-action-bar">';
+		$out .= '<span class="ml-action-bar-text"><span class="ml-selection-count">0</span> '
+			. $san->entities($this->_('selected')) . '</span>';
+		$out .= '<button type="button" class="uk-button uk-button-small uk-button-default" data-action="add_tags">'
+			. $san->entities($this->_('Add tags…')) . '</button>';
+		$out .= '<button type="button" class="uk-button uk-button-small uk-button-default" data-action="remove_tags">'
+			. $san->entities($this->_('Remove tags…')) . '</button>';
+		$out .= '<button type="button" class="uk-button uk-button-small uk-button-danger" data-action="delete">'
+			. $san->entities($this->_('Delete')) . '</button>';
+		$out .= '<button type="button" class="uk-button uk-button-small uk-button-default" data-action="clear">'
+			. $san->entities($this->_('Clear')) . '</button>';
+		$out .= '</div>';
 		return $out;
 	}
 
@@ -469,6 +493,161 @@ class ProcessMediaLibrary extends Process {
 	protected function jsonError(string $msg, int $status = 400): string {
 		http_response_code($status);
 		return json_encode(['ok' => false, 'error' => $msg]);
+	}
+
+	/**
+	 * AJAX endpoint: apply a single action to a batch of selected images.
+	 *
+	 * Expects POST with: action (add_tags|remove_tags|set_description|delete),
+	 * items (JSON array of {pageId,fieldName,basename}), value (string —
+	 * empty for delete), plus CSRF token.
+	 *
+	 * Items get grouped by pageId so each page is loaded and saved at most
+	 * once per field touched, regardless of how many images are selected on
+	 * it. Per-page `$page->editable()` is enforced; failures are reported in
+	 * the response rather than aborting the batch.
+	 *
+	 * Returns JSON: { ok, succeeded:int, failed:string[] }.
+	 */
+	public function ___executeBulk() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+
+		$action    = (string) $input->post('action');
+		$value     = (string) $input->post('value');
+		$itemsJson = (string) $input->post('items');
+
+		if (!in_array($action, ['add_tags', 'remove_tags', 'set_description', 'delete'], true)) {
+			return $this->jsonError('Unknown action');
+		}
+		if (in_array($action, ['add_tags', 'remove_tags'], true)) {
+			$tokens = preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			if (!$tokens) return $this->jsonError('No tags specified');
+		}
+
+		$items = json_decode($itemsJson, true);
+		if (!is_array($items) || !$items) {
+			return $this->jsonError('No items selected');
+		}
+
+		// Group by pageId so we save each page at most once per field.
+		$byPage = [];
+		foreach ($items as $item) {
+			$pid = (int) ($item['pageId'] ?? 0);
+			$fn  = $sanitizer->fieldName((string) ($item['fieldName'] ?? ''));
+			$bn  = basename((string) ($item['basename'] ?? ''));
+			if (!$pid || !$fn || !$bn) continue;
+			$byPage[$pid][] = ['fieldName' => $fn, 'basename' => $bn];
+		}
+		if (!$byPage) return $this->jsonError('No valid items');
+
+		$succeeded   = 0;
+		$failed      = [];
+		$tagsCfg     = $this->getTagsConfig();
+		$imageFields = $this->discoverImageFields();
+
+		foreach ($byPage as $pid => $pageItems) {
+			$page = $this->wire('pages')->get($pid);
+			if (!$page->id) {
+				$failed[] = sprintf('Page %d not found', $pid);
+				continue;
+			}
+			if (!$page->editable()) {
+				$failed[] = sprintf('Page %d not editable', $pid);
+				continue;
+			}
+			$page->of(false);
+			$fieldsTouched = [];
+
+			foreach ($pageItems as $it) {
+				$fn = $it['fieldName'];
+				$bn = $it['basename'];
+
+				if (!in_array($fn, $imageFields, true)) {
+					$failed[] = sprintf('Field %s not managed', $fn);
+					continue;
+				}
+
+				$fieldValue = $page->getUnformatted($fn);
+				$img = null;
+				if ($fieldValue instanceof Pageimages) {
+					$img = $fieldValue->getFile($bn);
+				} elseif ($fieldValue instanceof Pageimage) {
+					$img = $fieldValue;
+				}
+				if (!$img instanceof Pageimage) {
+					$failed[] = sprintf('Image %s not found in %d.%s', $bn, $pid, $fn);
+					continue;
+				}
+
+				switch ($action) {
+					case 'add_tags':
+						$tagCfg  = $tagsCfg[$fn] ?? ['mode' => 0, 'allowed' => []];
+						$newTags = preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						if ($tagCfg['mode'] === 2) {
+							$disallowed = array_diff($newTags, $tagCfg['allowed']);
+							if ($disallowed) {
+								$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $disallowed));
+								continue 2;
+							}
+						}
+						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$merged   = array_values(array_unique(array_merge($existing, $newTags)));
+						$img->tags = implode(' ', $merged);
+						$fieldsTouched[$fn] = true;
+						break;
+
+					case 'remove_tags':
+						$rmTags   = preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$kept     = array_values(array_diff($existing, $rmTags));
+						$img->tags = implode(' ', $kept);
+						$fieldsTouched[$fn] = true;
+						break;
+
+					case 'set_description':
+						$img->description = $value;
+						$fieldsTouched[$fn] = true;
+						break;
+
+					case 'delete':
+						if ($fieldValue instanceof Pageimages) {
+							$fieldValue->delete($img);
+						} else {
+							// Single-image field: clear the field value.
+							$page->set($fn, null);
+						}
+						$fieldsTouched[$fn] = true;
+						break;
+				}
+				$succeeded++;
+			}
+
+			foreach (array_keys($fieldsTouched) as $fn) {
+				if (!$page->save($fn)) {
+					$failed[] = sprintf('Save failed: page %d field %s', $pid, $fn);
+				}
+			}
+		}
+
+		return json_encode([
+			'ok'        => true,
+			'succeeded' => $succeeded,
+			'failed'    => $failed,
+		]);
 	}
 
 	/**
@@ -1070,15 +1249,20 @@ class ProcessMediaLibrary extends Process {
 		$config->js('ProcessMediaLibrary', [
 			'saveUrl'   => $this->wire('page')->url . 'save/',
 			'renderUrl' => $this->wire('page')->url . 'data/',
+			'bulkUrl'   => $this->wire('page')->url . 'bulk/',
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
 			],
 			'labels' => [
-				'saving' => $this->_('Saving…'),
-				'saved'  => $this->_('Saved'),
-				'error'  => $this->_('Save failed'),
-				'done'   => $this->_('Done'),
+				'saving'         => $this->_('Saving…'),
+				'saved'          => $this->_('Saved'),
+				'error'          => $this->_('Save failed'),
+				'done'           => $this->_('Done'),
+				'addTagsPrompt'  => $this->_('Tags to add (space-separated):'),
+				'removeTagsPrompt' => $this->_('Tags to remove (space-separated):'),
+				'deleteConfirm'  => $this->_('Delete %d image(s)? This cannot be undone.'),
+				'bulkResult'     => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
 			],
 		]);
 	}
@@ -1196,6 +1380,9 @@ class ProcessMediaLibrary extends Process {
 
 		$out  = '<table class="ml-table uk-table uk-table-divider uk-table-small">';
 		$out .= '<thead><tr>';
+		$out .= '<th class="ml-cell-select">'
+			. '<input type="checkbox" class="ml-select-all" title="'
+			. $san->entities($this->_('Select all on page')) . '"></th>';
 		foreach ($headers as [$label, $sortKey]) {
 			$out .= $this->renderSortableHeader($label, $sortKey, $sort, $dir, $filters, false);
 		}
@@ -1219,7 +1406,17 @@ class ProcessMediaLibrary extends Process {
 				$san->entities((string) $row['basename'])
 			);
 
+			$selKey = sprintf('%d:%s:%s',
+				(int) $row['pageId'],
+				(string) $row['fieldName'],
+				(string) $row['basename']
+			);
+
 			$out .= '<tr>';
+
+			$out .= '<td class="ml-cell-select">'
+				. '<input type="checkbox" class="ml-select-row" data-key="'
+				. $san->entities($selKey) . '"></td>';
 
 			$out .= '<td class="ml-cell-thumb">';
 			if (!empty($row['thumbUrl'])) {
