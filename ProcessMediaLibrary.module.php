@@ -458,6 +458,9 @@ class ProcessMediaLibrary extends Process {
 		if (!$page->save($fieldName)) {
 			return $this->jsonError('Save failed');
 		}
+		// Belt + suspenders: ensure the cache is gone before any subsequent
+		// re-fetch reads it. Matches the behavior in executeBulk.
+		$this->wire('cache')->deleteFor($this);
 
 		// Return the value PW actually stored — may differ from input after
 		// sanitization (e.g. tags lowercased, whitespace normalized, etc.).
@@ -636,6 +639,14 @@ class ProcessMediaLibrary extends Process {
 					$failed[] = sprintf('Save failed: page %d field %s', $pid, $fn);
 				}
 			}
+		}
+
+		// Belt + suspenders: nuke our cache after the batch so the
+		// subsequent /data/ re-fetch definitely sees fresh rows.
+		// (PW's selector-based invalidation should already handle this
+		// for $page->save($fn), but bulk has bitten us with stale reads.)
+		if ($succeeded > 0) {
+			$this->wire('cache')->deleteFor($this);
 		}
 
 		return json_encode([
@@ -1275,6 +1286,13 @@ class ProcessMediaLibrary extends Process {
 		$san = $this->wire('sanitizer');
 		$checked = fn($k) => $filters[$k] ? ' checked' : '';
 
+		// When the user has filtered to one image field, only show Missing-X
+		// checkboxes for subfields that field actually declares — otherwise
+		// the checkbox is dead UI (would always return 0 results).
+		if (!empty($filters['field'])) {
+			$customCols = $this->getCustomByField()[$filters['field']] ?? [];
+		}
+
 		$out  = '<form method="get" class="ml-filter-bar">';
 
 		// Preserve sort state across filter submits: without these hidden
@@ -1360,6 +1378,17 @@ class ProcessMediaLibrary extends Process {
 				. $san->entities($this->_('No images match the current filters.')) . '</p>';
 		}
 
+		// When the user has filtered to one image field, hide columns the
+		// field can't populate: drop the Tags column if useTags is off, and
+		// narrow custom-cols to just that field's declared subfields. With
+		// no field filter, show the full union (default behavior).
+		$showTagsCol = true;
+		if (!empty($filters['field'])) {
+			$fn = $filters['field'];
+			$customCols  = $this->getCustomByField()[$fn] ?? [];
+			$showTagsCol = (($tagsConfig[$fn]['mode'] ?? 0) > 0);
+		}
+
 		// label, sort-key (null = not sortable)
 		$headers = [
 			[$this->_('Thumb'),       null],
@@ -1371,6 +1400,9 @@ class ProcessMediaLibrary extends Process {
 			[$this->_('Dimensions'),  'width'],
 			[$this->_('Size'),        'filesize'],
 		];
+		if (!$showTagsCol) {
+			$headers = array_values(array_filter($headers, fn($h) => $h[1] !== 'tags'));
+		}
 
 		$out  = '<table class="ml-table uk-table uk-table-divider uk-table-small">';
 		$out .= '<thead><tr>';
@@ -1434,19 +1466,21 @@ class ProcessMediaLibrary extends Process {
 			$out .= '<td class="ml-cell-desc ml-cell-editable" ' . $editAttrs
 				. ' data-subfield="description" data-input="textarea">'
 				. $san->entities($desc) . '</td>';
-			$tagCfg     = $tagsConfig[$row['fieldName']] ?? ['mode' => 0, 'allowed' => []];
-			$tagAttrs   = ' data-tags-mode="' . (int) $tagCfg['mode'] . '"';
-			if ($tagCfg['mode'] === 2) {
-				$tagAttrs .= " data-tags-allowed='" . $san->entities(
-					json_encode(array_values($tagCfg['allowed']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-				) . "'";
-			} elseif ($tagCfg['mode'] === 1) {
-				$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
-					. $san->entities((string) $row['fieldName']) . '"';
+			if ($showTagsCol) {
+				$tagCfg     = $tagsConfig[$row['fieldName']] ?? ['mode' => 0, 'allowed' => []];
+				$tagAttrs   = ' data-tags-mode="' . (int) $tagCfg['mode'] . '"';
+				if ($tagCfg['mode'] === 2) {
+					$tagAttrs .= " data-tags-allowed='" . $san->entities(
+						json_encode(array_values($tagCfg['allowed']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+					) . "'";
+				} elseif ($tagCfg['mode'] === 1) {
+					$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
+						. $san->entities((string) $row['fieldName']) . '"';
+				}
+				$out .= '<td class="ml-cell-tags ml-cell-editable" ' . $editAttrs
+					. ' data-subfield="tags" data-input="text"' . $tagAttrs . '>'
+					. $san->entities($tags) . '</td>';
 			}
-			$out .= '<td class="ml-cell-tags ml-cell-editable" ' . $editAttrs
-				. ' data-subfield="tags" data-input="text"' . $tagAttrs . '>'
-				. $san->entities($tags) . '</td>';
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($size) . '</td>';
 
