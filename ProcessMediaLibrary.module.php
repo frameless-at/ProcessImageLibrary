@@ -817,6 +817,30 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
+	 * For each eligible template, which managed image fields it actually
+	 * contains. The filter-bar JS uses this to narrow the field dropdown
+	 * live when the user picks a template — without a server round-trip.
+	 *
+	 * @param array<int,string> $imageFields
+	 * @param array<int,string> $eligibleTemplates
+	 * @return array<string,array<int,string>> templateName => [fieldName, …]
+	 */
+	protected function getTemplateFieldsMap(array $imageFields, array $eligibleTemplates): array {
+		$fieldSet = array_flip($imageFields);
+		$map = [];
+		foreach ($eligibleTemplates as $tname) {
+			$tpl = $this->wire('templates')->get($tname);
+			if (!$tpl) continue;
+			$fields = [];
+			foreach ($tpl->fieldgroup as $f) {
+				if (isset($fieldSet[$f->name])) $fields[] = $f->name;
+			}
+			$map[$tname] = $fields;
+		}
+		return $map;
+	}
+
+	/**
 	 * Returns the subfield names defined on the field-{name} custom template,
 	 * empty if no custom fields are configured for the given image field.
 	 *
@@ -1282,10 +1306,15 @@ class ProcessMediaLibrary extends Process {
 		$version = $this->wire('modules')->getModuleInfoProperty($this, 'version');
 		$config->styles->add($baseUrl . 'ProcessMediaLibrary.css?v=' . $version);
 		$config->scripts->add($baseUrl . 'ProcessMediaLibrary.js?v=' . $version);
+
+		$imageFields = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+
 		$config->js('ProcessMediaLibrary', [
 			'saveUrl'   => $this->wire('page')->url . 'save/',
 			'renderUrl' => $this->wire('page')->url . 'data/',
 			'bulkUrl'   => $this->wire('page')->url . 'bulk/',
+			'tplFields' => $this->getTemplateFieldsMap($imageFields, $eligibleTemplates),
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
@@ -1315,7 +1344,6 @@ class ProcessMediaLibrary extends Process {
 
 	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = [], string $sort = '', string $dir = '', array $tagFilterPool = []): string {
 		$modules = $this->wire('modules');
-		$san     = $this->wire('sanitizer');
 
 		// When the user has filtered to one image field, only show Missing-X
 		// checkboxes for subfields that field actually declares — otherwise
@@ -1324,15 +1352,18 @@ class ProcessMediaLibrary extends Process {
 			$customCols = $this->getCustomByField()[$filters['field']] ?? [];
 		}
 
+		$active = $this->hasActiveFilter($filters);
+
 		/** @var \ProcessWire\InputfieldForm $form */
 		$form = $modules->get('InputfieldForm');
 		$form->method = 'get';
 		$form->action = './';
-		// Keep .ml-filter-bar so the existing JS hooks (submit interceptor,
-		// reset toggle, live visibility) find the form.
+		// Keep .ml-filter-bar so the JS submit interceptor + reset clearer
+		// + live reset-visibility find the form.
 		$form->attr('class', trim($form->attr('class') . ' ml-filter-bar'));
 
-		// Hidden sort/dir to persist column-sort across filter submits.
+		// Hidden sort/dir — at form level so they're never inside the
+		// (collapsible) outer fieldset and always submit cleanly.
 		if ($sort !== '' && $sort !== self::DEFAULT_SORT) {
 			$h = $modules->get('InputfieldHidden');
 			$h->name  = 'sort';
@@ -1346,14 +1377,23 @@ class ProcessMediaLibrary extends Process {
 			$form->add($h);
 		}
 
-		// Row 1: q + template + field, 33% each — what the user asked for.
+		// Outer "Filters" fieldset wraps everything. Collapsed by default;
+		// auto-opens on initial render when any filter is active so the
+		// user immediately sees what's filtering the view.
+		/** @var \ProcessWire\InputfieldFieldset $outer */
+		$outer = $modules->get('InputfieldFieldset');
+		$outer->name      = 'mlFilters';
+		$outer->label     = $this->_('Filters');
+		$outer->collapsed = $active ? Inputfield::collapsedNo : Inputfield::collapsedYes;
+
+		// Row 1: q + template + field, 33% each.
 		$q = $modules->get('InputfieldText');
 		$q->name        = 'q';
 		$q->label       = $this->_('Search');
 		$q->placeholder = $this->_('Description, tags, filename');
 		$q->value       = $filters['q'];
 		$q->columnWidth = 33;
-		$form->add($q);
+		$outer->add($q);
 
 		$tpl = $modules->get('InputfieldSelect');
 		$tpl->name        = 'template';
@@ -1362,7 +1402,7 @@ class ProcessMediaLibrary extends Process {
 		foreach ($eligibleTemplates as $t) $tpl->addOption($t, $t);
 		$tpl->value       = $filters['template'];
 		$tpl->columnWidth = 33;
-		$form->add($tpl);
+		$outer->add($tpl);
 
 		$fld = $modules->get('InputfieldSelect');
 		$fld->name        = 'field';
@@ -1371,35 +1411,35 @@ class ProcessMediaLibrary extends Process {
 		foreach ($imageFields as $f) $fld->addOption($f, $f);
 		$fld->value       = $filters['field'];
 		$fld->columnWidth = 34; // 33+33+34=100
-		$form->add($fld);
+		$outer->add($fld);
 
 		// Tags fieldset (full width, collapsed unless something is active).
 		if ($tagFilterPool) {
 			$selectedTags = $filters['tags'] ?? [];
-			/** @var \ProcessWire\InputfieldFieldset $fs */
-			$fs = $modules->get('InputfieldFieldset');
-			$fs->label = $selectedTags
+			/** @var \ProcessWire\InputfieldFieldset $tagsFs */
+			$tagsFs = $modules->get('InputfieldFieldset');
+			$tagsFs->label = $selectedTags
 				? sprintf($this->_('Tags (%d)'), count($selectedTags))
 				: $this->_('Tags');
-			$fs->collapsed   = !empty($selectedTags) ? Inputfield::collapsedNo : Inputfield::collapsedYes;
-			$fs->columnWidth = 100;
+			$tagsFs->collapsed   = !empty($selectedTags) ? Inputfield::collapsedNo : Inputfield::collapsedYes;
+			$tagsFs->columnWidth = 100;
 
 			$cbs = $modules->get('InputfieldCheckboxes');
 			$cbs->name        = 'tags';
 			$cbs->label       = $this->_('Active tags');
 			$cbs->skipLabel   = Inputfield::skipLabelHeader;
-			$cbs->optionColumns = 4; // narrow columns, wraps as needed
+			$cbs->optionColumns = 4;
 			foreach ($tagFilterPool as $t) $cbs->addOption($t, $t);
 			$cbs->value = $selectedTags;
-			$fs->add($cbs);
+			$tagsFs->add($cbs);
 
-			$form->add($fs);
+			$outer->add($tagsFs);
 		}
 
 		// Missing-X + galleries-only — each as InputfieldCheckbox, 25% wide.
 		$missingDef = [
-			'no_desc'        => $this->_('Missing description'),
-			'no_tags'        => $this->_('Missing tags'),
+			'no_desc' => $this->_('Missing description'),
+			'no_tags' => $this->_('Missing tags'),
 		];
 		foreach ($customCols as $name) {
 			$missingDef['no_custom_' . $name] = sprintf($this->_('Missing %s'), $name);
@@ -1411,8 +1451,6 @@ class ProcessMediaLibrary extends Process {
 			$cb->name        = $name;
 			$cb->label       = $label;
 			$cb->columnWidth = 25;
-			// readFilterInput uses bool($input->get(name)); $checked here is
-			// the rendered state, distinct from the boolean filter array.
 			if ($name === 'no_desc'        && !empty($filters['no_desc']))        $cb->attr('checked', 'checked');
 			if ($name === 'no_tags'        && !empty($filters['no_tags']))        $cb->attr('checked', 'checked');
 			if ($name === 'only_galleries' && !empty($filters['only_galleries'])) $cb->attr('checked', 'checked');
@@ -1420,25 +1458,28 @@ class ProcessMediaLibrary extends Process {
 				$key = substr($name, strlen('no_custom_'));
 				if (!empty($filters['no_custom'][$key])) $cb->attr('checked', 'checked');
 			}
-			$form->add($cb);
+			$outer->add($cb);
 		}
 
-		// Apply + Reset on the last row. Reset is a real <a href="./"> so
-		// graceful degradation works; JS intercepts it for AJAX reset.
+		// Apply + Reset, side by side. Reset is a real <a> via
+		// InputfieldButton(href=…) so graceful degradation works; JS
+		// intercepts the click for AJAX reset. .ml-reset stays a hook for
+		// the JS visibility toggle and click handler.
 		$apply = $modules->get('InputfieldSubmit');
 		$apply->name        = 'apply';
 		$apply->value       = $this->_('Apply');
 		$apply->columnWidth = 50;
-		$form->add($apply);
+		$outer->add($apply);
 
-		$initiallyHidden = $this->hasActiveFilter($filters) ? '' : ' hidden';
-		$reset = $modules->get('InputfieldMarkup');
-		$reset->skipLabel   = Inputfield::skipLabelHeader;
+		$reset = $modules->get('InputfieldButton');
+		$reset->name        = 'reset';
+		$reset->value       = $this->_('Reset');
+		$reset->attr('href', './');
+		$reset->addClass('ml-reset');
 		$reset->columnWidth = 50;
-		$reset->markup = '<a href="./" class="uk-button uk-button-default uk-button-small ml-reset"'
-			. $initiallyHidden . '>'
-			. $san->entities($this->_('Reset')) . '</a>';
-		$form->add($reset);
+		$outer->add($reset);
+
+		$form->add($outer);
 
 		return $form->render();
 	}
