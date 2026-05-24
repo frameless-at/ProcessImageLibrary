@@ -404,24 +404,9 @@
 			actionBar.addEventListener('click', function (e) {
 				var btn = e.target.closest && e.target.closest('button[data-action]');
 				if (!btn) return;
-				var action = btn.dataset.action;
-				if (action === 'clear') {
+				if (btn.dataset.action === 'clear') {
 					selection.clear();
 					syncCheckboxes();
-					return;
-				}
-				if (action === 'delete') {
-					var msg = (labels.deleteConfirm || 'Delete %d image(s)?').replace('%d', selection.size);
-					if (!confirm(msg)) return;
-					runBulk('delete', {}).then(function (result) {
-						if (reportBulk(result)) {
-							selection.clear();
-							updateActionBar();
-							replaceFromQs(location.search, false);
-						}
-					}).catch(function (err) {
-						alert((err && err.message) || labels.error || 'Network error');
-					});
 				}
 			});
 		}
@@ -502,10 +487,22 @@
 			});
 
 			// "Reset" is an <a href="./">; intercept so it clears via AJAX too.
+			// Also wipe the form's visible state — form.reset() goes back to
+			// the values present at page load, which here ARE the user's
+			// active filters, so we have to clear inputs manually.
 			filterForm.addEventListener('click', function (e) {
 				var reset = e.target.closest && e.target.closest('a[href="./"]');
 				if (!reset) return;
 				e.preventDefault();
+				filterForm.querySelectorAll('input[type="search"], input[type="text"], input[type="hidden"]').forEach(function (i) {
+					i.value = '';
+				});
+				filterForm.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(function (i) {
+					i.checked = false;
+				});
+				filterForm.querySelectorAll('select').forEach(function (s) {
+					s.selectedIndex = 0;
+				});
 				replaceFromQs('', true);
 			});
 		}
