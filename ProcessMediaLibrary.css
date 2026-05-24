@@ -4,33 +4,11 @@
 	margin: 0 0 1rem;
 }
 
-/* Filter bar */
+/* Filter bar — InputfieldForm-rendered. The admin theme handles
+   layout, spacing and labels; we just trim the default top margin
+   so it sits flush with the rest of the page. */
 .ml-filter-bar {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
-	align-items: center;
 	margin: 0 0 1rem;
-	padding: 0.75rem;
-	background: #f5f5f5;
-	border: 1px solid #e5e5e5;
-	border-radius: 3px;
-}
-.ml-filter-bar > * {
-	margin: 0;
-}
-.ml-filter-q {
-	min-width: 16rem;
-	flex: 1 1 auto;
-}
-.ml-filter-check {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.35rem;
-	white-space: nowrap;
-}
-.ml-filter-check input {
-	margin: 0;
 }
 
 /* Table */
@@ -183,44 +161,6 @@ textarea.ml-cell-input {
 	align-self: flex-start;
 	padding: 2px 10px;
 	cursor: pointer;
-}
-
-/* Tag filter: collapsible <details> with one checkbox per used tag.
-   AND-match against row tags. */
-.ml-filter-tags > summary {
-	cursor: pointer;
-	padding: 4px 8px;
-	background: #f5f5f5;
-	border: 1px solid #ddd;
-	border-radius: 2px;
-	user-select: none;
-	font-size: 0.9em;
-}
-.ml-filter-tags > summary:hover {
-	background: #ececec;
-}
-.ml-filter-tags[open] > summary {
-	margin-bottom: 4px;
-}
-.ml-filter-tags-list {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 4px 12px;
-	padding: 6px 8px;
-	background: #fff;
-	border: 1px solid #ddd;
-	border-radius: 2px;
-	max-height: 12rem;
-	overflow-y: auto;
-}
-.ml-filter-tags-list label {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	white-space: nowrap;
-	cursor: pointer;
-	font-weight: normal;
-	font-size: 0.9em;
 }
 
 /* Batch-edit mode picker (Add default, Replace). Shown only when the
