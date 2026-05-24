@@ -6,7 +6,7 @@ See [MediaLibrary-Konzept.md](MediaLibrary-Konzept.md) for the design document.
 
 ## Status
 
-Phase 10 — work in progress. Bulk operations: checkbox per row, sticky action bar with bulk add-tags / remove-tags / delete, selection survives AJAX re-renders, per-page batching server-side so each page is saved at most once per field touched. Whitelist validation respected on bulk add. Smarter tags editor (whitelist checkboxes / free-form autocomplete), AJAX re-render with pushState/popstate, column-driven sort, inline edit (description, tags, text custom fields), WireCache reads with template-based invalidation, filter bar (search, template / field selects, missing-X toggles, galleries-only). UI polish and richer custom-field input types in later phases.
+Phase 10b — work in progress. Bulk edit as paintbrush: tick rows, then edit any cell on a selected row — the change broadcasts to all selected rows via the same widget (whitelist tags, free-form tags with autocomplete, text, textarea). Delete remains as an explicit action with confirm. Per-page batching server-side so each page is saved at most once per field touched. Whitelist validation respected per item. AJAX re-render with pushState/popstate, column-driven sort, inline edit (description, tags, text custom fields), WireCache reads with template-based invalidation, filter bar (search, template / field selects, missing-X toggles, galleries-only). UI polish in a combined later pass.
 
 ## Requirements
 
