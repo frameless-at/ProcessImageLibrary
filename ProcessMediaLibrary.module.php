@@ -1643,19 +1643,31 @@ class ProcessMediaLibrary extends Process {
 				. ' data-subfield="description" data-input="textarea">'
 				. $san->entities($desc) . '</td>';
 			if ($showTagsCol) {
-				$tagCfg     = $tagsConfig[$row['fieldName']] ?? ['mode' => 0, 'allowed' => []];
-				$tagAttrs   = ' data-tags-mode="' . (int) $tagCfg['mode'] . '"';
-				if ($tagCfg['mode'] === 2) {
-					$tagAttrs .= " data-tags-allowed='" . $san->entities(
-						json_encode(array_values($tagCfg['allowed']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-					) . "'";
-				} elseif ($tagCfg['mode'] === 1) {
-					$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
-						. $san->entities((string) $row['fieldName']) . '"';
+				$tagCfg = $tagsConfig[$row['fieldName']] ?? ['mode' => 0, 'allowed' => []];
+				if ((int) $tagCfg['mode'] === 0) {
+					// Image field has useTags=0 — tags column shows because
+					// some OTHER image field in the union has tags on. This
+					// row's cell can't be edited; render as N/A to match
+					// the custom-field "not configured" treatment.
+					$out .= '<td class="ml-cell-na" title="'
+						. $san->entities(sprintf(
+							$this->_('tags is not configured on %s'),
+							(string) $row['fieldName']
+						)) . '">—</td>';
+				} else {
+					$tagAttrs = ' data-tags-mode="' . (int) $tagCfg['mode'] . '"';
+					if ($tagCfg['mode'] === 2) {
+						$tagAttrs .= " data-tags-allowed='" . $san->entities(
+							json_encode(array_values($tagCfg['allowed']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+						) . "'";
+					} elseif ($tagCfg['mode'] === 1) {
+						$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
+							. $san->entities((string) $row['fieldName']) . '"';
+					}
+					$out .= '<td class="ml-cell-tags ml-cell-editable" ' . $editAttrs
+						. ' data-subfield="tags" data-input="text"' . $tagAttrs . '>'
+						. $san->entities($tags) . '</td>';
 				}
-				$out .= '<td class="ml-cell-tags ml-cell-editable" ' . $editAttrs
-					. ' data-subfield="tags" data-input="text"' . $tagAttrs . '>'
-					. $san->entities($tags) . '</td>';
 			}
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($size) . '</td>';

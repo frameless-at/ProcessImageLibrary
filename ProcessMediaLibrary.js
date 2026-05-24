@@ -68,125 +68,6 @@
 			setTimeout(function () { td.classList.remove(cls); }, 1200);
 		}
 
-		// Build the editor widget for a cell based on its subfield and tags
-		// mode. Returns { element, getValue, focus, bindCommit }.
-		function buildEditorWidget(td, original) {
-			var subfield = td.dataset.subfield;
-			var tagsMode = parseInt(td.dataset.tagsMode || '0', 10);
-
-			if (subfield === 'tags' && tagsMode === 2) {
-				return buildTagCheckboxEditor(td, original);
-			}
-			if (subfield === 'tags' && tagsMode === 1) {
-				return buildTextEditor(td, original, 'text', td.dataset.tagsListId || '');
-			}
-			var inputType = td.dataset.input === 'textarea' ? 'textarea' : 'text';
-			return buildTextEditor(td, original, inputType, '');
-		}
-
-		function buildTextEditor(td, original, inputType, datalistId) {
-			var editor = document.createElement(inputType === 'textarea' ? 'textarea' : 'input');
-			if (inputType === 'text') editor.type = 'text';
-			if (inputType === 'textarea') editor.rows = 3;
-			editor.value = original;
-			editor.className = 'ml-cell-input';
-			if (datalistId) editor.setAttribute('list', datalistId);
-
-			return {
-				element: editor,
-				getValue: function () { return editor.value; },
-				focus: function () { editor.focus(); editor.select(); },
-				bindCommit: function (commit, cancel, batch) {
-					editor.addEventListener('keydown', function (e) {
-						if (e.key === 'Escape') {
-							e.preventDefault();
-							cancel();
-						} else if (!batch && e.key === 'Enter') {
-							if (inputType === 'text' || e.ctrlKey || e.metaKey) {
-								e.preventDefault();
-								commit();
-							}
-						}
-					});
-					// In batch mode the explicit Add/Replace/Cancel buttons
-					// drive commit — blur must not auto-fire.
-					if (!batch) editor.addEventListener('blur', commit);
-				}
-			};
-		}
-
-		function buildTagCheckboxEditor(td, original) {
-			var allowed = [];
-			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
-			catch (e) { allowed = []; }
-
-			var current = original.split(/\s+/).filter(Boolean);
-			var currentSet = {};
-			current.forEach(function (t) { currentSet[t] = true; });
-
-			var wrap = document.createElement('div');
-			wrap.className = 'ml-tag-editor';
-
-			var list = document.createElement('div');
-			list.className = 'ml-tag-editor-list';
-			wrap.appendChild(list);
-
-			allowed.forEach(function (tag) {
-				var label = document.createElement('label');
-				var cb = document.createElement('input');
-				cb.type = 'checkbox';
-				cb.value = tag;
-				cb.checked = !!currentSet[tag];
-				label.appendChild(cb);
-				label.appendChild(document.createTextNode(' ' + tag));
-				list.appendChild(label);
-			});
-
-			var done = document.createElement('button');
-			done.type = 'button';
-			done.className = 'ml-tag-editor-done';
-			done.textContent = labels.done || 'Done';
-			wrap.appendChild(done);
-
-			return {
-				element: wrap,
-				getValue: function () {
-					var sel = wrap.querySelectorAll('input[type="checkbox"]:checked');
-					return Array.prototype.map.call(sel, function (cb) { return cb.value; }).join(' ');
-				},
-				focus: function () {
-					var first = wrap.querySelector('input[type="checkbox"]');
-					if (first) first.focus();
-				},
-				bindCommit: function (commit, cancel, batch) {
-					wrap.addEventListener('keydown', function (e) {
-						if (e.key === 'Escape') { e.preventDefault(); cancel(); }
-						else if (!batch && e.key === 'Enter') { e.preventDefault(); commit(); }
-					});
-					if (batch) {
-						// Batch mode: hide Done; Add/Replace buttons outside
-						// the widget drive commit, click-outside doesn't.
-						done.style.display = 'none';
-					} else {
-						done.addEventListener('click', function (e) {
-							e.preventDefault();
-							commit();
-						});
-						// Click outside the editor commits. Capture phase + microtask
-						// so the click that opened the editor doesn't fire this.
-						setTimeout(function () {
-							document.addEventListener('click', function onOutside(e) {
-								if (!wrap.contains(e.target)) {
-									document.removeEventListener('click', onOutside, true);
-									commit();
-								}
-							}, true);
-						}, 0);
-					}
-				}
-			};
-		}
-
 		// Column header text for the cell, used as the popup dialog's
 		// label. Falls back to the raw subfield name if the <th> isn't
 		// findable (defensive — shouldn't happen with the current table).
@@ -199,18 +80,98 @@
 			return th ? th.textContent.trim() : (td.dataset.subfield || '');
 		}
 
-		// Popup editor for textarea-typed subfields. Mirrors
-		// activateEditor's commit semantics (single-save vs batch
-		// Add/Replace) but hosts the textarea + controls inside a
-		// native <dialog> so the user gets a real editing canvas. The
-		// table cell stays read-only behind the modal and updates
-		// optimistically when the user saves.
-		function activatePopupEditor(td) {
+		// Build the in-popup editor widget for a cell, dispatching by
+		// subfield + tags mode + input type. Returns
+		// { element, getValue, focus }. The popup container handles save /
+		// cancel / batch radios so widgets only care about their own value.
+		function buildPopupWidget(td, original) {
+			var subfield = td.dataset.subfield;
+			var tagsMode = parseInt(td.dataset.tagsMode || '0', 10);
+
+			if (subfield === 'tags' && tagsMode === 2) {
+				return buildPopupCheckboxes(td, original);
+			}
+			if (subfield === 'tags' && tagsMode === 1) {
+				return buildPopupTextInput(original, td.dataset.tagsListId || '');
+			}
+			if (td.dataset.input === 'textarea') {
+				return buildPopupTextarea(original);
+			}
+			return buildPopupTextInput(original, '');
+		}
+
+		function buildPopupTextarea(original) {
+			var ta = document.createElement('textarea');
+			ta.value = original;
+			ta.rows = 12;
+			return {
+				element: ta,
+				getValue: function () { return ta.value; },
+				focus:    function () { ta.focus(); ta.select(); }
+			};
+		}
+
+		function buildPopupTextInput(original, datalistId) {
+			var input = document.createElement('input');
+			input.type = 'text';
+			input.value = original;
+			input.className = 'ml-popup-input';
+			if (datalistId) input.setAttribute('list', datalistId);
+			return {
+				element: input,
+				getValue: function () { return input.value; },
+				focus:    function () { input.focus(); input.select(); }
+			};
+		}
+
+		function buildPopupCheckboxes(td, original) {
+			var allowed = [];
+			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
+			catch (e) { allowed = []; }
+
+			var currentSet = Object.create(null);
+			original.split(/\s+/).filter(Boolean).forEach(function (t) {
+				currentSet[t] = true;
+			});
+
+			var wrap = document.createElement('div');
+			wrap.className = 'ml-popup-tag-list';
+			allowed.forEach(function (tag) {
+				var label = document.createElement('label');
+				var cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.value = tag;
+				cb.checked = !!currentSet[tag];
+				label.appendChild(cb);
+				label.appendChild(document.createTextNode(' ' + tag));
+				wrap.appendChild(label);
+			});
+
+			return {
+				element: wrap,
+				getValue: function () {
+					var sel = wrap.querySelectorAll('input[type="checkbox"]:checked');
+					return Array.prototype.map.call(sel, function (cb) { return cb.value; }).join(' ');
+				},
+				focus: function () {
+					var first = wrap.querySelector('input[type="checkbox"]');
+					if (first) first.focus();
+				}
+			};
+		}
+
+		// All cell edits run through one popup. The native <dialog>
+		// gives a roomy editing canvas regardless of subfield type
+		// (textarea, single-line text, whitelisted-tag checkboxes) and
+		// keeps the table row from shifting under the user. Esc and
+		// backdrop click dismiss; Save commits.
+		function activateEditor(td) {
 			if (td.classList.contains('ml-editing')) return;
 			td.classList.add('ml-editing');
 
 			var original = td.textContent;
 			var batch    = isBatchEdit(td);
+			var widget   = buildPopupWidget(td, original);
 
 			var dialog = document.createElement('dialog');
 			dialog.className = 'ml-popup-editor';
@@ -219,10 +180,7 @@
 			header.textContent = columnLabelFor(td);
 			dialog.appendChild(header);
 
-			var ta = document.createElement('textarea');
-			ta.value = original;
-			ta.rows = 12;
-			dialog.appendChild(ta);
+			dialog.appendChild(widget.element);
 
 			var batchBar = null;
 			function getBatchMode() {
@@ -233,12 +191,12 @@
 			if (batch) {
 				batchBar = document.createElement('div');
 				batchBar.className = 'ml-batch-mode';
-				var name = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
+				var radioName = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
 				['add', 'replace'].forEach(function (mode) {
 					var lbl = document.createElement('label');
 					var rb = document.createElement('input');
 					rb.type = 'radio';
-					rb.name = name;
+					rb.name = radioName;
 					rb.value = mode;
 					if (mode === 'add') rb.checked = true;
 					lbl.appendChild(rb);
@@ -253,8 +211,7 @@
 			var footer = document.createElement('footer');
 			var cancelBtn = document.createElement('button');
 			cancelBtn.type = 'button';
-			// PW admin theme is UIkit — match the rest of the admin chrome
-			// (Apply / Reset buttons in the filter bar use these classes).
+			// Match the rest of the admin chrome — PW admin is UIkit.
 			cancelBtn.className = 'ml-popup-cancel uk-button uk-button-default uk-button-small';
 			cancelBtn.textContent = labels.cancel || 'Cancel';
 			var saveBtn = document.createElement('button');
@@ -284,16 +241,26 @@
 			function commit(mode) {
 				if (committed) return;
 				committed = true;
-				var newValue = ta.value;
+				var newValue = widget.getValue();
 
 				if (batch) {
 					var sendValue = newValue;
 					if ((mode || 'replace') === 'add') {
-						// For textarea Add: strip the editor's starting prefix
-						// so the broadcast carries only the new tail. If the
-						// user edited mid-string, ship the full value as a
-						// safe fallback.
-						if (newValue.indexOf(original) === 0) {
+						if (td.dataset.subfield === 'tags') {
+							// Tag Add: ship only the delta vs. starting set
+							// so we don't broadcast pre-existing tags back
+							// to siblings. Server unions anyway, but this
+							// keeps the payload honest.
+							var origToks = original.split(/\s+/).filter(Boolean);
+							var newToks  = newValue.split(/\s+/).filter(Boolean);
+							var origSet  = Object.create(null);
+							origToks.forEach(function (t) { origSet[t] = true; });
+							sendValue = newToks.filter(function (t) { return !origSet[t]; }).join(' ');
+						} else if (newValue.indexOf(original) === 0) {
+							// Text / textarea Add: strip the editor's
+							// starting prefix so only the new tail goes
+							// out. If the user edited mid-string, ship
+							// the full value as a safe fallback.
 							sendValue = newValue.substring(original.length).replace(/^\s+/, '');
 						}
 						if (sendValue === '') { teardown(); return; }
@@ -361,225 +328,25 @@
 			cancelBtn.addEventListener('click', cancel);
 			saveBtn.addEventListener('click', function () { commit(getBatchMode()); });
 
-			ta.addEventListener('keydown', function (e) {
-				if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-					e.preventDefault();
-					commit(getBatchMode());
-				}
+			// Enter commits — except inside a <textarea>, where plain
+			// Enter inserts a newline and only Ctrl/Cmd+Enter saves.
+			dialog.addEventListener('keydown', function (e) {
+				if (e.key !== 'Enter') return;
+				var inTextarea = e.target && e.target.tagName === 'TEXTAREA';
+				if (inTextarea && !(e.ctrlKey || e.metaKey)) return;
+				e.preventDefault();
+				commit(getBatchMode());
 			});
 
-			// Native <dialog> fires "close" on Esc and on dialog.close().
-			// Treat any non-committed close as cancel so the cell never
-			// gets stuck in ml-editing.
+			// Native <dialog> fires "close" on Esc + dialog.close(). Any
+			// non-committed close is a cancel so the cell can't get
+			// stuck in ml-editing.
 			dialog.addEventListener('close', function () {
 				if (!committed) cancel();
 			});
 
 			dialog.showModal();
-			ta.focus();
-			ta.select();
-		}
-
-		function activateEditor(td) {
-			if (td.classList.contains('ml-editing')) return;
-
-			// Multi-line subfields (FieldtypeTextarea + the built-in
-			// description) get a modal popup instead of a cramped 3-row
-			// inline textarea — gives the editor real estate for long
-			// descriptions and keeps the table row from jumping.
-			if (td.dataset.input === 'textarea') {
-				return activatePopupEditor(td);
-			}
-
-			td.classList.add('ml-editing');
-
-			var original = td.textContent;
-			var widget   = buildEditorWidget(td, original);
-			var batch    = isBatchEdit(td);
-
-			td.textContent = '';
-			td.appendChild(widget.element);
-
-			// In batch mode, show two radios (Add default, Replace) under
-			// the editor. Commit fires on blur or click-outside the cell
-			// using the currently-selected mode. Esc cancels.
-			var batchBar = null;
-			function getBatchMode() {
-				if (!batchBar) return 'replace';
-				var cb = batchBar.querySelector('input[type="radio"]:checked');
-				return cb ? cb.value : 'add';
-			}
-			if (batch) {
-				batchBar = document.createElement('div');
-				batchBar.className = 'ml-batch-mode';
-				var name = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
-				var addLabel = document.createElement('label');
-				var addRadio = document.createElement('input');
-				addRadio.type = 'radio';
-				addRadio.name = name;
-				addRadio.value = 'add';
-				addRadio.checked = true;
-				addLabel.appendChild(addRadio);
-				addLabel.appendChild(document.createTextNode(' ' + (labels.add || 'Add')));
-
-				var repLabel = document.createElement('label');
-				var repRadio = document.createElement('input');
-				repRadio.type = 'radio';
-				repRadio.name = name;
-				repRadio.value = 'replace';
-				repLabel.appendChild(repRadio);
-				repLabel.appendChild(document.createTextNode(' ' + (labels.replace || 'Replace')));
-
-				batchBar.appendChild(addLabel);
-				batchBar.appendChild(repLabel);
-				td.appendChild(batchBar);
-
-				// Suppress the focus shift on radio clicks so the editor's
-				// blur doesn't fire when the user just wants to switch mode.
-				// Safari nulls e.relatedTarget on blur, so the relatedTarget
-				// guard below isn't reliable on its own. preventDefault on
-				// mousedown cancels the focus behavior; the subsequent click
-				// still toggles the radio.
-				batchBar.addEventListener('mousedown', function (e) { e.preventDefault(); });
-			}
-
-			setTimeout(widget.focus, 0);
-
-			var committed = false;
-
-			function cancel() {
-				if (committed) return;
-				committed = true;
-				td.classList.remove('ml-editing');
-				td.textContent = original;
-			}
-
-			function commit(mode) {
-				if (committed) return;
-				committed = true;
-				var newValue = widget.getValue();
-				td.classList.remove('ml-editing');
-
-				if (batch) {
-					// Add mode: send only what's NEW vs the editor's starting
-					// value so we don't broadcast the edited row's pre-existing
-					// content to siblings. Replace mode sends the full value.
-					var sendValue = newValue;
-					if ((mode || 'replace') === 'add') {
-						if (td.dataset.subfield === 'tags') {
-							var origToks = original.split(/\s+/).filter(Boolean);
-							var newToks  = newValue.split(/\s+/).filter(Boolean);
-							var origSet  = Object.create(null);
-							origToks.forEach(function (t) { origSet[t] = true; });
-							sendValue = newToks.filter(function (t) { return !origSet[t]; }).join(' ');
-						} else {
-							// Text / textarea: the common case is "user typed
-							// more at the end", so strip the original prefix
-							// when present. If they edited mid-string, fall
-							// through with the full value.
-							if (newValue.indexOf(original) === 0) {
-								sendValue = newValue.substring(original.length).replace(/^\s+/, '');
-							}
-						}
-						if (sendValue === '') {
-							// Nothing new to apply — close cleanly without
-							// touching anything.
-							td.textContent = original;
-							return;
-						}
-					}
-
-					td.textContent = '…';
-					td.classList.add('ml-cell-saving');
-					runBulk('set', {
-						subfield: td.dataset.subfield,
-						value:    sendValue,
-						mode:     mode || 'replace'
-					}).then(function (result) {
-						var ok = reportBulk(result);
-						replaceFromQs(location.search, false);
-						if (!ok && td.isConnected) {
-							td.textContent = original;
-							flashCell(td, false);
-						}
-					}).catch(function (err) {
-						if (!td.isConnected) return;
-						td.classList.remove('ml-cell-saving');
-						td.textContent = original;
-						td.title = (err && err.message) || labels.error || 'Network error';
-						flashCell(td, false);
-					});
-					return;
-				}
-
-				if (newValue === original) {
-					td.textContent = original;
-					return;
-				}
-
-				td.textContent = newValue;
-				td.classList.add('ml-cell-saving');
-				td.title = labels.saving || 'Saving…';
-
-				enqueueSave(td.dataset.pageId, function () {
-					return postSave({
-						pageId:    td.dataset.pageId,
-						fieldName: td.dataset.field,
-						basename:  td.dataset.basename,
-						subfield:  td.dataset.subfield,
-						value:     newValue
-					});
-				}).then(function (result) {
-					if (!td.isConnected) return;
-					td.classList.remove('ml-cell-saving');
-					if (result && result.data && result.data.ok) {
-						td.textContent = result.data.value;
-						td.title = '';
-						flashCell(td, true);
-					} else {
-						td.textContent = original;
-						td.title = (result && result.data && result.data.error) || labels.error || 'Save failed';
-						flashCell(td, false);
-					}
-				}).catch(function (err) {
-					if (!td.isConnected) return;
-					td.classList.remove('ml-cell-saving');
-					td.textContent = original;
-					td.title = (err && err.message) || labels.error || 'Network error';
-					flashCell(td, false);
-				});
-			}
-
-			if (batch) {
-				// Widget only handles Esc-to-cancel in batch mode.
-				widget.bindCommit(function () {}, cancel, true);
-
-				// Blur on a text-style editor commits — unless focus moved
-				// to another element inside this cell (radio button click).
-				if (widget.element.tagName !== 'DIV') {
-					widget.element.addEventListener('blur', function (e) {
-						if (committed) return;
-						if (e.relatedTarget && td.contains(e.relatedTarget)) return;
-						commit(getBatchMode());
-					});
-				}
-				// Click outside the cell also commits. Capture phase + microtask
-				// so the click that opened the editor doesn't trigger this.
-				setTimeout(function () {
-					document.addEventListener('click', function onOutside(e) {
-						if (committed) {
-							document.removeEventListener('click', onOutside, true);
-							return;
-						}
-						if (!td.contains(e.target)) {
-							document.removeEventListener('click', onOutside, true);
-							commit(getBatchMode());
-						}
-					}, true);
-				}, 0);
-			} else {
-				widget.bindCommit(function () { commit(); }, cancel, false);
-			}
+			widget.focus();
 		}
 
 		// -- AJAX re-render --------------------------------------------
