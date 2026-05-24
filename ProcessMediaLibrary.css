@@ -153,35 +153,6 @@ textarea.ml-cell-input {
 	cursor: pointer;
 }
 
-/* Action bar: shown only when .ml-active (≥1 selected). Sticks to the
-   top of the scroll container so it stays reachable on long lists. */
-.ml-action-bar {
-	display: none;
-	align-items: center;
-	gap: 8px;
-	padding: 8px 10px;
-	margin: 8px 0;
-	background: #e3edf9;
-	border: 1px solid #c0d1e5;
-	border-radius: 2px;
-	position: sticky;
-	top: 0;
-	z-index: 10;
-}
-.ml-action-bar.ml-active {
-	display: flex;
-}
-.ml-action-bar.ml-busy {
-	opacity: 0.6;
-	pointer-events: none;
-}
-.ml-action-bar-text {
-	margin-right: auto;
-}
-.ml-selection-count {
-	font-weight: bold;
-}
-
 /* Tag editor — checkbox grid for useTags=2 whitelist mode. */
 .ml-tag-editor {
 	display: flex;

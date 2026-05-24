@@ -100,7 +100,6 @@ class ProcessMediaLibrary extends Process {
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir);
-		$out .= $this->renderActionBar();
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		$out .= '</div>';
 
@@ -156,23 +155,6 @@ class ProcessMediaLibrary extends Process {
 			sort($keys, SORT_NATURAL | SORT_FLAG_CASE);
 			$out[$f] = $keys;
 		}
-		return $out;
-	}
-
-	/**
-	 * Persistent bulk-action bar between filter bar and results region.
-	 * Hidden via CSS until JS sets .ml-active when at least one row is
-	 * checked. Lives outside .ml-results so it survives AJAX re-renders.
-	 */
-	protected function renderActionBar(): string {
-		$san = $this->wire('sanitizer');
-		$out  = '<div class="ml-action-bar">';
-		$out .= '<span class="ml-action-bar-text"><span class="ml-selection-count">0</span> '
-			. $san->entities($this->_('selected — edits on a selected row apply to all'))
-			. '</span>';
-		$out .= '<button type="button" class="uk-button uk-button-small uk-button-default" data-action="clear">'
-			. $san->entities($this->_('Clear')) . '</button>';
-		$out .= '</div>';
 		return $out;
 	}
 
@@ -1274,8 +1256,8 @@ class ProcessMediaLibrary extends Process {
 				'saved'      => $this->_('Saved'),
 				'error'      => $this->_('Save failed'),
 				'done'       => $this->_('Done'),
-				'addN'       => $this->_('Add to %d'),
-				'replaceN'   => $this->_('Replace in %d'),
+				'add'        => $this->_('Add'),
+				'replace'    => $this->_('Replace'),
 				'batching'   => $this->_('Applying to %d selected…'),
 				'bulkResult' => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
 			],

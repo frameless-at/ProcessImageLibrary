@@ -33,7 +33,6 @@
 		var saveQueues = new Map();
 		var results    = root.querySelector('.ml-results');
 		var filterForm = root.querySelector('.ml-filter-bar');
-		var actionBar  = root.querySelector('.ml-action-bar');
 		var isReplacing = false;
 		var isBulking   = false;
 		var selection   = new Set();
@@ -218,7 +217,7 @@
 				addRadio.value = 'add';
 				addRadio.checked = true;
 				addLabel.appendChild(addRadio);
-				addLabel.appendChild(document.createTextNode(' ' + (labels.addN || 'Add to %d').replace('%d', selection.size)));
+				addLabel.appendChild(document.createTextNode(' ' + (labels.add || 'Add')));
 
 				var repLabel = document.createElement('label');
 				var repRadio = document.createElement('input');
@@ -226,7 +225,7 @@
 				repRadio.name = name;
 				repRadio.value = 'replace';
 				repLabel.appendChild(repRadio);
-				repLabel.appendChild(document.createTextNode(' ' + (labels.replaceN || 'Replace in %d').replace('%d', selection.size)));
+				repLabel.appendChild(document.createTextNode(' ' + (labels.replace || 'Replace')));
 
 				batchBar.appendChild(addLabel);
 				batchBar.appendChild(repLabel);
@@ -287,7 +286,7 @@
 						}
 					}
 
-					td.textContent = (labels.batching || 'Applying to %d…').replace('%d', selection.size);
+					td.textContent = '…';
 					td.classList.add('ml-cell-saving');
 					runBulk('set', {
 						subfield: td.dataset.subfield,
@@ -424,20 +423,14 @@
 
 		// -- Bulk selection --------------------------------------------
 
-		function updateActionBar() {
-			if (!actionBar) return;
-			var count = selection.size;
-			var counter = actionBar.querySelector('.ml-selection-count');
-			if (counter) counter.textContent = String(count);
-			actionBar.classList.toggle('ml-active', count > 0);
-			// Sync select-all header checkbox state.
-			var head = results && results.querySelector('.ml-select-all');
-			if (head) {
-				var rows = results.querySelectorAll('.ml-select-row');
-				var checkedRows = results.querySelectorAll('.ml-select-row:checked');
-				head.checked = rows.length > 0 && rows.length === checkedRows.length;
-				head.indeterminate = checkedRows.length > 0 && checkedRows.length < rows.length;
-			}
+		function syncSelectAllHeader() {
+			if (!results) return;
+			var head = results.querySelector('.ml-select-all');
+			if (!head) return;
+			var rows = results.querySelectorAll('.ml-select-row');
+			var checkedRows = results.querySelectorAll('.ml-select-row:checked');
+			head.checked = rows.length > 0 && rows.length === checkedRows.length;
+			head.indeterminate = checkedRows.length > 0 && checkedRows.length < rows.length;
 		}
 
 		function syncCheckboxes() {
@@ -445,7 +438,7 @@
 			results.querySelectorAll('.ml-select-row').forEach(function (cb) {
 				cb.checked = selection.has(cb.dataset.key);
 			});
-			updateActionBar();
+			syncSelectAllHeader();
 		}
 
 		function selectionItems() {
@@ -466,7 +459,6 @@
 			var items = selectionItems();
 			if (!items.length) return Promise.reject(new Error('empty selection'));
 			isBulking = true;
-			actionBar && actionBar.classList.add('ml-busy');
 
 			var fd = new FormData();
 			fd.append('action', action);
@@ -484,7 +476,6 @@
 				return res.json().then(function (data) { return { status: res.status, data: data }; });
 			}).finally(function () {
 				isBulking = false;
-				actionBar && actionBar.classList.remove('ml-busy');
 			});
 		}
 
@@ -502,17 +493,6 @@
 				alert(msg + '\n\n' + d.failed.join('\n'));
 			}
 			return true;
-		}
-
-		if (actionBar) {
-			actionBar.addEventListener('click', function (e) {
-				var btn = e.target.closest && e.target.closest('button[data-action]');
-				if (!btn) return;
-				if (btn.dataset.action === 'clear') {
-					selection.clear();
-					syncCheckboxes();
-				}
-			});
 		}
 
 		function rowKey(td) {
@@ -564,7 +544,7 @@
 					var key = t.dataset.key;
 					if (t.checked) selection.add(key);
 					else selection.delete(key);
-					updateActionBar();
+					syncSelectAllHeader();
 				} else if (t.classList.contains('ml-select-all')) {
 					var checked = t.checked;
 					results.querySelectorAll('.ml-select-row').forEach(function (cb) {
@@ -572,7 +552,7 @@
 						if (checked) selection.add(cb.dataset.key);
 						else selection.delete(cb.dataset.key);
 					});
-					updateActionBar();
+					syncSelectAllHeader();
 				}
 			});
 		}
@@ -616,9 +596,6 @@
 		window.addEventListener('popstate', function () {
 			replaceFromQs(location.search, false);
 		});
-
-		// Initial state: hide action bar (0 selected) on page load.
-		updateActionBar();
 	}
 
 	if (document.readyState === 'loading') {
