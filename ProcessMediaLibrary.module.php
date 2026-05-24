@@ -1628,8 +1628,15 @@ class ProcessMediaLibrary extends Process {
 			// Thumbnail cell becomes clickable when the host page is
 			// editable — JS opens the PW page editor for just this
 			// image field in a modal iframe so the user gets the
-			// native crop / focus / variations UI.
-			$thumbAttrs = !empty($row['pageEditUrl']) ? (' ' . $editAttrs) : '';
+			// native crop / focus / variations UI. The file-hash
+			// (md5 of basename, matching Pagefile::hash()) lets the
+			// iframe filter find the matching gridImage via id
+			// selector instead of string-matching URLs.
+			$thumbAttrs = '';
+			if (!empty($row['pageEditUrl'])) {
+				$thumbAttrs = ' ' . $editAttrs
+					. ' data-file-hash="' . md5((string) $row['basename']) . '"';
+			}
 			$out .= '<td class="ml-cell-thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
 				$out .= '<img src="' . $san->entities($row['thumbUrl']) . '"'
