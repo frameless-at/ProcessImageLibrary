@@ -152,10 +152,55 @@ class ProcessMediaLibrary extends Process {
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
+		$out .= $this->renderColumnsBar($customCols);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		$out .= '</div>';
 
 		return $out;
+	}
+
+	/**
+	 * Render a collapsed "Columns" fieldset with a checkbox per
+	 * toggleable table column. All checkboxes default to checked;
+	 * client-side JS restores user preferences from localStorage and
+	 * toggles cell visibility via [data-col] attributes. State lives
+	 * client-side so flipping a checkbox doesn't round-trip to the
+	 * server or reset filters.
+	 *
+	 * @param array<int,string> $customCols
+	 */
+	protected function renderColumnsBar(array $customCols): string {
+		$san = $this->wire('sanitizer');
+		$builtIn = [
+			'thumb'       => $this->_('Thumb'),
+			'page'        => $this->_('Page'),
+			'field'       => $this->_('Field'),
+			'filename'    => $this->_('Filename'),
+			'description' => $this->_('Description'),
+			'tags'        => $this->_('Tags'),
+			'dimensions'  => $this->_('Dimensions'),
+			'size'        => $this->_('Size'),
+		];
+		$cols = $builtIn;
+		foreach ($customCols as $name) {
+			$cols['custom:' . $name] = $name;
+		}
+		$items = '';
+		foreach ($cols as $key => $label) {
+			$items .= '<li><label>'
+				. '<input type="checkbox" class="ml-col-toggle" data-col="'
+				. $san->entities($key) . '" checked>'
+				. ' ' . $san->entities($label)
+				. '</label></li>';
+		}
+		// Match PW admin's collapsible-fieldset markup so the admin
+		// theme's InputfieldStateToggle JS handles open/close for us.
+		return '<div class="Inputfield InputfieldFieldset InputfieldStateCollapsed ml-columns-bar">'
+			. '<label class="InputfieldHeader InputfieldStateToggle">'
+			. $san->entities($this->_('Columns')) . '</label>'
+			. '<div class="InputfieldContent">'
+			. '<ul class="ml-columns-list">' . $items . '</ul>'
+			. '</div></div>';
 	}
 
 	/**
@@ -182,9 +227,11 @@ class ProcessMediaLibrary extends Process {
 		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
 		$slice      = $this->hydrateSlice($slice);
 
-		return $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
+		$pager = $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir);
+		return $pager
+			. $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
 			. $this->renderTagDatalists($usedTags)
-			. $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir);
+			. $pager;
 	}
 
 	/**
@@ -1618,19 +1665,22 @@ class ProcessMediaLibrary extends Process {
 			$showTagsCol = (($tagsConfig[$fn]['mode'] ?? 0) > 0);
 		}
 
-		// label, sort-key (null = not sortable)
+		// col-key, label, sort-key (null = not sortable). The col-key
+		// drives the data-col attribute on <th> + every matching <td>,
+		// which the Columns toggles in the filter bar use to show /
+		// hide whole columns client-side.
 		$headers = [
-			[$this->_('Thumb'),       null],
-			[$this->_('Page'),        'pageTitle'],
-			[$this->_('Field'),       'fieldName'],
-			[$this->_('Filename'),    'basename'],
-			[$this->_('Description'), 'description'],
-			[$this->_('Tags'),        'tags'],
-			[$this->_('Dimensions'),  'width'],
-			[$this->_('Size'),        'filesize'],
+			['thumb',       $this->_('Thumb'),       null],
+			['page',        $this->_('Page'),        'pageTitle'],
+			['field',       $this->_('Field'),       'fieldName'],
+			['filename',    $this->_('Filename'),    'basename'],
+			['description', $this->_('Description'), 'description'],
+			['tags',        $this->_('Tags'),        'tags'],
+			['dimensions',  $this->_('Dimensions'),  'width'],
+			['size',        $this->_('Size'),        'filesize'],
 		];
 		if (!$showTagsCol) {
-			$headers = array_values(array_filter($headers, fn($h) => $h[1] !== 'tags'));
+			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
 		}
 
 		$out  = '<table class="ml-table uk-table uk-table-divider uk-table-small">';
@@ -1638,11 +1688,11 @@ class ProcessMediaLibrary extends Process {
 		$out .= '<th class="ml-cell-select">'
 			. '<input type="checkbox" class="ml-select-all" title="'
 			. $san->entities($this->_('Select all on page')) . '"></th>';
-		foreach ($headers as [$label, $sortKey]) {
-			$out .= $this->renderSortableHeader($label, $sortKey, $sort, $dir, $filters, false);
+		foreach ($headers as [$colKey, $label, $sortKey]) {
+			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters, false);
 		}
 		foreach ($customCols as $name) {
-			$out .= $this->renderSortableHeader($name, 'custom:' . $name, $sort, $dir, $filters, true);
+			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters, true);
 		}
 		$out .= '</tr></thead><tbody>';
 
@@ -1685,7 +1735,7 @@ class ProcessMediaLibrary extends Process {
 				$thumbAttrs = ' ' . $editAttrs
 					. ' data-file-hash="' . md5((string) $row['basename']) . '"';
 			}
-			$out .= '<td class="ml-cell-thumb"' . $thumbAttrs . '>';
+			$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
 				$out .= '<img src="' . $san->entities($row['thumbUrl']) . '"'
 					. ' alt="' . $san->entities($row['basename']) . '"'
@@ -1693,7 +1743,7 @@ class ProcessMediaLibrary extends Process {
 			}
 			$out .= '</td>';
 
-			$out .= '<td class="ml-cell-page">';
+			$out .= '<td class="ml-cell-page" data-col="page">';
 			if (!empty($row['pageEditUrl'])) {
 				$out .= '<a href="' . $san->entities($row['pageEditUrl']) . '">'
 					. $san->entities((string) $row['pageTitle']) . '</a>';
@@ -1702,9 +1752,9 @@ class ProcessMediaLibrary extends Process {
 			}
 			$out .= '</td>';
 
-			$out .= '<td><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
-			$out .= '<td><code>' . $san->entities((string) $row['basename']) . '</code></td>';
-			$out .= '<td class="ml-cell-desc ml-cell-editable" ' . $editAttrs
+			$out .= '<td data-col="field"><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
+			$out .= '<td data-col="filename"><code>' . $san->entities((string) $row['basename']) . '</code></td>';
+			$out .= '<td class="ml-cell-desc ml-cell-editable" data-col="description" ' . $editAttrs
 				. ' data-subfield="description" data-input="textarea">'
 				. $san->entities($desc) . '</td>';
 			if ($showTagsCol) {
@@ -1714,7 +1764,7 @@ class ProcessMediaLibrary extends Process {
 					// some OTHER image field in the union has tags on. This
 					// row's cell can't be edited; render as N/A to match
 					// the custom-field "not configured" treatment.
-					$out .= '<td class="ml-cell-na" title="'
+					$out .= '<td class="ml-cell-na" data-col="tags" title="'
 						. $san->entities(sprintf(
 							$this->_('tags is not configured on %s'),
 							(string) $row['fieldName']
@@ -1729,23 +1779,24 @@ class ProcessMediaLibrary extends Process {
 						$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
 							. $san->entities((string) $row['fieldName']) . '"';
 					}
-					$out .= '<td class="ml-cell-tags ml-cell-editable" ' . $editAttrs
+					$out .= '<td class="ml-cell-tags ml-cell-editable" data-col="tags" ' . $editAttrs
 						. ' data-subfield="tags" data-input="text"' . $tagAttrs . '>'
 						. $san->entities($tags) . '</td>';
 				}
 			}
-			$out .= '<td class="ml-cell-nowrap">' . $san->entities($dims) . '</td>';
-			$out .= '<td class="ml-cell-nowrap">' . $san->entities($size) . '</td>';
+			$out .= '<td class="ml-cell-nowrap" data-col="dimensions">' . $san->entities($dims) . '</td>';
+			$out .= '<td class="ml-cell-nowrap" data-col="size">' . $san->entities($size) . '</td>';
 
 			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
+				$colAttr = ' data-col="custom:' . $san->entities($name) . '"';
 				// When the customCols list is the union across image
 				// fields (no field filter), some rows won't host every
 				// listed subfield — render those as visually disabled
 				// instead of editable so a click can't trigger an editor
 				// for a field the server would reject anyway.
 				if (!in_array($name, $rowCustoms, true)) {
-					$out .= '<td class="ml-cell-na" title="'
+					$out .= '<td class="ml-cell-na"' . $colAttr . ' title="'
 						. $san->entities(sprintf(
 							$this->_('%1$s is not configured on %2$s'),
 							$name,
@@ -1756,7 +1807,7 @@ class ProcessMediaLibrary extends Process {
 				$val = $row['custom'][$name] ?? '';
 				if (is_array($val)) $val = json_encode($val);
 				$inputType = $customInputTypes[$name] ?? 'text';
-				$out .= '<td class="ml-cell-editable" ' . $editAttrs
+				$out .= '<td class="ml-cell-editable"' . $colAttr . ' ' . $editAttrs
 					. ' data-subfield="' . $san->entities($name) . '"'
 					. ' data-input="' . $san->entities($inputType) . '">'
 					. $san->entities((string) $val) . '</td>';
@@ -1775,14 +1826,15 @@ class ProcessMediaLibrary extends Process {
 	 * (asc → desc → asc) while preserving the current filters. Custom-column
 	 * headers wrap the label in <code> like before.
 	 */
-	protected function renderSortableHeader(string $label, ?string $sortKey, string $currentSort, string $currentDir, array $filters, bool $codeLabel): string {
+	protected function renderSortableHeader(string $colKey, string $label, ?string $sortKey, string $currentSort, string $currentDir, array $filters, bool $codeLabel): string {
 		$san = $this->wire('sanitizer');
+		$colAttr = ' data-col="' . $san->entities($colKey) . '"';
 		$labelHtml = $codeLabel
 			? '<code>' . $san->entities($label) . '</code>'
 			: $san->entities($label);
 
 		if ($sortKey === null) {
-			return '<th>' . $labelHtml . '</th>';
+			return '<th' . $colAttr . '>' . $labelHtml . '</th>';
 		}
 
 		$isActive = $currentSort === $sortKey;
@@ -1797,7 +1849,7 @@ class ProcessMediaLibrary extends Process {
 			$inner .= ' <span class="ml-sort-arrow">' . $arrow . '</span>';
 		}
 
-		return '<th class="' . $cls . '">'
+		return '<th class="' . $cls . '"' . $colAttr . '>'
 			. '<a href="' . $san->entities($href) . '">' . $inner . '</a>'
 			. '</th>';
 	}

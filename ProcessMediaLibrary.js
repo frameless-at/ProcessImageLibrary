@@ -479,6 +479,9 @@
 				// New rows = new checkboxes; restore checked state from the
 				// persistent selection Set so it survives the swap.
 				syncCheckboxes();
+				// New cells = lost ml-col-hidden classes; re-apply the
+				// user's column visibility prefs to the swapped DOM.
+				if (root._mlApplyColumnVisibility) root._mlApplyColumnVisibility();
 				if (push) {
 					history.pushState({ ml: qs }, '', location.pathname + qs);
 				}
@@ -770,11 +773,55 @@
 			});
 		}
 
+		// -- Column visibility toggle ----------------------------------
+		// State lives in localStorage, scoped to the install. The
+		// server renders every checkbox checked + every cell visible,
+		// so on first load with no stored state the table looks the
+		// same as before. Checking/unchecking a Columns-fieldset box
+		// toggles every <th>/<td>[data-col="X"] in the document via a
+		// single class; re-applied after each AJAX results swap so
+		// the user's preference survives filter/sort/pagination.
+		var COLUMNS_STORAGE_KEY = 'ml-columns-v1';
+		var columnsState = {};
+		try {
+			var stored = localStorage.getItem(COLUMNS_STORAGE_KEY);
+			if (stored) columnsState = JSON.parse(stored) || {};
+		} catch (e) { columnsState = {}; }
+
+		function applyColumnVisibility() {
+			var cells = document.querySelectorAll('[data-col]');
+			Array.prototype.forEach.call(cells, function (cell) {
+				var hidden = columnsState[cell.dataset.col] === false;
+				cell.classList.toggle('ml-col-hidden', hidden);
+			});
+		}
+
+		function saveColumnsState() {
+			try { localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(columnsState)); }
+			catch (e) {}
+		}
+
+		var colToggles = document.querySelectorAll('.ml-col-toggle');
+		Array.prototype.forEach.call(colToggles, function (cb) {
+			var col = cb.dataset.col;
+			if (columnsState[col] === false) cb.checked = false;
+			cb.addEventListener('change', function () {
+				columnsState[col] = cb.checked;
+				saveColumnsState();
+				applyColumnVisibility();
+			});
+		});
+		applyColumnVisibility();
+
 		// -- Browser back/forward --------------------------------------
 
 		window.addEventListener('popstate', function () {
 			replaceFromQs(location.search, false);
 		});
+
+		// Expose applyColumnVisibility for replaceFromQs to call after
+		// it swaps results.innerHTML with freshly-rendered cells.
+		root._mlApplyColumnVisibility = applyColumnVisibility;
 	}
 
 	if (document.readyState === 'loading') {

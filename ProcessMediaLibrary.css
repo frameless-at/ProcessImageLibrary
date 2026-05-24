@@ -284,6 +284,35 @@ textarea.ml-cell-input {
 	background: #f5f5f5;
 }
 
+/* Columns toggle — collapsible fieldset of checkboxes below the
+   filter bar that controls which table columns render. CSS hides
+   matching [data-col] cells; state lives in localStorage. */
+.ml-col-hidden {
+	display: none !important;
+}
+.ml-columns-bar {
+	margin-bottom: 0.75rem;
+}
+.ml-columns-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: 0.25rem 0.75rem;
+}
+.ml-columns-list label {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	cursor: pointer;
+	padding: 0.2rem 0.3rem;
+	border-radius: 2px;
+}
+.ml-columns-list label:hover {
+	background: #f5f5f5;
+}
+
 /* Image-editor modal — wraps PW's ProcessPageEdit in an iframe so
    the user gets the native crop / focus / variations UI plus all
    page-level field editing. Sized near-fullscreen to give the
