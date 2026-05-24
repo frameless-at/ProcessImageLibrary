@@ -350,14 +350,14 @@
 			widget.focus();
 		}
 
-		// Open PW's per-file edit dialog in a modal iframe. PW exposes
-		// this at /processwire/page/image/edit/ — it's the same
-		// endpoint InputfieldImage uses for its own gear-click edit
-		// modal (see getEditUrl() in core InputfieldImage.module). The
-		// "file" param is the composite "<pageId>,<basename>"; rte=0
-		// disables the rich-text-editor mode so we get the plain
-		// editor (crop / variations / focus / description / customs)
-		// instead of the CKEditor insert flow.
+		// Open PW's per-file crop/edit dialog in a modal iframe. URL
+		// pattern matches InputfieldImage.module's getEditUrl()
+		// exactly — that's the URL the core Crop button uses, so this
+		// gets us the same drag-to-crop UI for the single image.
+		// "file" is the composite "<pageId>,<basename>" PW expects;
+		// rte=0 selects the plain editor (not the CKEditor flow).
+		// Do NOT add modal=1 here — it puts ProcessPageEditImageSelect
+		// into a different render path and the crop tool disappears.
 		function openImageEditor(td) {
 			if (!config.adminUrl) return;
 			var pageId    = td.dataset.pageId;
@@ -368,9 +368,9 @@
 			var url = config.adminUrl + 'page/image/edit/'
 				+ '?id=' + encodeURIComponent(pageId)
 				+ '&file=' + encodeURIComponent(pageId + ',' + basename)
-				+ '&field=' + encodeURIComponent(fieldName)
 				+ '&rte=0'
-				+ '&modal=1';
+				+ '&field=' + encodeURIComponent(fieldName)
+				+ '&version=0';
 
 			var dialog = document.createElement('dialog');
 			dialog.className = 'ml-image-modal';
