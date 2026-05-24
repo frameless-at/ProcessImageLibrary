@@ -350,42 +350,26 @@
 			widget.focus();
 		}
 
-		// Locate the InputfieldImage list item that represents the
-		// given basename inside the loaded page-edit iframe. PW has
-		// shipped a few different markup conventions for the image
-		// grid (gridImage vs InputfieldFileItem, with data-href or
-		// data-basename or neither), so this tries them in order and
-		// falls back to a substring match against any <img src>.
-		function findImageItem(doc, basename) {
-			var direct = doc.querySelector(
-				'[data-basename="' + basename + '"], ' +
-				'[data-href$="/' + basename + '"]'
-			);
-			if (direct) return direct.closest('.gridImage, .InputfieldFileItem') || direct;
-			var imgs = doc.querySelectorAll('.gridImage img, .InputfieldFileItem img');
-			for (var i = 0; i < imgs.length; i++) {
-				if (imgs[i].src.indexOf(basename) !== -1) {
-					return imgs[i].closest('.gridImage, .InputfieldFileItem') || imgs[i];
-				}
-			}
-			return null;
-		}
-
-		// Open PW's page editor for a single image field in a modal
-		// iframe — the user gets the native crop / focus / variations
-		// UI plus all the page-level metadata fields. modal=1 strips
-		// admin chrome; fields=<imageField> narrows the form to just
-		// the relevant field. We always refresh the table on close
-		// since we can't reliably detect "did the user save".
+		// Open PW's per-file edit dialog in a modal iframe. PW exposes
+		// this at /processwire/page/image/edit/ — it's the same
+		// endpoint InputfieldImage uses for its own gear-click edit
+		// modal (see getEditUrl() in core InputfieldImage.module). The
+		// "file" param is the composite "<pageId>,<basename>"; rte=0
+		// disables the rich-text-editor mode so we get the plain
+		// editor (crop / variations / focus / description / customs)
+		// instead of the CKEditor insert flow.
 		function openImageEditor(td) {
 			if (!config.adminUrl) return;
 			var pageId    = td.dataset.pageId;
 			var fieldName = td.dataset.field;
 			var basename  = td.dataset.basename || '';
-			if (!pageId || !fieldName) return;
+			if (!pageId || !fieldName || !basename) return;
 
-			var url = config.adminUrl + 'page/edit/?id=' + encodeURIComponent(pageId)
-				+ '&fields=' + encodeURIComponent(fieldName)
+			var url = config.adminUrl + 'page/image/edit/'
+				+ '?id=' + encodeURIComponent(pageId)
+				+ '&file=' + encodeURIComponent(pageId + ',' + basename)
+				+ '&field=' + encodeURIComponent(fieldName)
+				+ '&rte=0'
 				+ '&modal=1';
 
 			var dialog = document.createElement('dialog');
@@ -407,34 +391,6 @@
 			var iframe = document.createElement('iframe');
 			iframe.src = url;
 			iframe.className = 'ml-image-modal-iframe';
-
-			// PW's "fields=" filter narrows the form to one image field,
-			// but a field is a collection — the form still shows every
-			// file. After load, find the file the user clicked, scroll
-			// it into view, and flash an outline so they don't have to
-			// scan a long list. Same-origin so DOM access is fine;
-			// guarded with try/catch in case PW renames things in a
-			// future version.
-			iframe.addEventListener('load', function () {
-				if (!basename) return;
-				try {
-					var doc = iframe.contentDocument;
-					if (!doc) return;
-					var target = findImageItem(doc, basename);
-					if (!target) return;
-					target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-					var prevOutline = target.style.outline;
-					var prevOffset  = target.style.outlineOffset;
-					target.style.outline = '3px solid #5b8cd6';
-					target.style.outlineOffset = '4px';
-					setTimeout(function () {
-						target.style.outline = prevOutline;
-						target.style.outlineOffset = prevOffset;
-					}, 2500);
-				} catch (e) {
-					// Cross-origin guard — shouldn't trip for same-origin admin.
-				}
-			});
 
 			dialog.appendChild(bar);
 			dialog.appendChild(iframe);
