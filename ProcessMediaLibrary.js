@@ -21,6 +21,7 @@
 			saveUrl:   pwCfg.saveUrl   || root.dataset.saveUrl   || '',
 			renderUrl: pwCfg.renderUrl || root.dataset.renderUrl || '',
 			bulkUrl:   pwCfg.bulkUrl   || root.dataset.bulkUrl   || '',
+			adminUrl:  pwCfg.adminUrl  || root.dataset.adminUrl  || '',
 			tplFields: pwCfg.tplFields || {},
 			csrf: pwCfg.csrf || {
 				name:  root.dataset.csrfName  || '',
@@ -349,6 +350,60 @@
 			widget.focus();
 		}
 
+		// Open PW's page editor for a single image field in a modal
+		// iframe — the user gets the native crop / focus / variations
+		// UI plus all the page-level metadata fields. modal=1 strips
+		// admin chrome; fields=<imageField> narrows the form to just
+		// the relevant field. We always refresh the table on close
+		// since we can't reliably detect "did the user save".
+		function openImageEditor(td) {
+			if (!config.adminUrl) return;
+			var pageId    = td.dataset.pageId;
+			var fieldName = td.dataset.field;
+			var basename  = td.dataset.basename || '';
+			if (!pageId || !fieldName) return;
+
+			var url = config.adminUrl + 'page/edit/?id=' + encodeURIComponent(pageId)
+				+ '&fields=' + encodeURIComponent(fieldName)
+				+ '&modal=1';
+
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-image-modal';
+
+			var bar = document.createElement('header');
+			bar.className = 'ml-image-modal-bar';
+			var title = document.createElement('span');
+			title.className = 'ml-image-modal-title';
+			var titleTpl = (labels.imageEditorTitle || 'Edit image: %s');
+			title.textContent = titleTpl.replace('%s', basename);
+			var closeBtn = document.createElement('button');
+			closeBtn.type = 'button';
+			closeBtn.className = 'ml-image-modal-close uk-button uk-button-default uk-button-small';
+			closeBtn.textContent = labels.close || 'Close';
+			bar.appendChild(title);
+			bar.appendChild(closeBtn);
+
+			var iframe = document.createElement('iframe');
+			iframe.src = url;
+			iframe.className = 'ml-image-modal-iframe';
+
+			dialog.appendChild(bar);
+			dialog.appendChild(iframe);
+			document.body.appendChild(dialog);
+
+			closeBtn.addEventListener('click', function () {
+				if (dialog.open) dialog.close();
+			});
+			dialog.addEventListener('close', function () {
+				dialog.remove();
+				// Always refresh — the user might have saved inside the
+				// iframe before closing. A no-op refresh is cheap.
+				replaceFromQs(location.search, false);
+			});
+
+			dialog.showModal();
+		}
+
 		// -- AJAX re-render --------------------------------------------
 
 		function replaceFromHref(href) {
@@ -496,6 +551,16 @@
 						e.target.classList.contains('ml-select-row') ||
 						e.target.classList.contains('ml-select-all')
 					)) return;
+					// Thumbnail → PW image editor modal. The td only carries
+					// the page-edit data attrs when the host page is
+					// editable, so unauthorised users just see the thumb
+					// without a clickable cursor.
+					var thumbTd = e.target.closest('.ml-cell-thumb[data-page-id]');
+					if (thumbTd) {
+						e.preventDefault();
+						openImageEditor(thumbTd);
+						return;
+					}
 					// Editable cell — but ignore clicks that landed on an
 					// internal anchor (e.g. Page-link in the Page column).
 					if (e.target.tagName === 'A' || e.target.closest('a')) return;
