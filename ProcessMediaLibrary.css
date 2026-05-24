@@ -194,6 +194,52 @@ textarea.ml-cell-input {
 	text-decoration: none;
 }
 
+/* Popup editor for textarea-typed subfields (description, custom
+   FieldtypeTextarea customs like "summary"). Native <dialog>, so
+   the browser handles the backdrop + Esc + focus trap for us. */
+.ml-popup-editor {
+	border: 1px solid #ccc;
+	border-radius: 4px;
+	padding: 1.25rem;
+	width: min(720px, 92vw);
+	max-height: 90vh;
+	overflow: auto;
+	background: #fff;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ml-popup-editor::backdrop {
+	background: rgba(0, 0, 0, 0.4);
+}
+.ml-popup-editor header {
+	font-weight: 600;
+	font-size: 1.05em;
+	margin-bottom: 0.75rem;
+}
+.ml-popup-editor textarea {
+	display: block;
+	width: 100%;
+	min-height: 14em;
+	box-sizing: border-box;
+	font: inherit;
+	padding: 0.5rem;
+	border: 1px solid #c0c0c0;
+	border-radius: 3px;
+	resize: vertical;
+}
+.ml-popup-editor textarea:focus {
+	outline: 2px solid #5b8cd6;
+	outline-offset: -1px;
+}
+.ml-popup-editor footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	margin-top: 1rem;
+}
+.ml-popup-editor .ml-batch-mode {
+	margin: 0.75rem 0 0;
+}
+
 /* Empty / debug */
 .ml-empty {
 	padding: 2rem;
