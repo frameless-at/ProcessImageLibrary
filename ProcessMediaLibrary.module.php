@@ -623,6 +623,12 @@ class ProcessMediaLibrary extends Process {
 					}
 					$itemValue = implode(' ', $tokens);
 				} elseif ($mode === 'add') {
+					// Add of an empty delta is a no-op — don't append a
+					// trailing space to every selected row.
+					if ($itemValue === '') {
+						$succeeded++;
+						continue;
+					}
 					// Description / custom text: append with a single space
 					// to the row's existing value. Empty existing → just
 					// the new value.

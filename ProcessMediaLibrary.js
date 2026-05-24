@@ -241,11 +241,39 @@
 				td.classList.remove('ml-editing');
 
 				if (batch) {
+					// Add mode: send only what's NEW vs the editor's starting
+					// value so we don't broadcast the edited row's pre-existing
+					// content to siblings. Replace mode sends the full value.
+					var sendValue = newValue;
+					if ((mode || 'replace') === 'add') {
+						if (td.dataset.subfield === 'tags') {
+							var origToks = original.split(/\s+/).filter(Boolean);
+							var newToks  = newValue.split(/\s+/).filter(Boolean);
+							var origSet  = Object.create(null);
+							origToks.forEach(function (t) { origSet[t] = true; });
+							sendValue = newToks.filter(function (t) { return !origSet[t]; }).join(' ');
+						} else {
+							// Text / textarea: the common case is "user typed
+							// more at the end", so strip the original prefix
+							// when present. If they edited mid-string, fall
+							// through with the full value.
+							if (newValue.indexOf(original) === 0) {
+								sendValue = newValue.substring(original.length).replace(/^\s+/, '');
+							}
+						}
+						if (sendValue === '') {
+							// Nothing new to apply — close cleanly without
+							// touching anything.
+							td.textContent = original;
+							return;
+						}
+					}
+
 					td.textContent = (labels.batching || 'Applying to %d…').replace('%d', selection.size);
 					td.classList.add('ml-cell-saving');
 					runBulk('set', {
 						subfield: td.dataset.subfield,
-						value:    newValue,
+						value:    sendValue,
 						mode:     mode || 'replace'
 					}).then(function (result) {
 						var ok = reportBulk(result);
