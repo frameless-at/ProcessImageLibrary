@@ -161,7 +161,6 @@ class ProcessMediaLibrary extends Process {
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
-		$out .= $this->renderColumnsBar($customCols);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		$out .= '</div>';
 
@@ -169,18 +168,19 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Render a collapsed "Columns" fieldset with a checkbox per
-	 * toggleable table column. All checkboxes default to checked;
-	 * client-side JS restores user preferences from localStorage and
-	 * toggles cell visibility via [data-col] attributes. State lives
-	 * client-side so flipping a checkbox doesn't round-trip to the
-	 * server or reset filters.
+	 * Just the <ul> of column-toggle checkboxes — wrapped in an
+	 * InputfieldMarkup inside the "Filters & Columns" outer
+	 * fieldset, so the toggle UI lives alongside the filters
+	 * without polluting the form's URL state. The checkboxes
+	 * deliberately have NO name= attribute, so FormData skips
+	 * them and the JS visibility hook (.ml-col-toggle, localStorage
+	 * -backed) is the only path that reads their state.
 	 *
 	 * @param array<int,string> $customCols
 	 */
-	protected function renderColumnsBar(array $customCols): string {
+	protected function renderColumnsListMarkup(array $customCols): string {
 		$san = $this->wire('sanitizer');
-		$builtIn = [
+		$cols = [
 			'thumb'       => $this->_('Thumb'),
 			'page'        => $this->_('Page'),
 			'field'       => $this->_('Field'),
@@ -189,8 +189,8 @@ class ProcessMediaLibrary extends Process {
 			'tags'        => $this->_('Tags'),
 			'dimensions'  => $this->_('Dimensions'),
 			'size'        => $this->_('Size'),
+			'variations'  => $this->_('Variations'),
 		];
-		$cols = $builtIn;
 		foreach ($customCols as $name) {
 			$cols['custom:' . $name] = $name;
 		}
@@ -202,14 +202,7 @@ class ProcessMediaLibrary extends Process {
 				. ' ' . $san->entities($label)
 				. '</label></li>';
 		}
-		// Match PW admin's collapsible-fieldset markup so the admin
-		// theme's InputfieldStateToggle JS handles open/close for us.
-		return '<div class="Inputfield InputfieldFieldset InputfieldStateCollapsed ml-columns-bar">'
-			. '<label class="InputfieldHeader InputfieldStateToggle">'
-			. $san->entities($this->_('Columns')) . '</label>'
-			. '<div class="InputfieldContent">'
-			. '<ul class="ml-columns-list">' . $items . '</ul>'
-			. '</div></div>';
+		return '<ul class="ml-columns-list">' . $items . '</ul>';
 	}
 
 	/**
@@ -1285,9 +1278,10 @@ class ProcessMediaLibrary extends Process {
 		$customByField = $this->getCustomByField();
 
 		foreach ($slice as &$row) {
-			$row['thumbUrl']    = '';
-			$row['pageUrl']     = '';
-			$row['pageEditUrl'] = '';
+			$row['thumbUrl']        = '';
+			$row['pageUrl']         = '';
+			$row['pageEditUrl']     = '';
+			$row['variationsCount'] = 0;
 
 			$page = $pagesById[$row['pageId']] ?? null;
 			if (!$page || !$page->id) continue;
@@ -1305,6 +1299,12 @@ class ProcessMediaLibrary extends Process {
 			if (!$img instanceof Pageimage) continue;
 
 			$row['thumbUrl'] = $img->size(120, 80, ['upscaling' => false, 'quality' => 80])->url;
+			// Variations count — Phase 2 column from the concept,
+			// useful for pre-warm diagnosis and cleanup. getVariations()
+			// does a filesystem scan per image, but only for the 50-ish
+			// rows in the visible slice, so the cost is bounded.
+			$variations = $img->getVariations();
+			$row['variationsCount'] = $variations ? $variations->count() : 0;
 
 			// Custom-field hydration: read each declared custom subfield off
 			// the Pageimage. Phase 6 will handle type-specific edit semantics;
@@ -1556,7 +1556,7 @@ class ProcessMediaLibrary extends Process {
 		/** @var \ProcessWire\InputfieldFieldset $outer */
 		$outer = $modules->get('InputfieldFieldset');
 		$outer->name      = 'mlFilters';
-		$outer->label     = $this->_('Filters');
+		$outer->label     = $this->_('Filters & Columns');
 		$outer->collapsed = $active ? Inputfield::collapsedNo : Inputfield::collapsedYes;
 
 		// Row 1: q + template + field, 33% each.
@@ -1652,6 +1652,23 @@ class ProcessMediaLibrary extends Process {
 		$reset->columnWidth = 50;
 		$outer->add($reset);
 
+		// Columns sub-fieldset — checkboxes have no name= so they
+		// don't enter the filter form's URL params, and the JS toggle
+		// hook (.ml-col-toggle, localStorage-backed) works regardless
+		// of where in the DOM the checkboxes live.
+		/** @var \ProcessWire\InputfieldFieldset $columnsFs */
+		$columnsFs = $modules->get('InputfieldFieldset');
+		$columnsFs->name      = 'mlColumns';
+		$columnsFs->label     = $this->_('Columns');
+		$columnsFs->collapsed = Inputfield::collapsedYes;
+
+		$columnsMarkup = $modules->get('InputfieldMarkup');
+		$columnsMarkup->skipLabel = Inputfield::skipLabelHeader;
+		$columnsMarkup->markup    = $this->renderColumnsListMarkup($customCols);
+		$columnsFs->add($columnsMarkup);
+
+		$outer->add($columnsFs);
+
 		$form->add($outer);
 
 		return $form->render();
@@ -1744,12 +1761,16 @@ class ProcessMediaLibrary extends Process {
 			['tags',        $this->_('Tags'),        'tags'],
 			['dimensions',  $this->_('Dimensions'),  'width'],
 			['size',        $this->_('Size'),        'filesize'],
+			['variations',  $this->_('Variations'),  null],
 		];
 		if (!$showTagsCol) {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
 		}
 
-		$out  = '<table class="ml-table uk-table uk-table-divider uk-table-small">';
+		// Outer scroller so the wide table can overflow horizontally
+		// on narrow viewports without breaking the table layout.
+		$out  = '<div class="ml-table-scroll">';
+		$out .= '<table class="ml-table uk-table uk-table-divider uk-table-small">';
 		$out .= '<thead><tr>';
 		$out .= '<th class="ml-cell-select">'
 			. '<input type="checkbox" class="ml-select-all" title="'
@@ -1852,6 +1873,8 @@ class ProcessMediaLibrary extends Process {
 			}
 			$out .= '<td class="ml-cell-nowrap" data-col="dimensions">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap" data-col="size">' . $san->entities($size) . '</td>';
+			$out .= '<td class="ml-cell-nowrap ml-cell-variations" data-col="variations">'
+				. (int) ($row['variationsCount'] ?? 0) . '</td>';
 
 			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
@@ -1882,7 +1905,7 @@ class ProcessMediaLibrary extends Process {
 			$out .= '</tr>';
 		}
 
-		$out .= '</tbody></table>';
+		$out .= '</tbody></table></div>';
 		return $out;
 	}
 
