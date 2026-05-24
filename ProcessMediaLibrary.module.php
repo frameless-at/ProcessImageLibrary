@@ -79,38 +79,51 @@ class ProcessMediaLibrary extends Process {
 			return $this->renderEmptyState($imageFields, $eligibleTemplates);
 		}
 
-		$customCols = $this->collectCustomNames();
-		$filters    = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
-		$sortState  = $this->readSortInput($customCols);
-		$sort       = $sortState['sort'];
-		$dir        = $sortState['dir'];
-		$rows       = $this->loadRows($filters);
-		$rows       = $this->applyRowFilters($rows, $filters);
-		$this->applySort($rows, $sort, $dir);
-
-		$total      = count($rows);
-		$totalPages = max(1, (int) ceil($total / self::PAGE_SIZE));
-		$page       = min(max(1, (int) $this->wire('input')->get('p')), $totalPages);
-		$offset     = ($page - 1) * self::PAGE_SIZE;
-		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
-		$slice      = $this->hydrateSlice($slice);
+		$customCols   = $this->collectCustomNames();
+		$filters      = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
+		$sortState    = $this->readSortInput($customCols);
+		$sort         = $sortState['sort'];
+		$dir          = $sortState['dir'];
+		$requestedPg  = max(1, (int) $this->wire('input')->get('p'));
+		$resultsHtml  = $this->renderResultsHtml($filters, $sort, $dir, $requestedPg, $customCols);
 
 		$session   = $this->wire('session');
 		$sanitizer = $this->wire('sanitizer');
 		$rootAttrs = sprintf(
-			' data-save-url="%s" data-csrf-name="%s" data-csrf-value="%s"',
+			' data-save-url="%s" data-render-url="%s" data-csrf-name="%s" data-csrf-value="%s"',
 			$sanitizer->entities($this->wire('page')->url . 'save/'),
+			$sanitizer->entities($this->wire('page')->url . 'data/'),
 			$sanitizer->entities($session->CSRF->getTokenName()),
 			$sanitizer->entities($session->CSRF->getTokenValue())
 		);
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir);
-		$out .= $this->renderTable($slice, $customCols, $filters, $sort, $dir);
-		$out .= $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir);
+		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		$out .= '</div>';
 
 		return $out;
+	}
+
+	/**
+	 * Render just the swappable region (table + pagination) for a given
+	 * filter/sort/page state. Called by both ___execute and ___executeData
+	 * so server-rendered and AJAX-rendered HTML stay in sync.
+	 */
+	protected function renderResultsHtml(array $filters, string $sort, string $dir, int $requestedPage, array $customCols): string {
+		$rows = $this->loadRows($filters);
+		$rows = $this->applyRowFilters($rows, $filters);
+		$this->applySort($rows, $sort, $dir);
+
+		$total      = count($rows);
+		$totalPages = max(1, (int) ceil($total / self::PAGE_SIZE));
+		$page       = min(max(1, $requestedPage), $totalPages);
+		$offset     = ($page - 1) * self::PAGE_SIZE;
+		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
+		$slice      = $this->hydrateSlice($slice);
+
+		return $this->renderTable($slice, $customCols, $filters, $sort, $dir)
+			. $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir);
 	}
 
 	/**
@@ -237,16 +250,36 @@ class ProcessMediaLibrary extends Process {
 
 	/**
 	 * AJAX endpoint: returns paginated rows + total count as JSON.
-	 * Filters, sort, AJAX-driven re-render arrive in Phase 4.
+	 * AJAX re-render endpoint: returns the rendered table+pagination HTML
+	 * for the current GET params (q, template, field, no_*, sort, dir, p).
+	 * The browser JS swaps it into .ml-results without a full reload.
+	 *
+	 * Returns text/html, not JSON — the response goes straight into innerHTML.
 	 */
 	public function ___executeData() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		$rows = $this->loadRows();
-		return json_encode([
-			'total' => count($rows),
-			'rows'  => array_slice($rows, 0, self::PAGE_SIZE),
-		]);
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: text/html; charset=utf-8');
+
+		$imageFields = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		if (!$imageFields || !$eligibleTemplates) {
+			return '<p class="ml-empty">'
+				. $this->wire('sanitizer')->entities($this->_('No images.')) . '</p>';
+		}
+
+		$customCols  = $this->collectCustomNames();
+		$filters     = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
+		$sortState   = $this->readSortInput($customCols);
+		$requestedPg = max(1, (int) $this->wire('input')->get('p'));
+
+		return $this->renderResultsHtml(
+			$filters,
+			$sortState['sort'],
+			$sortState['dir'],
+			$requestedPg,
+			$customCols
+		);
 	}
 
 	/**
@@ -911,7 +944,8 @@ class ProcessMediaLibrary extends Process {
 		$config->styles->add($baseUrl . 'ProcessMediaLibrary.css?v=' . $version);
 		$config->scripts->add($baseUrl . 'ProcessMediaLibrary.js?v=' . $version);
 		$config->js('ProcessMediaLibrary', [
-			'saveUrl' => $this->wire('page')->url . 'save/',
+			'saveUrl'   => $this->wire('page')->url . 'save/',
+			'renderUrl' => $this->wire('page')->url . 'data/',
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
