@@ -821,6 +821,54 @@
 		});
 		applyColumnVisibility();
 
+		// -- Import form ----------------------------------------------
+		// Submit via fetch so the user stays on their current filter
+		// view; the import endpoint returns JSON with succeeded /
+		// skipped / failed counts. On success the table re-renders
+		// from the same query string so updated values appear.
+		var importForm = document.querySelector('.ml-import-form');
+		var importStatus = document.querySelector('.ml-import-status');
+		if (importForm) {
+			importForm.addEventListener('submit', function (e) {
+				e.preventDefault();
+				if (!importStatus) importStatus = document.querySelector('.ml-import-status');
+				if (importStatus) importStatus.textContent = labels.importing || 'Importing…';
+
+				var fd = new FormData(importForm);
+				fetch(importForm.action, {
+					method: 'POST',
+					body: fd,
+					credentials: 'same-origin'
+				}).then(function (res) {
+					return res.json().then(function (data) {
+						return { status: res.status, data: data };
+					});
+				}).then(function (result) {
+					var d = (result && result.data) || {};
+					if (!d.ok) {
+						if (importStatus) importStatus.textContent =
+							(labels.importError || 'Import failed') + ': ' + (d.error || 'Unknown error');
+						return;
+					}
+					var parts = [
+						(labels.importSaved || 'Saved') + ': ' + (d.succeeded || 0),
+						(labels.importSkipped || 'Unchanged') + ': ' + (d.skipped || 0),
+						(labels.importFailed || 'Failed') + ': ' + ((d.failed || []).length)
+					];
+					var msg = parts.join('  ·  ');
+					if (d.failed && d.failed.length) {
+						msg += '\n' + d.failed.join('\n');
+					}
+					if (importStatus) importStatus.textContent = msg;
+					importForm.reset();
+					if (d.succeeded > 0) replaceFromQs(location.search, false);
+				}).catch(function (err) {
+					if (importStatus) importStatus.textContent =
+						(labels.importError || 'Import failed') + ': ' + (err && err.message || 'Network error');
+				});
+			});
+		}
+
 		// -- Browser back/forward --------------------------------------
 
 		window.addEventListener('popstate', function () {

@@ -419,6 +419,37 @@ textarea.ml-cell-input {
 	margin: 0.75rem 0 0;
 }
 
+/* Export / Import for LLM round-trip — collapsed fieldset at the
+   bottom of the page. The download is a direct <a>, the upload is
+   AJAX-posted so the user stays on their current filter view. */
+.ml-export-import {
+	margin-top: 1.5rem;
+}
+.ml-ei-help {
+	color: #555;
+	margin: 0 0 0.75rem;
+}
+.ml-import-form {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	margin: 0.5rem 0 0;
+}
+.ml-ei-file {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	color: #555;
+}
+.ml-import-status {
+	margin-top: 0.75rem;
+	white-space: pre-wrap;
+	color: #444;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 0.85em;
+}
+
 /* Empty / debug */
 .ml-empty {
 	padding: 2rem;

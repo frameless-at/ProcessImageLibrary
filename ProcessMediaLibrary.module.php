@@ -162,9 +162,62 @@ class ProcessMediaLibrary extends Process {
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
+		$out .= $this->renderExportImportBar($filters);
 		$out .= '</div>';
 
 		return $out;
+	}
+
+	/**
+	 * Bottom-of-page Export / Import block. Export is a plain link
+	 * to the export endpoint that carries the current filter URL,
+	 * so the resulting download is exactly the slice the user is
+	 * looking at. Import is a small upload form — JS intercepts to
+	 * post via fetch + show the result inline so the page doesn't
+	 * navigate away from the user's current filter.
+	 */
+	protected function renderExportImportBar(array $filters): string {
+		$san = $this->wire('sanitizer');
+		$session = $this->wire('session');
+
+		$qs = '';
+		// Reuse buildUrl to get the same filter querystring the
+		// listing built; sort / page / pageSize aren't relevant for
+		// export so we pass defaults.
+		$built = $this->buildUrl($filters, 1, '', '', self::PAGE_SIZE_DEFAULT);
+		if ($built !== './' && $built !== '') $qs = $built;
+
+		$exportUrl = $this->wire('page')->url . 'export/' . $qs;
+		$importUrl = $this->wire('page')->url . 'import/';
+
+		$csrfName  = $session->CSRF->getTokenName();
+		$csrfValue = $session->CSRF->getTokenValue();
+
+		$exportLabel = $this->_('Export current filter as JSON');
+		$importLabel = $this->_('Import JSON');
+		$pickLabel   = $this->_('Choose JSON file');
+
+		return '<div class="Inputfield InputfieldFieldset InputfieldStateCollapsed ml-export-import">'
+			. '<label class="InputfieldHeader InputfieldStateToggle">'
+			. $san->entities($this->_('Export / Import for LLM round-trip'))
+			. '</label>'
+			. '<div class="InputfieldContent">'
+			. '<p class="ml-ei-help">' . $san->entities(
+				$this->_('Export hands an LLM the current filter set (image URL, page context, current values). The LLM fills empty fields, you re-upload the JSON to apply changes.')
+			) . '</p>'
+			. '<p><a class="uk-button uk-button-primary uk-button-small ml-export-link" href="'
+			. $san->entities($exportUrl) . '">'
+			. $san->entities($exportLabel) . '</a></p>'
+			. '<form class="ml-import-form" enctype="multipart/form-data" method="post" action="'
+			. $san->entities($importUrl) . '">'
+			. '<input type="hidden" name="' . $san->entities($csrfName) . '" value="' . $san->entities($csrfValue) . '">'
+			. '<label class="ml-ei-file"><span>' . $san->entities($pickLabel) . '</span> '
+			. '<input type="file" name="file" accept="application/json,.json" required></label> '
+			. '<button type="submit" class="uk-button uk-button-default uk-button-small">'
+			. $san->entities($importLabel) . '</button>'
+			. '</form>'
+			. '<div class="ml-import-status" role="status" aria-live="polite"></div>'
+			. '</div></div>';
 	}
 
 	/**
@@ -764,6 +817,283 @@ class ProcessMediaLibrary extends Process {
 		return json_encode([
 			'ok'        => true,
 			'succeeded' => $succeeded,
+			'failed'    => $failed,
+		]);
+	}
+
+	/**
+	 * Streams the currently-filtered row set as a JSON file download,
+	 * shaped to be handed straight to an LLM. Each image carries
+	 * everything needed to (a) let the LLM see / understand the
+	 * picture (absolute URL, page context) and (b) round-trip the
+	 * payload back through ___executeImport without us needing to
+	 * trust anything but the identity triple.
+	 *
+	 * Filter state is read from the same GET params as the main
+	 * listing — so the user just builds the filter they care about
+	 * ("no_custom_summary=1") and the Export button hands that
+	 * exact slice over.
+	 */
+	public function ___executeExport() {
+		$imageFields = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		if (!$imageFields || !$eligibleTemplates) {
+			header('Content-Type: application/json');
+			echo json_encode(['error' => 'No image fields configured']);
+			exit;
+		}
+
+		$customCols = $this->collectCustomNames();
+		$filters    = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
+
+		$rows = $this->loadRows($filters);
+		$rows = $this->applyRowFilters($rows, $filters);
+		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
+
+		// Full hydration — no pagination. The export deliberately
+		// produces the entire filtered set so the operator can hand
+		// it all to an LLM at once; users with very large libraries
+		// should narrow the filter before exporting.
+		$pageIds = array_values(array_unique(array_column($rows, 'pageId')));
+		$pagesById = [];
+		foreach ($this->wire('pages')->getById($pageIds) as $p) {
+			$pagesById[$p->id] = $p;
+		}
+		$customByField = $this->getCustomByField();
+
+		$images = [];
+		foreach ($rows as $row) {
+			$page = $pagesById[$row['pageId']] ?? null;
+			if (!$page || !$page->id) continue;
+
+			$fieldValue = $page->getUnformatted($row['fieldName']);
+			$img = null;
+			if ($fieldValue instanceof Pageimages) {
+				$img = $fieldValue->getFile($row['basename']);
+			} elseif ($fieldValue instanceof Pageimage) {
+				$img = $fieldValue;
+			}
+			if (!$img instanceof Pageimage) continue;
+
+			$customs = [];
+			foreach ($customByField[$row['fieldName']] ?? [] as $name) {
+				$val = $img->get($name);
+				if ($val === null) $val = '';
+				if (is_object($val)) $val = (string) $val;
+				if (is_array($val)) $val = $this->normalizeDescription($val);
+				$customs[$name] = (string) $val;
+			}
+
+			$images[] = [
+				'id'          => sprintf('%d:%s:%s',
+					(int) $row['pageId'],
+					(string) $row['fieldName'],
+					(string) $row['basename']
+				),
+				'pageId'      => (int) $row['pageId'],
+				'fieldName'   => (string) $row['fieldName'],
+				'basename'    => (string) $row['basename'],
+				'url'         => $img->httpUrl,
+				'pageTitle'   => (string) $row['pageTitle'],
+				'pageUrl'     => $page->httpUrl,
+				'dimensions'  => ($row['width'] && $row['height'])
+					? ((int) $row['width']) . 'x' . ((int) $row['height'])
+					: '',
+				'filesize'    => (int) $row['filesize'],
+				'description' => $this->normalizeDescription($row['description']),
+				'tags'        => (string) $row['tags'],
+				'custom'      => (object) $customs, // force {} when empty so the LLM sees a key
+			];
+		}
+
+		$config = $this->wire('config');
+		$siteUrl = ($config->https ? 'https://' : 'http://') . $config->httpHost;
+
+		$payload = [
+			'meta' => [
+				'exportedAt'     => date('c'),
+				'siteUrl'        => $siteUrl,
+				'imageCount'     => count($images),
+				'appliedFilter'  => (object) array_filter($filters, fn($v) =>
+					!(is_string($v) && $v === '')
+					&& $v !== null
+					&& !(is_array($v) && empty($v))
+				),
+				'editableFields' => ['description', 'tags', 'custom.*'],
+				'instructions'   => [
+					'Each entry in "images" represents one editable image.',
+					'KEEP UNCHANGED: id, pageId, fieldName, basename, url, dimensions, filesize, pageTitle, pageUrl.',
+					'YOU MAY FILL OR REPLACE: description (string), tags (whitespace-separated string), custom.<subfield> (string per declared subfield).',
+					'An empty string means "no value yet". Use the url to fetch the image and fill any field you can.',
+					'Return the same JSON shape; only items whose values actually differ from the export will be touched on Import.',
+					'Tags whitelist (useTags=2) is enforced server-side — unknown tags on whitelisted fields are rejected.',
+				],
+			],
+			'images' => $images,
+		];
+
+		$filename = sprintf('media-library-export-%s.json', date('Ymd-His'));
+		header('Content-Type: application/json; charset=utf-8');
+		header('Content-Disposition: attachment; filename="' . $filename . '"');
+		echo json_encode(
+			$payload,
+			JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+		);
+		exit;
+	}
+
+	/**
+	 * Apply a previously-exported (and presumably LLM-augmented)
+	 * JSON file back to the live pages. Every value goes through the
+	 * same whitelist gates as the inline-edit save endpoint:
+	 * per-page editable() check, image-field whitelist, subfield
+	 * whitelist (built-ins + per-field declared customs), tag
+	 * whitelist when useTags=2. Items whose values match the page's
+	 * current state are skipped so we don't pile up empty saves.
+	 */
+	public function ___executeImport() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		// Accept either an uploaded "file" or pasted JSON via "payload".
+		$raw = '';
+		if (!empty($_FILES['file']['tmp_name']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
+			$raw = (string) file_get_contents($_FILES['file']['tmp_name']);
+		} elseif ($this->wire('input')->post('payload')) {
+			$raw = (string) $this->wire('input')->post('payload');
+		}
+		if ($raw === '') return $this->jsonError('No JSON provided');
+
+		$data = json_decode($raw, true);
+		if (!is_array($data) || empty($data['images']) || !is_array($data['images'])) {
+			return $this->jsonError('Invalid JSON shape — expected {"images": [...]}.');
+		}
+
+		$sanitizer     = $this->wire('sanitizer');
+		$imageFields   = $this->discoverImageFields();
+		$customByField = $this->getCustomByField();
+		$tagsConfig    = $this->getTagsConfig();
+
+		$succeeded = 0;
+		$skipped   = 0;
+		$failed    = [];
+
+		// Group by pageId so each affected page is saved once per field.
+		$byPage = [];
+		foreach ($data['images'] as $item) {
+			if (!is_array($item)) continue;
+			$pid = (int) ($item['pageId'] ?? 0);
+			$fn  = $sanitizer->fieldName((string) ($item['fieldName'] ?? ''));
+			$bn  = basename((string) ($item['basename'] ?? ''));
+			if (!$pid || !$fn || !$bn) {
+				$failed[] = 'Missing pageId / fieldName / basename';
+				continue;
+			}
+			$byPage[$pid][] = ['fn' => $fn, 'bn' => $bn, 'item' => $item];
+		}
+
+		foreach ($byPage as $pid => $items) {
+			$page = $this->wire('pages')->get($pid);
+			if (!$page->id) { $failed[] = "Page $pid not found"; continue; }
+			if (!$page->editable()) { $failed[] = "Page $pid not editable"; continue; }
+			$page->of(false);
+			$fieldsTouched = [];
+
+			foreach ($items as $entry) {
+				$fn = $entry['fn'];
+				$bn = $entry['bn'];
+				$item = $entry['item'];
+
+				if (!in_array($fn, $imageFields, true)) {
+					$failed[] = "Field $fn not managed";
+					continue;
+				}
+
+				$fieldValue = $page->getUnformatted($fn);
+				$img = null;
+				if ($fieldValue instanceof Pageimages) {
+					$img = $fieldValue->getFile($bn);
+				} elseif ($fieldValue instanceof Pageimage) {
+					$img = $fieldValue;
+				}
+				if (!$img instanceof Pageimage) {
+					$failed[] = "Image $bn not in $pid.$fn";
+					continue;
+				}
+
+				$dirty = false;
+
+				if (array_key_exists('description', $item)) {
+					$new = (string) $item['description'];
+					if ($new !== (string) $img->description) {
+						$img->set('description', $new);
+						$dirty = true;
+					}
+				}
+
+				if (array_key_exists('tags', $item)) {
+					$new = (string) $item['tags'];
+					$cfg = $tagsConfig[$fn] ?? ['mode' => 0, 'allowed' => []];
+					if ($cfg['mode'] === 2) {
+						$tokens = preg_split('/[\s,]+/', $new, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$bad = array_diff($tokens, $cfg['allowed']);
+						if ($bad) {
+							$failed[] = "Tag(s) not in whitelist for $fn: " . implode(', ', $bad);
+							continue;
+						}
+						$new = implode(' ', $tokens);
+					}
+					if ($new !== (string) $img->tags) {
+						$img->set('tags', $new);
+						$dirty = true;
+					}
+				}
+
+				if (!empty($item['custom']) && (is_array($item['custom']) || is_object($item['custom']))) {
+					$allowedCustoms = $customByField[$fn] ?? [];
+					foreach ((array) $item['custom'] as $name => $val) {
+						$name = $sanitizer->fieldName((string) $name);
+						if (!in_array($name, $allowedCustoms, true)) continue;
+						$new = is_scalar($val) ? (string) $val : '';
+						if ($new !== (string) $img->get($name)) {
+							$img->set($name, $new);
+							$dirty = true;
+						}
+					}
+				}
+
+				if ($dirty) {
+					$fieldsTouched[$fn] = true;
+					$succeeded++;
+				} else {
+					$skipped++;
+				}
+			}
+
+			foreach (array_keys($fieldsTouched) as $fn) {
+				if (!$page->save($fn)) {
+					$failed[] = "Save failed: page $pid field $fn";
+				}
+			}
+		}
+
+		if ($succeeded > 0) {
+			$this->wire('cache')->deleteFor($this);
+		}
+
+		return json_encode([
+			'ok'        => true,
+			'succeeded' => $succeeded,
+			'skipped'   => $skipped,
 			'failed'    => $failed,
 		]);
 	}
@@ -1466,6 +1796,11 @@ class ProcessMediaLibrary extends Process {
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
+				'importing'        => $this->_('Importing…'),
+				'importSaved'      => $this->_('Saved'),
+				'importSkipped'    => $this->_('Unchanged'),
+				'importFailed'    => $this->_('Failed'),
+				'importError'      => $this->_('Import failed'),
 				'batching'         => $this->_('Applying to %d selected…'),
 				'bulkResult'       => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
 				// Field-dropdown label when a template is active — %s is
