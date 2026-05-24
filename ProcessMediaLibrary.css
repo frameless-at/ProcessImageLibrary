@@ -185,6 +185,13 @@ textarea.ml-cell-input {
 	cursor: pointer;
 }
 
+/* Tag filter (multi-select) in the filter bar. Native widget for now,
+   chip-style replacement comes in the combined UI polish pass. */
+.ml-filter-tags {
+	min-width: 10rem;
+	max-width: 14rem;
+}
+
 /* Batch-edit mode picker (Add default, Replace). Shown only when the
    cell being edited belongs to the active selection. Commit happens on
    blur or click-outside-cell, not on radio click. */

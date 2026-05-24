@@ -85,6 +85,10 @@ class ProcessMediaLibrary extends Process {
 		$sort         = $sortState['sort'];
 		$dir          = $sortState['dir'];
 		$requestedPg  = max(1, (int) $this->wire('input')->get('p'));
+		// Tag pool for the filter bar: union across the entire (cached)
+		// flat-row set, not scoped to other filters, so the picker shows
+		// every tag the user can possibly choose from.
+		$tagFilterPool = $this->flatUsedTags($this->loadRows($filters));
 		$resultsHtml  = $this->renderResultsHtml($filters, $sort, $dir, $requestedPg, $customCols);
 
 		$session   = $this->wire('session');
@@ -99,7 +103,7 @@ class ProcessMediaLibrary extends Process {
 		);
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
-		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir);
+		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		$out .= '</div>';
 
@@ -114,6 +118,13 @@ class ProcessMediaLibrary extends Process {
 	protected function renderResultsHtml(array $filters, string $sort, string $dir, int $requestedPage, array $customCols): string {
 		$rows = $this->loadRows($filters);
 		$rows = $this->applyRowFilters($rows, $filters);
+
+		$tagsConfig = $this->getTagsConfig();
+		// Autocomplete + filter pool come from the *non-tag-filtered* set so
+		// selecting a tag in the picker doesn't shrink the picker itself.
+		$usedTags = $this->collectUsedTagsByField($rows);
+
+		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
 		$this->applySort($rows, $sort, $dir);
 
 		$total      = count($rows);
@@ -122,12 +133,6 @@ class ProcessMediaLibrary extends Process {
 		$offset     = ($page - 1) * self::PAGE_SIZE;
 		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
 		$slice      = $this->hydrateSlice($slice);
-
-		$tagsConfig = $this->getTagsConfig();
-		// Autocomplete pool comes from the *filtered* set, not the full cache —
-		// scoped to what the user is currently looking at to keep the datalist
-		// small and contextually relevant.
-		$usedTags   = $this->collectUsedTagsByField($rows);
 
 		return $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
 			. $this->renderTagDatalists($usedTags)
@@ -140,6 +145,24 @@ class ProcessMediaLibrary extends Process {
 	 *
 	 * @return array<string,array<int,string>> fieldName => sorted unique tags
 	 */
+	/**
+	 * Flat sorted-unique tag list across rows. Used by the filter bar's
+	 * tag picker. (collectUsedTagsByField keeps per-field grouping for
+	 * the editor autocomplete — different consumers, different shapes.)
+	 *
+	 * @return array<int,string>
+	 */
+	protected function flatUsedTags(array $rows): array {
+		$set = [];
+		foreach ($rows as $row) {
+			$tags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			foreach ($tags as $t) $set[$t] = true;
+		}
+		$keys = array_keys($set);
+		sort($keys, SORT_NATURAL | SORT_FLAG_CASE);
+		return $keys;
+	}
+
 	protected function collectUsedTagsByField(array $rows): array {
 		$byField = [];
 		foreach ($rows as $row) {
@@ -937,6 +960,21 @@ class ProcessMediaLibrary extends Process {
 			}
 		}
 
+		// tags filter: ?tags[]=foo&tags[]=bar — AND-match against row tags.
+		$rawTags = $input->get('tags');
+		$tags = [];
+		if (is_array($rawTags)) {
+			foreach ($rawTags as $t) {
+				$t = trim((string) $t);
+				if ($t !== '') $tags[] = $t;
+			}
+		} elseif (is_string($rawTags) && $rawTags !== '') {
+			foreach (preg_split('/[\s,]+/', $rawTags, -1, PREG_SPLIT_NO_EMPTY) as $t) {
+				$tags[] = $t;
+			}
+		}
+		$tags = array_values(array_unique($tags));
+
 		return [
 			'q'              => trim((string) $input->get('q')),
 			'template'       => in_array($template, $eligibleTemplates, true) ? $template : '',
@@ -945,6 +983,7 @@ class ProcessMediaLibrary extends Process {
 			'no_tags'        => (bool) $input->get('no_tags'),
 			'only_galleries' => (bool) $input->get('only_galleries'),
 			'no_custom'      => $noCustom,
+			'tags'           => $tags,
 		];
 	}
 
@@ -1274,7 +1313,7 @@ class ProcessMediaLibrary extends Process {
 		return '<p class="ml-empty">' . $san->entities($msg) . '</p>';
 	}
 
-	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = [], string $sort = '', string $dir = ''): string {
+	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = [], string $sort = '', string $dir = '', array $tagFilterPool = []): string {
 		$san = $this->wire('sanitizer');
 		$checked = fn($k) => $filters[$k] ? ' checked' : '';
 
@@ -1318,6 +1357,20 @@ class ProcessMediaLibrary extends Process {
 		}
 		$out .= '</select>';
 
+		// Tag picker — AND-match against row tags. Multi-select with
+		// every tag used in the library; ⌘/Ctrl-click to multi-pick.
+		if ($tagFilterPool) {
+			$selectedTags = $filters['tags'] ?? [];
+			$out .= '<select name="tags[]" multiple size="4" class="uk-select uk-form-small ml-filter-tags"'
+				. ' title="' . $san->entities($this->_('Tags (AND-match)')) . '">';
+			foreach ($tagFilterPool as $t) {
+				$sel = in_array($t, $selectedTags, true) ? ' selected' : '';
+				$out .= '<option value="' . $san->entities($t) . '"' . $sel . '>'
+					. $san->entities($t) . '</option>';
+			}
+			$out .= '</select>';
+		}
+
 		$out .= '<label class="ml-filter-check">'
 			. '<input type="checkbox" name="no_desc" value="1"' . $checked('no_desc') . '> '
 			. $san->entities($this->_('Missing description')) . '</label>';
@@ -1354,7 +1407,31 @@ class ProcessMediaLibrary extends Process {
 			|| $filters['no_desc']
 			|| $filters['no_tags']
 			|| $filters['only_galleries']
-			|| !empty($filters['no_custom']);
+			|| !empty($filters['no_custom'])
+			|| !empty($filters['tags']);
+	}
+
+	/**
+	 * Filter rows down to those whose tag set includes ALL of the requested
+	 * tag tokens (AND semantics). Called separately from applyRowFilters so
+	 * the filter UI can build its tag pool from "rows after non-tag filters"
+	 * — selecting a tag then doesn't shrink the picker's options.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @param array<int,string> $tags required tags (case-sensitive match)
+	 */
+	protected function applyTagFilter(array $rows, array $tags): array {
+		if (!$tags) return $rows;
+		$needed = array_fill_keys($tags, true);
+		return array_values(array_filter($rows, function ($row) use ($needed) {
+			$rowTags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			if (count($rowTags) < count($needed)) return false;
+			$rowSet = array_fill_keys($rowTags, true);
+			foreach ($needed as $t => $_) {
+				if (!isset($rowSet[$t])) return false;
+			}
+			return true;
+		}));
 	}
 
 	/**
@@ -1565,7 +1642,13 @@ class ProcessMediaLibrary extends Process {
 		foreach ($filters['no_custom'] ?? [] as $name => $on) {
 			if ($on) $params['no_custom_' . $name] = '1';
 		}
-		$params = array_filter($params, fn($v) => $v !== '' && $v !== null);
+		if (!empty($filters['tags'])) {
+			$params['tags'] = array_values($filters['tags']);
+		}
+		// Filter out empty scalars but keep non-empty arrays.
+		$params = array_filter($params, fn($v) =>
+			!(is_string($v) && $v === '') && $v !== null && !(is_array($v) && empty($v))
+		);
 		return $params ? '?' . http_build_query($params) : './';
 	}
 
