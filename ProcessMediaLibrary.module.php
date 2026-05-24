@@ -531,6 +531,8 @@ class ProcessMediaLibrary extends Process {
 		$action    = (string) $input->post('action');
 		$value     = (string) $input->post('value');
 		$subfield  = $sanitizer->fieldName((string) $input->post('subfield'));
+		$mode      = (string) $input->post('mode'); // 'replace' (default) | 'add'
+		if ($mode !== 'add') $mode = 'replace';
 		$itemsJson = (string) $input->post('items');
 
 		if ($action !== 'set') {
@@ -600,21 +602,36 @@ class ProcessMediaLibrary extends Process {
 				}
 
 				$itemValue = $value;
-				// Whitelist gate per item: the tag whitelist can differ
-				// per field, so we check at the per-item level rather
-				// than rejecting the whole batch up front.
+
 				if ($subfield === 'tags') {
+					$tokens = preg_split('/[\s,]+/', $itemValue, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+					// Whitelist gate per item: tag whitelist can differ per
+					// field, so we check per item rather than rejecting the
+					// whole batch up front.
 					$tagCfg = $tagsCfg[$fn] ?? ['mode' => 0, 'allowed' => []];
 					if ($tagCfg['mode'] === 2) {
-						$tokens = preg_split('/[\s,]+/', $itemValue, -1, PREG_SPLIT_NO_EMPTY) ?: [];
 						$disallowed = array_diff($tokens, $tagCfg['allowed']);
 						if ($disallowed) {
 							$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $disallowed));
 							continue;
 						}
-						$itemValue = implode(' ', $tokens);
+					}
+					if ($mode === 'add') {
+						// Union with the row's existing tags, dedup.
+						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$tokens   = array_values(array_unique(array_merge($existing, $tokens)));
+					}
+					$itemValue = implode(' ', $tokens);
+				} elseif ($mode === 'add') {
+					// Description / custom text: append with a single space
+					// to the row's existing value. Empty existing → just
+					// the new value.
+					$existing = (string) $img->get($subfield);
+					if ($existing !== '') {
+						$itemValue = $existing . ' ' . $itemValue;
 					}
 				}
+
 				$img->set($subfield, $itemValue);
 				$fieldsTouched[$fn] = true;
 				$succeeded++;
@@ -1251,6 +1268,9 @@ class ProcessMediaLibrary extends Process {
 				'saved'      => $this->_('Saved'),
 				'error'      => $this->_('Save failed'),
 				'done'       => $this->_('Done'),
+				'cancel'     => $this->_('Cancel'),
+				'addN'       => $this->_('Add to %d'),
+				'replaceN'   => $this->_('Replace in %d'),
 				'batching'   => $this->_('Applying to %d selected…'),
 				'bulkResult' => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
 			],

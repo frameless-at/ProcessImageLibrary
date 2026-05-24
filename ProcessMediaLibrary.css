@@ -214,6 +214,14 @@ textarea.ml-cell-input {
 	cursor: pointer;
 }
 
+/* Batch-edit commit buttons (Add / Replace / Cancel). Shown only when
+   the cell being edited belongs to the active selection. */
+.ml-batch-buttons {
+	display: flex;
+	gap: 6px;
+	margin-top: 6px;
+}
+
 /* Pagination */
 .ml-pagination {
 	display: flex;
