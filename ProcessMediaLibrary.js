@@ -350,6 +350,27 @@
 			widget.focus();
 		}
 
+		// Locate the InputfieldImage list item that represents the
+		// given basename inside the loaded page-edit iframe. PW has
+		// shipped a few different markup conventions for the image
+		// grid (gridImage vs InputfieldFileItem, with data-href or
+		// data-basename or neither), so this tries them in order and
+		// falls back to a substring match against any <img src>.
+		function findImageItem(doc, basename) {
+			var direct = doc.querySelector(
+				'[data-basename="' + basename + '"], ' +
+				'[data-href$="/' + basename + '"]'
+			);
+			if (direct) return direct.closest('.gridImage, .InputfieldFileItem') || direct;
+			var imgs = doc.querySelectorAll('.gridImage img, .InputfieldFileItem img');
+			for (var i = 0; i < imgs.length; i++) {
+				if (imgs[i].src.indexOf(basename) !== -1) {
+					return imgs[i].closest('.gridImage, .InputfieldFileItem') || imgs[i];
+				}
+			}
+			return null;
+		}
+
 		// Open PW's page editor for a single image field in a modal
 		// iframe — the user gets the native crop / focus / variations
 		// UI plus all the page-level metadata fields. modal=1 strips
@@ -386,6 +407,34 @@
 			var iframe = document.createElement('iframe');
 			iframe.src = url;
 			iframe.className = 'ml-image-modal-iframe';
+
+			// PW's "fields=" filter narrows the form to one image field,
+			// but a field is a collection — the form still shows every
+			// file. After load, find the file the user clicked, scroll
+			// it into view, and flash an outline so they don't have to
+			// scan a long list. Same-origin so DOM access is fine;
+			// guarded with try/catch in case PW renames things in a
+			// future version.
+			iframe.addEventListener('load', function () {
+				if (!basename) return;
+				try {
+					var doc = iframe.contentDocument;
+					if (!doc) return;
+					var target = findImageItem(doc, basename);
+					if (!target) return;
+					target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+					var prevOutline = target.style.outline;
+					var prevOffset  = target.style.outlineOffset;
+					target.style.outline = '3px solid #5b8cd6';
+					target.style.outlineOffset = '4px';
+					setTimeout(function () {
+						target.style.outline = prevOutline;
+						target.style.outlineOffset = prevOffset;
+					}, 2500);
+				} catch (e) {
+					// Cross-origin guard — shouldn't trip for same-origin admin.
+				}
+			});
 
 			dialog.appendChild(bar);
 			dialog.appendChild(iframe);
