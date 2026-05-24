@@ -74,40 +74,41 @@ class ProcessMediaLibrary extends Process {
 	 */
 	public function init() {
 		parent::init();
-		// Filter the Pagefiles collection BEFORE InputfieldImage's
-		// render loop runs — that way only one <li> wrapper is
-		// emitted at all. Hooking ::renderItem alone wasn't enough:
-		// renderItemWrap still emits an empty <li> for every file
-		// whose renderItem returned ''.
-		$this->addHookBefore('InputfieldImage::renderList', $this, 'filterToFocusedImage');
+		// renderList() is declared on InputfieldFile (InputfieldImage
+		// just inherits it) and iterates its $value PARAMETER, not
+		// $this->value — so we must mutate $event->arguments(0)
+		// instead of the inputfield property. Hooking the parent
+		// catches both File and Image fields in one shot.
+		$this->addHookBefore('InputfieldFile::renderList', $this, 'filterToFocusedImage');
 	}
 
 	/**
 	 * When the request URL carries ml_focus_hash=<md5(basename)>,
-	 * narrow the InputfieldImage's value down to just the matching
-	 * file so the render loop only iterates once. Pagefile::hash()
-	 * is literally md5($basename), so we can compute the same key
-	 * client-side without loading Pagefile objects in our table.
+	 * narrow the Pagefiles passed into ___renderList() down to just
+	 * the matching file so the render loop only iterates once.
+	 * Pagefile::hash() is literally md5($basename), so we can compute
+	 * the same key client-side without loading Pagefile objects in
+	 * our table view.
 	 *
 	 * Cloning the WireArray keeps the page's actual image collection
 	 * untouched; the clone holds the same Pageimage refs, we just
-	 * drop the non-matching ones from the clone. Save is safe
-	 * regardless: POST is a fresh request, $page->images is freshly
-	 * loaded, InputfieldFile::processInput iterates the full set and
-	 * only touches files whose form keys are present.
+	 * drop the non-matching ones from it. Save is safe regardless:
+	 * POST is a fresh request, $page->images is freshly loaded,
+	 * InputfieldFile::processInput iterates the full set and only
+	 * touches files whose form keys are present.
 	 */
 	protected function filterToFocusedImage(HookEvent $event) {
 		$focus = (string) $this->wire('input')->get('ml_focus_hash');
 		if (!preg_match('/^[a-f0-9]{32}$/', $focus)) return;
-		$inputfield = $event->object;
-		$value = $inputfield->value;
-		if (!$value instanceof Pageimages && !$value instanceof Pagefiles) return;
+
+		$value = $event->arguments(0);
+		if (!$value instanceof Pagefiles) return;
 
 		$filtered = clone $value;
 		foreach ($filtered as $pf) {
 			if ($pf->hash !== $focus) $filtered->remove($pf);
 		}
-		$inputfield->value = $filtered;
+		$event->arguments(0, $filtered);
 	}
 
 	/**
