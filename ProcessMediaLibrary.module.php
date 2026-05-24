@@ -1357,18 +1357,25 @@ class ProcessMediaLibrary extends Process {
 		}
 		$out .= '</select>';
 
-		// Tag picker — AND-match against row tags. Multi-select with
-		// every tag used in the library; ⌘/Ctrl-click to multi-pick.
+		// Tag picker — AND-match against row tags. Collapsible <details>
+		// with one checkbox per used tag. Auto-opens when any tag is
+		// already picked so the user sees what's active.
 		if ($tagFilterPool) {
 			$selectedTags = $filters['tags'] ?? [];
-			$out .= '<select name="tags[]" multiple size="4" class="uk-select uk-form-small ml-filter-tags"'
-				. ' title="' . $san->entities($this->_('Tags (AND-match)')) . '">';
+			$open = !empty($selectedTags) ? ' open' : '';
+			$summaryText = $selectedTags
+				? sprintf($this->_('Tags (%d)'), count($selectedTags))
+				: $this->_('Tags');
+			$out .= '<details class="ml-filter-tags"' . $open . '>';
+			$out .= '<summary>' . $san->entities($summaryText) . '</summary>';
+			$out .= '<div class="ml-filter-tags-list">';
 			foreach ($tagFilterPool as $t) {
-				$sel = in_array($t, $selectedTags, true) ? ' selected' : '';
-				$out .= '<option value="' . $san->entities($t) . '"' . $sel . '>'
-					. $san->entities($t) . '</option>';
+				$sel = in_array($t, $selectedTags, true) ? ' checked' : '';
+				$out .= '<label><input type="checkbox" name="tags[]" value="'
+					. $san->entities($t) . '"' . $sel . '> '
+					. $san->entities($t) . '</label>';
 			}
-			$out .= '</select>';
+			$out .= '</div></details>';
 		}
 
 		$out .= '<label class="ml-filter-check">'
