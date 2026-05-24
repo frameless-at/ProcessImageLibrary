@@ -141,6 +141,38 @@ textarea.ml-cell-input {
 	transition: opacity 0.15s ease-out;
 }
 
+/* Tag editor — checkbox grid for useTags=2 whitelist mode. */
+.ml-tag-editor {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	background: #fff;
+	border: 1px solid #888;
+	border-radius: 2px;
+	padding: 6px;
+	min-width: 12rem;
+}
+.ml-tag-editor-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	max-height: 12rem;
+	overflow-y: auto;
+}
+.ml-tag-editor-list label {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	white-space: nowrap;
+	cursor: pointer;
+	font-weight: normal;
+}
+.ml-tag-editor-done {
+	align-self: flex-start;
+	padding: 2px 10px;
+	cursor: pointer;
+}
+
 /* Pagination */
 .ml-pagination {
 	display: flex;
