@@ -351,29 +351,21 @@
 		}
 
 		// Hide every gridImage / InputfieldFileItem in the iframe
-		// EXCEPT the one whose basename matches, then auto-expand it
-		// so the user lands directly in the per-image action panel
-		// (Crop / Focus / Variations / Actions + Description / Tags /
-		// Customs). PW has no URL endpoint that renders a single
-		// file's item — this DOM filter is the only way to scope the
-		// page-edit form down to one image while keeping the native
-		// edit UI intact.
-		function focusSingleImage(doc, basename) {
-			var items = doc.querySelectorAll('.gridImage, .InputfieldFileItem');
-			var target = null;
-			Array.prototype.forEach.call(items, function (item) {
-				var matched = false;
-				var imgs = item.querySelectorAll('img');
-				for (var i = 0; i < imgs.length; i++) {
-					if (imgs[i].src.indexOf(basename) !== -1) { matched = true; break; }
-				}
-				if (matched) {
-					target = item;
-				} else {
-					item.style.display = 'none';
-				}
-			});
+		// EXCEPT the one whose file-hash matches, then auto-expand
+		// it so the user lands directly in the per-image action
+		// panel (Crop / Focus / Variations / Actions + Description /
+		// Tags / Customs). PW labels each grid item with
+		// id="file_<md5(basename)>" via Pagefile::hash(), and our
+		// thumb cell carries the same md5 in data-file-hash, so the
+		// match is a direct getElementById — no URL-string fishing.
+		function focusSingleImage(doc, fileHash) {
+			if (!fileHash) return;
+			var target = doc.getElementById('file_' + fileHash);
 			if (!target) return;
+			var items = doc.querySelectorAll('.gridImage, .InputfieldFileItem');
+			Array.prototype.forEach.call(items, function (item) {
+				if (item !== target) item.style.display = 'none';
+			});
 			// Expand the panel. InputfieldImage toggles the metadata
 			// strip on a click of .gridImage__inner; falling back to
 			// the item itself for older / file-only markup.
@@ -396,7 +388,8 @@
 			var pageId    = td.dataset.pageId;
 			var fieldName = td.dataset.field;
 			var basename  = td.dataset.basename || '';
-			if (!pageId || !fieldName || !basename) return;
+			var fileHash  = td.dataset.fileHash || '';
+			if (!pageId || !fieldName || !basename || !fileHash) return;
 
 			var url = config.adminUrl + 'page/edit/'
 				+ '?id=' + encodeURIComponent(pageId)
@@ -429,7 +422,7 @@
 			iframe.addEventListener('load', function () {
 				try {
 					var doc = iframe.contentDocument;
-					if (doc) focusSingleImage(doc, basename);
+					if (doc) focusSingleImage(doc, fileHash);
 				} catch (e) {
 					// Cross-origin guard — shouldn't trip for same-origin admin.
 				}
@@ -603,7 +596,7 @@
 					// the page-edit data attrs when the host page is
 					// editable, so unauthorised users just see the thumb
 					// without a clickable cursor.
-					var thumbTd = e.target.closest('.ml-cell-thumb[data-page-id]');
+					var thumbTd = e.target.closest('.ml-cell-thumb[data-file-hash]');
 					if (thumbTd) {
 						e.preventDefault();
 						openImageEditor(thumbTd);

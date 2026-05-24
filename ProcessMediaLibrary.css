@@ -51,11 +51,12 @@
 	background: #fafafa;
 }
 /* Clickable when host page is editable — JS opens the PW image
-   editor in a modal iframe. data-page-id is only set in that case. */
-.ml-cell-thumb[data-page-id] {
+   editor in a modal iframe. data-file-hash is only set in that case
+   (and is the matching key for finding the gridImage item there). */
+.ml-cell-thumb[data-file-hash] {
 	cursor: pointer;
 }
-.ml-cell-thumb[data-page-id] img:hover {
+.ml-cell-thumb[data-file-hash] img:hover {
 	outline: 2px solid #5b8cd6;
 }
 .ml-cell-page a {
