@@ -169,6 +169,29 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
+	 * Reduce a filters array to just the entries that actually
+	 * narrow the result set, for the export's meta.appliedFilter
+	 * field. Drops empty strings, falsy booleans, empty arrays and
+	 * the no_custom map when nothing is checked. Truthy entries
+	 * (non-empty string, true bool, non-empty array) are kept as-is.
+	 */
+	protected function summarizeActiveFilters(array $filters): array {
+		$active = [];
+		foreach ($filters as $k => $v) {
+			if (is_string($v)) {
+				if ($v !== '') $active[$k] = $v;
+			} elseif (is_array($v)) {
+				if (!empty($v)) $active[$k] = $v;
+			} elseif (is_bool($v)) {
+				if ($v) $active[$k] = true;
+			} elseif ($v !== null && $v !== 0) {
+				$active[$k] = $v;
+			}
+		}
+		return $active;
+	}
+
+	/**
 	 * Bottom-of-page Export / Import block. Export is a plain link
 	 * to the export endpoint that carries the current filter URL,
 	 * so the resulting download is exactly the slice the user is
@@ -180,14 +203,14 @@ class ProcessMediaLibrary extends Process {
 		$san = $this->wire('sanitizer');
 		$session = $this->wire('session');
 
-		$qs = '';
-		// Reuse buildUrl to get the same filter querystring the
-		// listing built; sort / page / pageSize aren't relevant for
-		// export so we pass defaults.
-		$built = $this->buildUrl($filters, 1, '', '', self::PAGE_SIZE_DEFAULT);
-		if ($built !== './' && $built !== '') $qs = $built;
-
-		$exportUrl = $this->wire('page')->url . 'export/' . $qs;
+		$exportBase = $this->wire('page')->url . 'export/';
+		// Initial href reflects the filter URL at server-render time,
+		// but the listing's AJAX filter swaps push new state into the
+		// URL without re-rendering this block — JS hijacks the click
+		// and rebuilds the URL from location.search so the download
+		// always matches what the user is currently looking at.
+		$initialQs = $this->buildUrl($filters, 1, '', '', self::PAGE_SIZE_DEFAULT);
+		$exportUrl = $exportBase . ($initialQs !== './' && $initialQs !== '' ? $initialQs : '');
 		$importUrl = $this->wire('page')->url . 'import/';
 
 		$csrfName  = $session->CSRF->getTokenName();
@@ -205,8 +228,9 @@ class ProcessMediaLibrary extends Process {
 			. '<p class="ml-ei-help">' . $san->entities(
 				$this->_('Export hands an LLM the current filter set (image URL, page context, current values). The LLM fills empty fields, you re-upload the JSON to apply changes.')
 			) . '</p>'
-			. '<p><a class="uk-button uk-button-primary uk-button-small ml-export-link" href="'
-			. $san->entities($exportUrl) . '">'
+			. '<p><a class="uk-button uk-button-primary uk-button-small ml-export-link"'
+			. ' href="' . $san->entities($exportUrl) . '"'
+			. ' data-export-base="' . $san->entities($exportBase) . '">'
 			. $san->entities($exportLabel) . '</a></p>'
 			. '<form class="ml-import-form" enctype="multipart/form-data" method="post" action="'
 			. $san->entities($importUrl) . '">'
@@ -914,11 +938,7 @@ class ProcessMediaLibrary extends Process {
 				'exportedAt'     => date('c'),
 				'siteUrl'        => $siteUrl,
 				'imageCount'     => count($images),
-				'appliedFilter'  => (object) array_filter($filters, fn($v) =>
-					!(is_string($v) && $v === '')
-					&& $v !== null
-					&& !(is_array($v) && empty($v))
-				),
+				'appliedFilter'  => (object) $this->summarizeActiveFilters($filters),
 				'editableFields' => ['description', 'tags', 'custom.*'],
 				'instructions'   => [
 					'Each entry in "images" represents one editable image.',
