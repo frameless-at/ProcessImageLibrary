@@ -216,9 +216,10 @@ class ProcessMediaLibrary extends Process {
 		$csrfName  = $session->CSRF->getTokenName();
 		$csrfValue = $session->CSRF->getTokenValue();
 
-		$exportLabel = $this->_('Export current filter as JSON');
-		$importLabel = $this->_('Import JSON');
-		$pickLabel   = $this->_('Choose JSON file');
+		$exportJsonLabel = $this->_('Export JSON');
+		$exportCsvLabel  = $this->_('Export CSV');
+		$importLabel = $this->_('Import');
+		$pickLabel   = $this->_('Choose JSON or CSV file');
 
 		return '<div class="Inputfield InputfieldFieldset InputfieldStateCollapsed ml-export-import">'
 			. '<label class="InputfieldHeader InputfieldStateToggle">'
@@ -228,15 +229,23 @@ class ProcessMediaLibrary extends Process {
 			. '<p class="ml-ei-help">' . $san->entities(
 				$this->_('Export hands an LLM the current filter set (image URL, page context, current values). The LLM fills empty fields, you re-upload the JSON to apply changes.')
 			) . '</p>'
-			. '<p><a class="uk-button uk-button-primary uk-button-small ml-export-link"'
+			. '<p>'
+			. '<a class="uk-button uk-button-primary uk-button-small ml-export-link"'
 			. ' href="' . $san->entities($exportUrl) . '"'
-			. ' data-export-base="' . $san->entities($exportBase) . '">'
-			. $san->entities($exportLabel) . '</a></p>'
+			. ' data-export-base="' . $san->entities($exportBase) . '"'
+			. ' data-format="json">'
+			. $san->entities($exportJsonLabel) . '</a> '
+			. '<a class="uk-button uk-button-default uk-button-small ml-export-link"'
+			. ' href="' . $san->entities($exportUrl . (str_contains($exportUrl, '?') ? '&' : '?') . 'format=csv') . '"'
+			. ' data-export-base="' . $san->entities($exportBase) . '"'
+			. ' data-format="csv">'
+			. $san->entities($exportCsvLabel) . '</a>'
+			. '</p>'
 			. '<form class="ml-import-form" enctype="multipart/form-data" method="post" action="'
 			. $san->entities($importUrl) . '">'
 			. '<input type="hidden" name="' . $san->entities($csrfName) . '" value="' . $san->entities($csrfValue) . '">'
 			. '<label class="ml-ei-file"><span>' . $san->entities($pickLabel) . '</span> '
-			. '<input type="file" name="file" accept="application/json,.json" required></label> '
+			. '<input type="file" name="file" accept="application/json,.json,text/csv,.csv" required></label> '
 			. '<button type="submit" class="uk-button uk-button-default uk-button-small">'
 			. $san->entities($importLabel) . '</button>'
 			. '</form>'
@@ -952,6 +961,12 @@ class ProcessMediaLibrary extends Process {
 			'images' => $images,
 		];
 
+		$format = (string) $this->wire('input')->get('format');
+		if ($format === 'csv') {
+			$this->streamExportCsv($images);
+			exit;
+		}
+
 		$filename = sprintf('media-library-export-%s.json', date('Ymd-His'));
 		header('Content-Type: application/json; charset=utf-8');
 		header('Content-Disposition: attachment; filename="' . $filename . '"');
@@ -960,6 +975,97 @@ class ProcessMediaLibrary extends Process {
 			JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
 		);
 		exit;
+	}
+
+	/**
+	 * Parse a CSV import body into the same {images: [...]} shape
+	 * the JSON import path produces. Columns prefixed "custom_" fold
+	 * back into a custom object per row. Returns null when the
+	 * header row is missing or unusable; missing optional columns
+	 * (description, tags, etc.) are tolerated and emitted as empty
+	 * strings so downstream "if value changed" checks still work.
+	 *
+	 * @return array<int,array<string,mixed>>|null
+	 */
+	protected function parseImportCsv(string $raw): ?array {
+		// Strip UTF-8 BOM if present so the first header isn't garbled.
+		if (strncmp($raw, "\xEF\xBB\xBF", 3) === 0) $raw = substr($raw, 3);
+		$stream = fopen('php://memory', 'r+');
+		fwrite($stream, $raw);
+		rewind($stream);
+
+		$headers = fgetcsv($stream);
+		if (!is_array($headers) || !$headers) { fclose($stream); return null; }
+		$headers = array_map(fn($h) => trim((string) $h), $headers);
+
+		$out = [];
+		while (($row = fgetcsv($stream)) !== false) {
+			// Skip blank lines fgetcsv yields as [null].
+			if (count($row) === 1 && ($row[0] === null || $row[0] === '')) continue;
+			$entry = ['custom' => []];
+			foreach ($headers as $i => $h) {
+				if ($h === '') continue;
+				$val = (string) ($row[$i] ?? '');
+				if (strncmp($h, 'custom_', 7) === 0) {
+					$entry['custom'][substr($h, 7)] = $val;
+				} else {
+					$entry[$h] = $val;
+				}
+			}
+			$out[] = $entry;
+		}
+		fclose($stream);
+		return $out;
+	}
+
+	/**
+	 * CSV variant of the export. Same row content as the JSON path,
+	 * flattened — one row per image, with each Custom subfield
+	 * promoted to its own "custom_<name>" column (union across the
+	 * export, sorted, so the column layout stays stable across
+	 * rows). UTF-8 BOM prepended so Excel reads umlauts correctly;
+	 * fputcsv handles quoting + newlines-in-fields.
+	 *
+	 * @param array<int,array<string,mixed>> $images
+	 */
+	protected function streamExportCsv(array $images): void {
+		$customCols = [];
+		foreach ($images as $img) {
+			foreach ((array) $img['custom'] as $k => $_) {
+				$customCols[$k] = true;
+			}
+		}
+		ksort($customCols);
+		$customCols = array_keys($customCols);
+
+		$headers = [
+			'id', 'pageId', 'fieldName', 'basename', 'url',
+			'pageTitle', 'pageUrl', 'dimensions', 'filesize',
+			'description', 'tags',
+		];
+		foreach ($customCols as $c) $headers[] = 'custom_' . $c;
+
+		$filename = sprintf('media-library-export-%s.csv', date('Ymd-His'));
+		header('Content-Type: text/csv; charset=utf-8');
+		header('Content-Disposition: attachment; filename="' . $filename . '"');
+		// UTF-8 BOM — keeps Excel from mangling umlauts.
+		echo "\xEF\xBB\xBF";
+		$out = fopen('php://output', 'w');
+		fputcsv($out, $headers);
+		foreach ($images as $img) {
+			$row = [];
+			foreach ($headers as $h) {
+				if (strncmp($h, 'custom_', 7) === 0) {
+					$key = substr($h, 7);
+					$customs = (array) $img['custom'];
+					$row[] = (string) ($customs[$key] ?? '');
+				} else {
+					$row[] = (string) ($img[$h] ?? '');
+				}
+			}
+			fputcsv($out, $row);
+		}
+		fclose($out);
 	}
 
 	/**
@@ -984,18 +1090,41 @@ class ProcessMediaLibrary extends Process {
 			return $this->jsonError('Invalid CSRF token', 403);
 		}
 
-		// Accept either an uploaded "file" or pasted JSON via "payload".
+		// Accept either an uploaded "file" or pasted text via "payload".
 		$raw = '';
+		$uploadName = '';
 		if (!empty($_FILES['file']['tmp_name']) && $_FILES['file']['error'] === UPLOAD_ERR_OK) {
 			$raw = (string) file_get_contents($_FILES['file']['tmp_name']);
+			$uploadName = (string) ($_FILES['file']['name'] ?? '');
 		} elseif ($this->wire('input')->post('payload')) {
 			$raw = (string) $this->wire('input')->post('payload');
 		}
-		if ($raw === '') return $this->jsonError('No JSON provided');
+		if ($raw === '') return $this->jsonError('No file or payload provided');
 
-		$data = json_decode($raw, true);
-		if (!is_array($data) || empty($data['images']) || !is_array($data['images'])) {
-			return $this->jsonError('Invalid JSON shape — expected {"images": [...]}.');
+		// Format detection: filename extension wins, then peek the
+		// first non-whitespace byte ({/[ ⇒ JSON, anything else ⇒ CSV).
+		$isCsv = false;
+		$lowerName = strtolower($uploadName);
+		if (str_ends_with($lowerName, '.csv')) {
+			$isCsv = true;
+		} elseif (str_ends_with($lowerName, '.json')) {
+			$isCsv = false;
+		} else {
+			$peek = ltrim($raw);
+			$isCsv = !($peek !== '' && ($peek[0] === '{' || $peek[0] === '['));
+		}
+
+		if ($isCsv) {
+			$images = $this->parseImportCsv($raw);
+			if ($images === null) {
+				return $this->jsonError('Invalid CSV — could not parse header row.');
+			}
+			$data = ['images' => $images];
+		} else {
+			$data = json_decode($raw, true);
+			if (!is_array($data) || empty($data['images']) || !is_array($data['images'])) {
+				return $this->jsonError('Invalid JSON shape — expected {"images": [...]}.');
+			}
 		}
 
 		$sanitizer     = $this->wire('sanitizer');
