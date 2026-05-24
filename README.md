@@ -6,7 +6,7 @@ See [MediaLibrary-Konzept.md](MediaLibrary-Konzept.md) for the design document.
 
 ## Status
 
-Phase 7 — work in progress. Column-driven sort via header clicks (asc/desc, sort+dir persist across filter and pagination). Inline edit for description, tags, and text-typed custom-fields-on-images. Reads are cached via WireCache and auto-invalidate on save. Filter bar with full-text search, template / image-field selects, missing-X toggles (incl. per custom field) and galleries-only. AJAX re-render and richer custom-field input types in later phases.
+Phase 8 — work in progress. AJAX re-render of the results region: filter submit, sort and pagination swap the table in place without a full reload, browser back/forward replays via popstate. Column-driven sort, inline edit (description, tags, text custom fields), WireCache reads with template-based invalidation, filter bar (full-text search, template / field selects, missing-X toggles, galleries-only). Richer custom-field input types and bulk operations in later phases.
 
 ## Requirements
 
