@@ -74,32 +74,40 @@ class ProcessMediaLibrary extends Process {
 	 */
 	public function init() {
 		parent::init();
-		$this->addHookBefore('InputfieldImage::renderItem', $this, 'filterToFocusedImage');
+		// Filter the Pagefiles collection BEFORE InputfieldImage's
+		// render loop runs — that way only one <li> wrapper is
+		// emitted at all. Hooking ::renderItem alone wasn't enough:
+		// renderItemWrap still emits an empty <li> for every file
+		// whose renderItem returned ''.
+		$this->addHookBefore('InputfieldImage::renderList', $this, 'filterToFocusedImage');
 	}
 
 	/**
 	 * When the request URL carries ml_focus_hash=<md5(basename)>,
-	 * suppress every InputfieldImage::renderItem() call whose
-	 * Pagefile's hash() doesn't match. The hash convention is
-	 * literally md5($pagefile->basename()) — see Pagefile::hash() —
-	 * so we can compute the same key client-side without loading
-	 * pagefiles in our table view.
+	 * narrow the InputfieldImage's value down to just the matching
+	 * file so the render loop only iterates once. Pagefile::hash()
+	 * is literally md5($basename), so we can compute the same key
+	 * client-side without loading Pagefile objects in our table.
 	 *
-	 * Save is safe: InputfieldFile::processInput() iterates the full
-	 * Pagefiles collection at POST time and only acts on items whose
-	 * form keys are present. Items we suppress at render are simply
-	 * absent from form data — processInput skips them, no deletion.
+	 * Cloning the WireArray keeps the page's actual image collection
+	 * untouched; the clone holds the same Pageimage refs, we just
+	 * drop the non-matching ones from the clone. Save is safe
+	 * regardless: POST is a fresh request, $page->images is freshly
+	 * loaded, InputfieldFile::processInput iterates the full set and
+	 * only touches files whose form keys are present.
 	 */
 	protected function filterToFocusedImage(HookEvent $event) {
 		$focus = (string) $this->wire('input')->get('ml_focus_hash');
-		// md5 is fixed shape — anything else is either absent or
-		// someone tampering with the URL; either way, do nothing.
 		if (!preg_match('/^[a-f0-9]{32}$/', $focus)) return;
-		$pagefile = $event->arguments(0);
-		if (!$pagefile instanceof Pagefile) return;
-		if ($pagefile->hash === $focus) return;
-		$event->replace = true;
-		$event->return  = '';
+		$inputfield = $event->object;
+		$value = $inputfield->value;
+		if (!$value instanceof Pageimages && !$value instanceof Pagefiles) return;
+
+		$filtered = clone $value;
+		foreach ($filtered as $pf) {
+			if ($pf->hash !== $focus) $filtered->remove($pf);
+		}
+		$inputfield->value = $filtered;
 	}
 
 	/**
