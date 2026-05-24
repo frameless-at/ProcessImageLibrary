@@ -828,16 +828,20 @@
 		// always rebuild the href from the live URL at click time.
 		// Browser sees Content-Disposition: attachment on the
 		// response and triggers a download without navigating away.
-		var exportLink = document.querySelector('.ml-export-link');
-		if (exportLink) {
-			exportLink.addEventListener('click', function (e) {
-				var base = exportLink.dataset.exportBase
-					|| exportLink.href.split('?')[0];
+		var exportLinks = document.querySelectorAll('.ml-export-link');
+		Array.prototype.forEach.call(exportLinks, function (link) {
+			link.addEventListener('click', function (e) {
+				var base = link.dataset.exportBase
+					|| link.href.split('?')[0];
 				if (!base) return;
 				e.preventDefault();
-				window.location.href = base + (location.search || '');
+				var qs = location.search || '';
+				if (link.dataset.format === 'csv') {
+					qs += (qs ? '&' : '?') + 'format=csv';
+				}
+				window.location.href = base + qs;
 			});
-		}
+		});
 
 		// -- Import form ----------------------------------------------
 		// Submit via fetch so the user stays on their current filter
