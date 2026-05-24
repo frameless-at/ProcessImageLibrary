@@ -1559,6 +1559,26 @@ class ProcessMediaLibrary extends Process {
 		$outer->label     = $this->_('Filters & Columns');
 		$outer->collapsed = $active ? Inputfield::collapsedNo : Inputfield::collapsedYes;
 
+		// Columns sub-fieldset first — checkboxes have no name= so they
+		// don't enter the filter form's URL params, and the JS toggle
+		// hook (.ml-col-toggle, localStorage-backed) works regardless
+		// of where in the DOM the checkboxes live.
+		/** @var \ProcessWire\InputfieldFieldset $columnsFs */
+		$columnsFs = $modules->get('InputfieldFieldset');
+		$columnsFs->name      = 'mlColumns';
+		$columnsFs->label     = $this->_('Columns');
+		$columnsFs->collapsed = Inputfield::collapsedYes;
+
+		$columnsMarkup = $modules->get('InputfieldMarkup');
+		$columnsMarkup->skipLabel = Inputfield::skipLabelHeader;
+		// InputfieldMarkup picks up "value" first, then "markup" as a
+		// legacy fallback — setting both is harmless but value is what
+		// the modern render path actually reads.
+		$columnsMarkup->value = $this->renderColumnsListMarkup($customCols);
+		$columnsFs->add($columnsMarkup);
+
+		$outer->add($columnsFs);
+
 		// Row 1: q + template + field, 33% each.
 		$q = $modules->get('InputfieldText');
 		$q->name        = 'q';
@@ -1651,23 +1671,6 @@ class ProcessMediaLibrary extends Process {
 		$reset->addClass('ml-reset');
 		$reset->columnWidth = 50;
 		$outer->add($reset);
-
-		// Columns sub-fieldset — checkboxes have no name= so they
-		// don't enter the filter form's URL params, and the JS toggle
-		// hook (.ml-col-toggle, localStorage-backed) works regardless
-		// of where in the DOM the checkboxes live.
-		/** @var \ProcessWire\InputfieldFieldset $columnsFs */
-		$columnsFs = $modules->get('InputfieldFieldset');
-		$columnsFs->name      = 'mlColumns';
-		$columnsFs->label     = $this->_('Columns');
-		$columnsFs->collapsed = Inputfield::collapsedYes;
-
-		$columnsMarkup = $modules->get('InputfieldMarkup');
-		$columnsMarkup->skipLabel = Inputfield::skipLabelHeader;
-		$columnsMarkup->markup    = $this->renderColumnsListMarkup($customCols);
-		$columnsFs->add($columnsMarkup);
-
-		$outer->add($columnsFs);
 
 		$form->add($outer);
 
