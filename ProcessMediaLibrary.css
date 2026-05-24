@@ -66,6 +66,16 @@
 	white-space: nowrap;
 }
 
+/* Non-applicable custom-field cell — the row's image field doesn't
+   host this custom, so the cell can't be edited. Muted + not-allowed
+   cursor signal that visually; a title attribute names the reason. */
+.ml-cell-na {
+	color: #c4c4c4;
+	cursor: not-allowed;
+	text-align: center;
+	user-select: none;
+}
+
 /* Inline edit */
 .ml-cell-editable {
 	/* pointer (not text) so iOS Safari fires click events on non-native

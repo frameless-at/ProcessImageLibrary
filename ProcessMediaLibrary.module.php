@@ -1538,8 +1538,9 @@ class ProcessMediaLibrary extends Process {
 		// <input type="text">. Built once across every image field's
 		// declared subfields so the per-row loop is just a lookup.
 		$fieldsApi  = $this->wire('fields');
+		$customByField = $this->getCustomByField();
 		$customInputTypes = [];
-		foreach ($this->getCustomByField() as $names) {
+		foreach ($customByField as $names) {
 			foreach ($names as $n) {
 				if (isset($customInputTypes[$n])) continue;
 				$f = $fieldsApi->get($n);
@@ -1659,7 +1660,22 @@ class ProcessMediaLibrary extends Process {
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap">' . $san->entities($size) . '</td>';
 
+			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
+				// When the customCols list is the union across image
+				// fields (no field filter), some rows won't host every
+				// listed subfield — render those as visually disabled
+				// instead of editable so a click can't trigger an editor
+				// for a field the server would reject anyway.
+				if (!in_array($name, $rowCustoms, true)) {
+					$out .= '<td class="ml-cell-na" title="'
+						. $san->entities(sprintf(
+							$this->_('%1$s is not configured on %2$s'),
+							$name,
+							(string) $row['fieldName']
+						)) . '">—</td>';
+					continue;
+				}
 				$val = $row['custom'][$name] ?? '';
 				if (is_array($val)) $val = json_encode($val);
 				$inputType = $customInputTypes[$name] ?? 'text';
