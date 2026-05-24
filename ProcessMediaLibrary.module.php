@@ -17,7 +17,8 @@ class ProcessMediaLibrary extends Process {
 	const ADMIN_PAGE_NAME = 'media-library';
 	const PERMISSION_NAME = 'media-library-access';
 	const CACHE_PREFIX = 'media-library-';
-	const PAGE_SIZE = 50;
+	const PAGE_SIZE_DEFAULT = 50;
+	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 	/**
 	 * Flat-row keys allowed as a sort column, mapped to compare type.
@@ -126,6 +127,14 @@ class ProcessMediaLibrary extends Process {
 		if (!$imageFields || !$eligibleTemplates) {
 			return $this->renderEmptyState($imageFields, $eligibleTemplates);
 		}
+		// Boot gate: the media-library-access permission is the hard
+		// security check, but the module is only useful to someone
+		// who can actually edit at least one image-field page. If
+		// they can't, short-circuit with a tailored message instead
+		// of rendering a table they can't write to.
+		if (!$this->canEditAnyImagePage($eligibleTemplates)) {
+			return $this->renderNoEditAccess();
+		}
 
 		$customCols   = $this->collectCustomNames();
 		$filters      = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
@@ -220,14 +229,15 @@ class ProcessMediaLibrary extends Process {
 		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
 		$this->applySort($rows, $sort, $dir);
 
+		$pageSize   = $this->readPageSize();
 		$total      = count($rows);
-		$totalPages = max(1, (int) ceil($total / self::PAGE_SIZE));
+		$totalPages = max(1, (int) ceil($total / $pageSize));
 		$page       = min(max(1, $requestedPage), $totalPages);
-		$offset     = ($page - 1) * self::PAGE_SIZE;
-		$slice      = array_slice($rows, $offset, self::PAGE_SIZE);
+		$offset     = ($page - 1) * $pageSize;
+		$slice      = array_slice($rows, $offset, $pageSize);
 		$slice      = $this->hydrateSlice($slice);
 
-		$pager = $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir);
+		$pager = $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir, $pageSize);
 		return $pager
 			. $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
 			. $this->renderTagDatalists($usedTags)
@@ -1133,6 +1143,17 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
+	 * Whitelist-validate the ps GET param against PAGE_SIZE_OPTIONS,
+	 * falling back to PAGE_SIZE_DEFAULT for missing / out-of-range
+	 * values. URL-driven (not stored) so it stays bookmarkable
+	 * alongside the other filter / sort / page state.
+	 */
+	protected function readPageSize(): int {
+		$ps = (int) $this->wire('input')->get('ps');
+		return in_array($ps, self::PAGE_SIZE_OPTIONS, true) ? $ps : self::PAGE_SIZE_DEFAULT;
+	}
+
+	/**
 	 * Sort flat rows in place by the given column. Custom-fields-on-images
 	 * are addressed via the 'custom:<name>' token. Ties break on
 	 * "pageId:basename" so output is deterministic across requests.
@@ -1464,6 +1485,34 @@ class ProcessMediaLibrary extends Process {
 			$msg = $this->_('No template currently uses an image field. Add an image field to a template and reload.');
 		}
 		return '<p class="ml-empty">' . $san->entities($msg) . '</p>';
+	}
+
+	/**
+	 * True if the current user can edit at least one page that uses
+	 * one of the eligible image-field templates. Superusers always
+	 * pass; users without any page-edit permission short-circuit to
+	 * false. Otherwise we lazy-iterate (findMany doesn't load all
+	 * pages at once) and bail on the first match — typically one
+	 * page in for users with broad edit access, bounded by total
+	 * matching-page count for the worst case.
+	 */
+	protected function canEditAnyImagePage(array $eligibleTemplates): bool {
+		if (!$eligibleTemplates) return false;
+		$user = $this->wire('user');
+		if ($user->isSuperuser()) return true;
+		if (!$user->hasPermission('page-edit')) return false;
+		$selector = 'template=' . implode('|', $eligibleTemplates) . ', include=hidden';
+		foreach ($this->wire('pages')->findMany($selector) as $p) {
+			if ($p->editable()) return true;
+		}
+		return false;
+	}
+
+	protected function renderNoEditAccess(): string {
+		$san = $this->wire('sanitizer');
+		return '<p class="ml-empty">' . $san->entities(
+			$this->_('You don\'t have edit access to any page with an image field. Ask an admin to grant the relevant page-edit permission.')
+		) . '</p>';
 	}
 
 	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = [], string $sort = '', string $dir = '', array $tagFilterPool = []): string {
@@ -1871,7 +1920,7 @@ class ProcessMediaLibrary extends Process {
 			. '</th>';
 	}
 
-	protected function renderPagination(int $total, int $page, int $totalPages, array $filters, string $sort = '', string $dir = ''): string {
+	protected function renderPagination(int $total, int $page, int $totalPages, array $filters, string $sort = '', string $dir = '', int $pageSize = self::PAGE_SIZE_DEFAULT): string {
 		$san = $this->wire('sanitizer');
 
 		$summary = sprintf(
@@ -1884,20 +1933,32 @@ class ProcessMediaLibrary extends Process {
 
 		if ($totalPages > 1) {
 			if ($page > 1) {
-				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page - 1, $sort, $dir)) . '">'
+				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page - 1, $sort, $dir, $pageSize)) . '">'
 					. $san->entities($this->_('← Previous')) . '</a>';
 			}
 			if ($page < $totalPages) {
-				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page + 1, $sort, $dir)) . '">'
+				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page + 1, $sort, $dir, $pageSize)) . '">'
 					. $san->entities($this->_('Next →')) . '</a>';
 			}
 		}
+
+		// Per-page picker. Client-side JS intercepts the change event,
+		// rewrites the URL and triggers the AJAX refresh; non-JS users
+		// see the picker but it requires a manual reload to take effect.
+		$out .= '<label class="ml-page-size">'
+			. $san->entities($this->_('per page')) . ' '
+			. '<select class="ml-page-size-picker">';
+		foreach (self::PAGE_SIZE_OPTIONS as $opt) {
+			$sel = $opt === $pageSize ? ' selected' : '';
+			$out .= '<option value="' . $opt . '"' . $sel . '>' . $opt . '</option>';
+		}
+		$out .= '</select></label>';
 
 		$out .= '</div>';
 		return $out;
 	}
 
-	protected function buildUrl(array $filters, int $page, string $sort = '', string $dir = ''): string {
+	protected function buildUrl(array $filters, int $page, string $sort = '', string $dir = '', int $pageSize = self::PAGE_SIZE_DEFAULT): string {
 		$params = [
 			'q'              => $filters['q'],
 			'template'       => $filters['template'],
@@ -1908,6 +1969,7 @@ class ProcessMediaLibrary extends Process {
 			'p'              => $page > 1 ? (string) $page : '',
 			'sort'           => ($sort !== '' && $sort !== self::DEFAULT_SORT) ? $sort : '',
 			'dir'            => $dir === 'desc' ? 'desc' : '',
+			'ps'             => $pageSize !== self::PAGE_SIZE_DEFAULT ? (string) $pageSize : '',
 		];
 		foreach ($filters['no_custom'] ?? [] as $name => $on) {
 			if ($on) $params['no_custom_' . $name] = '1';
