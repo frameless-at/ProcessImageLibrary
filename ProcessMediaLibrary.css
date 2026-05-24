@@ -16,6 +16,7 @@
 .ml-table-scroll {
 	overflow-x: auto;
 	-webkit-overflow-scrolling: touch;
+	margin-top: 1rem;
 }
 
 /* Table */
