@@ -638,6 +638,14 @@
 						else selection.delete(cb.dataset.key);
 					});
 					syncSelectAllHeader();
+				} else if (t.classList.contains('ml-page-size-picker')) {
+					// Drop ?p — the current page number rarely makes
+					// sense at the new size; landing back on page 1 is
+					// the least surprising default.
+					var url = new URL(location.href);
+					url.searchParams.set('ps', t.value);
+					url.searchParams.delete('p');
+					replaceFromQs(url.search, true);
 				}
 			});
 		}
