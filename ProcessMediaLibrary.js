@@ -413,8 +413,22 @@
 			// the iframe triggers a full reload that drops our hiding.
 			iframe.addEventListener('load', function () {
 				try {
+					var win = iframe.contentWindow;
 					var doc = iframe.contentDocument;
-					if (doc) focusSingleImage(doc, fileHash);
+					if (!win || !doc) return;
+					// PW redirects to $page->editUrl() after save and
+					// drops our extra GET — without re-applying it,
+					// the next render would show every file again.
+					// One throwaway reload re-arms the server filter.
+					var search = win.location.search || '';
+					if (search.indexOf('ml_focus_hash=' + fileHash) === -1) {
+						var sep = search ? '&' : '?';
+						var newHref = win.location.pathname + search + sep
+							+ 'ml_focus_hash=' + encodeURIComponent(fileHash);
+						win.location.replace(newHref);
+						return;
+					}
+					focusSingleImage(doc, fileHash);
 				} catch (e) {
 					// Cross-origin guard — shouldn't trip for same-origin admin.
 				}
