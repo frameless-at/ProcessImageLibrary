@@ -64,6 +64,45 @@ class ProcessMediaLibrary extends Process {
 	protected $customByFieldCache = null;
 
 	/**
+	 * Module bootstrap — autoloaded on admin pages so the renderItem
+	 * hook below fires while ProcessPageEdit is rendering an
+	 * InputfieldImage. The hook is the heart of the "edit one image
+	 * in an iframe" feature: it lets the page-edit form render only
+	 * the file the user clicked instead of the whole collection,
+	 * with no client-side hiding and no thumbnail-generation cost
+	 * for the others.
+	 */
+	public function init() {
+		parent::init();
+		$this->addHookBefore('InputfieldImage::renderItem', $this, 'filterToFocusedImage');
+	}
+
+	/**
+	 * When the request URL carries ml_focus_hash=<md5(basename)>,
+	 * suppress every InputfieldImage::renderItem() call whose
+	 * Pagefile's hash() doesn't match. The hash convention is
+	 * literally md5($pagefile->basename()) — see Pagefile::hash() —
+	 * so we can compute the same key client-side without loading
+	 * pagefiles in our table view.
+	 *
+	 * Save is safe: InputfieldFile::processInput() iterates the full
+	 * Pagefiles collection at POST time and only acts on items whose
+	 * form keys are present. Items we suppress at render are simply
+	 * absent from form data — processInput skips them, no deletion.
+	 */
+	protected function filterToFocusedImage(HookEvent $event) {
+		$focus = (string) $this->wire('input')->get('ml_focus_hash');
+		// md5 is fixed shape — anything else is either absent or
+		// someone tampering with the URL; either way, do nothing.
+		if (!preg_match('/^[a-f0-9]{32}$/', $focus)) return;
+		$pagefile = $event->arguments(0);
+		if (!$pagefile instanceof Pagefile) return;
+		if ($pagefile->hash === $focus) return;
+		$event->replace = true;
+		$event->return  = '';
+	}
+
+	/**
 	 * Render the main media library admin page.
 	 */
 	public function ___execute() {
