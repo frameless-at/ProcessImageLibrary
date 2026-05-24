@@ -231,6 +231,14 @@
 				batchBar.appendChild(addLabel);
 				batchBar.appendChild(repLabel);
 				td.appendChild(batchBar);
+
+				// Suppress the focus shift on radio clicks so the editor's
+				// blur doesn't fire when the user just wants to switch mode.
+				// Safari nulls e.relatedTarget on blur, so the relatedTarget
+				// guard below isn't reliable on its own. preventDefault on
+				// mousedown cancels the focus behavior; the subsequent click
+				// still toggles the radio.
+				batchBar.addEventListener('mousedown', function (e) { e.preventDefault(); });
 			}
 
 			setTimeout(widget.focus, 0);
