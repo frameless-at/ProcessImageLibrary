@@ -562,22 +562,33 @@ class ProcessMediaLibrary extends Process {
 	 * right widget (whitelist checkbox group vs. free-text + autocomplete)
 	 * and the save endpoint can validate against the whitelist.
 	 *
+	 * Effective mode for our editor (NOT the raw PW useTags value):
+	 *   0 = tags disabled
+	 *   1 = free-form (useTags set but no tagsList content)
+	 *   2 = whitelist (tagsList has parseable content)
+	 *
+	 * Why we don't trust $field->useTags directly: modern PW stores useTags
+	 * as a bit-mask of feature flags (1=manual, 2=list, 4=…, 8=…), so the
+	 * value can be e.g. 8 when the user enabled a whitelist. Our editor only
+	 * cares whether a list is present, so we key off tagsList content.
+	 *
 	 * @return array<string,array{mode:int,allowed:array<int,string>}>
-	 *   keyed by field name. mode: 0 = no tags, 1 = free, 2 = whitelist.
 	 */
 	protected function getTagsConfig(): array {
 		$out = [];
 		foreach ($this->wire('fields') as $field) {
 			if (!($field->type instanceof FieldtypeImage)) continue;
-			$mode = (int) $field->useTags;
-			$allowed = [];
-			if ($mode === 2) {
-				// tagsList is a whitespace/newline-separated string in the
-				// field config — PW doesn't auto-parse it for us.
-				$raw = (string) $field->tagsList;
-				$allowed = preg_split('/[\s,]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+			$useTagsRaw = $field->useTags;
+			$rawList    = (string) $field->tagsList;
+			$allowed    = preg_split('/[\s,]+/', $rawList, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+
+			$effective = 0;
+			if ($useTagsRaw) {
+				$effective = $allowed ? 2 : 1;
 			}
-			$out[$field->name] = ['mode' => $mode, 'allowed' => $allowed];
+
+			$out[$field->name] = ['mode' => $effective, 'allowed' => $allowed];
 		}
 		return $out;
 	}
