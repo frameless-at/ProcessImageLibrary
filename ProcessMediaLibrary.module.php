@@ -204,6 +204,27 @@ class ProcessMediaLibrary extends Process {
 		$out .= '<dt>Eligible templates</dt><dd><code>' . $sanitizer->entities(implode(', ', $eligibleTemplates)) . '</code></dd>';
 		$out .= '<dt>Custom fields per image field</dt><dd><pre>'
 			. $sanitizer->entities(json_encode($customByField, JSON_PRETTY_PRINT)) . '</pre></dd>';
+
+		// Show what getTagsConfig() actually detects per field, plus the raw
+		// useTags / tagsList values straight off the Field, so we can tell
+		// whether the discovery or the parsing is wrong when the editor
+		// widget doesn't switch.
+		$tagsCfg = $this->getTagsConfig();
+		$rawTags = [];
+		foreach ($imageFields as $name) {
+			$f = $this->wire('fields')->get($name);
+			if (!$f) continue;
+			$rawTags[$name] = [
+				'useTags'          => $f->useTags,
+				'useTags (type)'   => gettype($f->useTags),
+				'tagsList'         => $f->tagsList,
+				'tagsList (type)'  => gettype($f->tagsList),
+			];
+		}
+		$out .= '<dt>getTagsConfig()</dt><dd><pre>'
+			. $sanitizer->entities(json_encode($tagsCfg, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) . '</pre></dd>';
+		$out .= '<dt>Raw $field->useTags / tagsList</dt><dd><pre>'
+			. $sanitizer->entities(json_encode($rawTags, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) . '</pre></dd>';
 		$out .= '<dt>Selector</dt><dd><code>' . $sanitizer->entities($selector) . '</code></dd>';
 		$out .= '<dt>$pages->count($selector)</dt><dd>' . (int) $pageCount . '</dd>';
 		$out .= '<dt>findRaw fields requested</dt><dd><code>'
