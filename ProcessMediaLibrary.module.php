@@ -725,7 +725,7 @@ class ProcessMediaLibrary extends Process {
 		// Output formatting off before mutating: setters work on the raw value
 		// and avoid double-encoding for fields like description.
 		$page->of(false);
-		$img->set($subfield, $value);
+		$this->writeLangValue($img, $subfield, $value);
 		if (!$page->save($fieldName)) {
 			return $this->jsonError('Save failed');
 		}
@@ -735,9 +735,9 @@ class ProcessMediaLibrary extends Process {
 
 		// Return the value PW actually stored — may differ from input after
 		// sanitization (e.g. tags lowercased, whitespace normalized, etc.).
-		$stored = $img->get($subfield);
-		if (is_object($stored)) $stored = (string) $stored;
-		if (is_array($stored)) $stored = json_encode($stored, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+		// Multilang values get reduced to the current-user-language string
+		// so the inline cell display matches what the editor sees.
+		$stored = $this->normalizeDescription($img->get($subfield));
 
 		return json_encode([
 			'ok'    => true,
@@ -911,7 +911,7 @@ class ProcessMediaLibrary extends Process {
 					}
 				}
 
-				$img->set($subfield, $itemValue);
+				$this->writeLangValue($img, $subfield, $itemValue);
 				$fieldsTouched[$fn] = true;
 				$succeeded++;
 			}
@@ -1010,7 +1010,7 @@ class ProcessMediaLibrary extends Process {
 				'fieldName'   => (string) $row['fieldName'],
 				'basename'    => (string) $row['basename'],
 				'url'         => $img->httpUrl,
-				'pageTitle'   => (string) $row['pageTitle'],
+				'pageTitle'   => $this->normalizeDescription($row['pageTitle']),
 				'pageUrl'     => $page->httpUrl,
 				'dimensions'  => ($row['width'] && $row['height'])
 					? ((int) $row['width']) . 'x' . ((int) $row['height'])
@@ -1259,8 +1259,12 @@ class ProcessMediaLibrary extends Process {
 
 				if (array_key_exists('description', $item)) {
 					$new = (string) $item['description'];
-					if ($new !== (string) $img->description) {
-						$img->set('description', $new);
+					// Compare against the current-language string the export
+					// would have produced, so an unchanged value doesn't get
+					// re-written. writeLangValue() then touches only the
+					// editor's language, preserving translations.
+					if ($new !== $this->normalizeDescription($img->description)) {
+						$this->writeLangValue($img, 'description', $new);
 						$dirty = true;
 					}
 				}
@@ -1278,7 +1282,7 @@ class ProcessMediaLibrary extends Process {
 						$new = implode(' ', $tokens);
 					}
 					if ($new !== (string) $img->tags) {
-						$img->set('tags', $new);
+						$this->writeLangValue($img, 'tags', $new);
 						$dirty = true;
 					}
 				}
@@ -1289,8 +1293,8 @@ class ProcessMediaLibrary extends Process {
 						$name = $sanitizer->fieldName((string) $name);
 						if (!in_array($name, $allowedCustoms, true)) continue;
 						$new = is_scalar($val) ? (string) $val : '';
-						if ($new !== (string) $img->get($name)) {
-							$img->set($name, $new);
+						if ($new !== $this->normalizeDescription($img->get($name))) {
+							$this->writeLangValue($img, $name, $new);
 							$dirty = true;
 						}
 					}
@@ -1714,13 +1718,18 @@ class ProcessMediaLibrary extends Process {
 
 		usort($rows, function ($a, $b) use ($sort, $dir, $type, $isCustom, $custom) {
 			if ($isCustom) {
-				$va = $a['custom'][$custom] ?? '';
-				$vb = $b['custom'][$custom] ?? '';
-				if (is_array($va)) $va = json_encode($va);
-				if (is_array($vb)) $vb = json_encode($vb);
+				$va = $this->normalizeDescription($a['custom'][$custom] ?? '');
+				$vb = $this->normalizeDescription($b['custom'][$custom] ?? '');
 			} else {
-				$va = $a[$sort] ?? '';
-				$vb = $b[$sort] ?? '';
+				// Multilang values (pageTitle, description) arrive as
+				// {langId: value} arrays from findRaw — collapse to the
+				// editor's current language so strcasecmp doesn't blow up.
+				$va = $type === 'string'
+					? $this->normalizeDescription($a[$sort] ?? '')
+					: ($a[$sort] ?? '');
+				$vb = $type === 'string'
+					? $this->normalizeDescription($b[$sort] ?? '')
+					: ($b[$sort] ?? '');
 			}
 			$cmp = $type === 'int'
 				? ((int) $va <=> (int) $vb)
@@ -1784,8 +1793,7 @@ class ProcessMediaLibrary extends Process {
 
 			foreach ($noCustom as $name => $_) {
 				$val = $r['custom'][$name] ?? '';
-				if (is_array($val)) $val = json_encode($val);
-				if (trim((string) $val) !== '') return false;
+				if (trim($this->normalizeDescription($val)) !== '') return false;
 			}
 
 			if ($hasQ) {
@@ -1802,7 +1810,7 @@ class ProcessMediaLibrary extends Process {
 					$desc . ' '
 					. $tags . ' '
 					. ((string) $r['basename']) . ' '
-					. ((string) ($r['pageTitle'] ?? '')) . ' '
+					. $this->normalizeDescription($r['pageTitle'] ?? '') . ' '
 					. $customHay
 				);
 				if (mb_strpos($hay, $q) === false) return false;
@@ -1877,9 +1885,7 @@ class ProcessMediaLibrary extends Process {
 				if (isset($row['custom'][$customName])) continue; // already filled by bulk pass
 				$val = $img->get($customName);
 				if ($val === null || $val === '') continue;
-				if (is_object($val)) $val = (string) $val;
-				if (is_array($val)) $val = json_encode($val, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-				$row['custom'][$customName] = $val;
+				$row['custom'][$customName] = $this->normalizeDescription($val);
 			}
 		}
 		unset($row);
@@ -1939,9 +1945,10 @@ class ProcessMediaLibrary extends Process {
 			foreach ($customNames as $name) {
 				$val = $img->get($name);
 				if ($val === null) continue;
-				if (is_object($val)) $val = (string) $val;
-				if (is_array($val)) $val = json_encode($val, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-				$row['custom'][$name] = $val;
+				// Reduce to the current-user-language string instead of
+				// JSON-encoding the raw {langId: value} map — that's what
+				// the table and the inline editor expect downstream.
+				$row['custom'][$name] = $this->normalizeDescription($val);
 			}
 		}
 		unset($row);
@@ -1969,18 +1976,87 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Multilingual descriptions arrive as assoc arrays keyed by language id.
-	 * Take the first non-empty value as the display string for now.
+	 * Reduce a possibly-multilingual subfield value to a display
+	 * string. For multilingual installs we honour the editor's
+	 * current language with a fallback chain (current → default →
+	 * id 0 → first non-empty), so the table shows the user the
+	 * value that matches their admin language instead of a
+	 * JSON-encoded {langId: value} dump.
+	 *
+	 * @param mixed $val
 	 */
-	protected function normalizeDescription($desc): string {
-		if (is_string($desc)) return $desc;
-		if (is_array($desc)) {
-			foreach ($desc as $v) {
-				if (is_string($v) && $v !== '') return $v;
-			}
-			return '';
+	protected function normalizeDescription($val): string {
+		if ($val === null) return '';
+		if (is_string($val)) return $val;
+		if (is_object($val)) {
+			// LanguagesPageFieldValue::__toString returns the current
+			// user-language value (with PW's own fallback rules).
+			return (string) $val;
 		}
-		return (string) $desc;
+		if (!is_array($val)) return (string) $val;
+
+		// Raw {langId: string} shape (typical for findRaw and for
+		// $img->get('description') on a multilang Pagefile).
+		$user = $this->wire('user');
+		$userLangId = ($user && $user->language && $user->language->id) ? (int) $user->language->id : 0;
+		if (isset($val[$userLangId]) && $val[$userLangId] !== '') {
+			return (string) $val[$userLangId];
+		}
+		$languages = $this->wire('languages');
+		if ($languages) {
+			$def = $languages->getDefault();
+			if ($def && isset($val[$def->id]) && $val[$def->id] !== '') {
+				return (string) $val[$def->id];
+			}
+		}
+		if (isset($val[0]) && $val[0] !== '') return (string) $val[0];
+		foreach ($val as $v) {
+			if (is_string($v) && $v !== '') return $v;
+		}
+		return '';
+	}
+
+	/**
+	 * Write a single subfield value while preserving translations
+	 * the editor isn't touching. Without this, $img->set('description',
+	 * $value) on a multilang field blanks every other language —
+	 * including ones the editor doesn't even have access to.
+	 *
+	 * Uses Pagefile's dedicated description($lang, $value) signature
+	 * when available; falls back to the LanguagesPageFieldValue's
+	 * setLanguageValue() for custom subfields, and finally to a
+	 * plain set() for installs without multilang.
+	 */
+	protected function writeLangValue(Pagefile $img, string $subfield, string $value): void {
+		$languages = $this->wire('languages');
+		if (!$languages || $languages->count() < 2) {
+			$img->set($subfield, $value);
+			return;
+		}
+
+		$user = $this->wire('user');
+		$lang = ($user && $user->language && $user->language->id)
+			? $user->language
+			: $languages->getDefault();
+
+		if ($subfield === 'description') {
+			// Pagefile has a dedicated per-language setter.
+			$img->description($lang, $value);
+			return;
+		}
+
+		// Custom subfields backed by a multilang Fieldtype expose a
+		// LanguagesPageFieldValue — update only the current lang and
+		// write the same object back so the other lang slots survive.
+		$current = $img->get($subfield);
+		if (is_object($current) && method_exists($current, 'setLanguageValue')) {
+			$current->setLanguageValue($lang, $value);
+			$img->set($subfield, $current);
+			return;
+		}
+
+		// Non-multilang field on a multilang install — plain set is fine.
+		$img->set($subfield, $value);
 	}
 
 	protected function formatFilesize(int $bytes): string {
@@ -2407,12 +2483,13 @@ class ProcessMediaLibrary extends Process {
 			}
 			$out .= '</td>';
 
+			$pageTitle = $this->normalizeDescription($row['pageTitle']);
 			$out .= '<td class="ml-cell-page" data-col="page">';
 			if (!empty($row['pageEditUrl'])) {
 				$out .= '<a href="' . $san->entities($row['pageEditUrl']) . '">'
-					. $san->entities((string) $row['pageTitle']) . '</a>';
+					. $san->entities($pageTitle) . '</a>';
 			} else {
-				$out .= $san->entities((string) $row['pageTitle']);
+				$out .= $san->entities($pageTitle);
 			}
 			$out .= '</td>';
 
@@ -2470,8 +2547,10 @@ class ProcessMediaLibrary extends Process {
 						)) . '">—</td>';
 					continue;
 				}
-				$val = $row['custom'][$name] ?? '';
-				if (is_array($val)) $val = json_encode($val);
+				// The hydration pass already reduces multilang values to the
+				// editor's current language; the defensive normalize here
+				// handles older row-cache entries that still carry arrays.
+				$val = $this->normalizeDescription($row['custom'][$name] ?? '');
 				$inputType = $customInputTypes[$name] ?? 'text';
 				$out .= '<td class="ml-cell-editable"' . $colAttr . ' ' . $editAttrs
 					. ' data-subfield="' . $san->entities($name) . '"'
