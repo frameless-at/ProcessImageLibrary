@@ -933,27 +933,26 @@
 		}
 
 		// -- Column visibility + order toggle -------------------------
-		// State lives in localStorage. Visibility ("ml-columns-v1")
-		// holds per-column on/off; order ("ml-columns-order-v1")
-		// holds the user's drag-sorted column sequence. Admin can
-		// preset a default-hidden list via module config — that's
-		// what config.defaultHiddenColumns reflects, used only when
-		// the user has no explicit preference for a column yet.
-		var COLUMNS_STORAGE_KEY = 'ml-columns-v1';
-		var COLUMNS_ORDER_STORAGE_KEY = 'ml-columns-order-v1';
+		// State is per-user, stored server-side in $user->meta via
+		// the user-prefs endpoint. Cross-device by design — the same
+		// user on a different browser sees the same column layout.
+		// Admin can preset a default-hidden list via module config;
+		// that's only consulted when the user has no saved
+		// preference for a column yet.
 		var columnsState = {};
 		var columnsOrder = [];
 		var defaultHidden = {};
 		(config.defaultHiddenColumns || []).forEach(function (k) { defaultHidden[k] = true; });
-		try {
-			var storedVis = localStorage.getItem(COLUMNS_STORAGE_KEY);
-			if (storedVis) columnsState = JSON.parse(storedVis) || {};
-		} catch (e) { columnsState = {}; }
-		try {
-			var storedOrder = localStorage.getItem(COLUMNS_ORDER_STORAGE_KEY);
-			if (storedOrder) columnsOrder = JSON.parse(storedOrder) || [];
-			if (!Array.isArray(columnsOrder)) columnsOrder = [];
-		} catch (e) { columnsOrder = []; }
+		if (config.userColumns) {
+			if (config.userColumns.visible && typeof config.userColumns.visible === 'object') {
+				Object.keys(config.userColumns.visible).forEach(function (k) {
+					columnsState[k] = !!config.userColumns.visible[k];
+				});
+			}
+			if (Array.isArray(config.userColumns.order)) {
+				columnsOrder = config.userColumns.order.slice();
+			}
+		}
 
 		function isColumnHidden(col) {
 			if (col in columnsState) return columnsState[col] === false;
@@ -997,14 +996,31 @@
 			});
 		}
 
-		function saveColumnsState() {
-			try { localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(columnsState)); }
-			catch (e) {}
-		}
-
-		function saveColumnsOrder() {
-			try { localStorage.setItem(COLUMNS_ORDER_STORAGE_KEY, JSON.stringify(columnsOrder)); }
-			catch (e) {}
+		// Debounced POST to the user-prefs endpoint. Avoids
+		// hammering the server when the user flips checkboxes
+		// quickly or drags a column through several positions —
+		// only the last state within the window goes over the wire.
+		var savePrefsTimer = null;
+		function saveColumnsPrefs() {
+			if (!config.userPrefsUrl) return;
+			clearTimeout(savePrefsTimer);
+			savePrefsTimer = setTimeout(function () {
+				var fd = new FormData();
+				fd.append('columns', JSON.stringify({
+					visible: columnsState,
+					order:   columnsOrder
+				}));
+				if (config.csrf && config.csrf.name) {
+					fd.append(config.csrf.name, config.csrf.value);
+				}
+				fetch(config.userPrefsUrl, {
+					method: 'POST',
+					body: fd,
+					credentials: 'same-origin'
+				}).catch(function (err) {
+					console.error('[MediaLibrary] save column prefs failed:', err);
+				});
+			}, 400);
 		}
 
 		// Sync the <li> order in the picker to match columnsOrder
@@ -1042,7 +1058,7 @@
 						list.querySelectorAll('li input[type="checkbox"]'),
 						function (cb) { return cb.dataset.col; }
 					);
-					saveColumnsOrder();
+					saveColumnsPrefs();
 					applyColumnOrder();
 				});
 				li.addEventListener('dragover', function (e) {
@@ -1063,7 +1079,7 @@
 			cb.checked = !isColumnHidden(col);
 			cb.addEventListener('change', function () {
 				columnsState[col] = cb.checked;
-				saveColumnsState();
+				saveColumnsPrefs();
 				applyColumnVisibility();
 			});
 		});

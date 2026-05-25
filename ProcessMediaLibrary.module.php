@@ -76,6 +76,32 @@ class ProcessMediaLibrary extends Process {
 	 *
 	 * @return array<int,string>
 	 */
+	/**
+	 * Read the user's saved column preferences from their meta
+	 * (per-user, cross-device — concept-preferred location). Returns
+	 * a normalized shape so JS + render code don't need to defend.
+	 *
+	 * @return array{visible:array<string,bool>,order:array<int,string>}
+	 */
+	protected function getUserColumnsPref(): array {
+		$raw = $this->wire('user')->meta('mediaLibraryColumns');
+		$visible = [];
+		$order   = [];
+		if (is_array($raw)) {
+			if (isset($raw['visible']) && is_array($raw['visible'])) {
+				foreach ($raw['visible'] as $col => $vis) {
+					$visible[(string) $col] = (bool) $vis;
+				}
+			}
+			if (isset($raw['order']) && is_array($raw['order'])) {
+				foreach ($raw['order'] as $col) {
+					if (is_string($col) && $col !== '') $order[] = $col;
+				}
+			}
+		}
+		return ['visible' => $visible, 'order' => $order];
+	}
+
 	protected function getDefaultHiddenColumns(): array {
 		$val = $this->get('defaultHiddenColumns');
 		if (!is_array($val)) return [];
@@ -362,10 +388,38 @@ class ProcessMediaLibrary extends Process {
 		foreach ($customCols as $name) {
 			$cols['custom:' . $name] = $name;
 		}
-		$hidden = array_flip($this->getDefaultHiddenColumns());
+
+		// User-saved column prefs override the admin defaults. When
+		// nothing's saved for a column, fall back to the admin's
+		// "hidden by default" config so a fresh user lands on the
+		// site-wide preset before they touch a checkbox.
+		$pref = $this->getUserColumnsPref();
+		$visible = $pref['visible'];
+		$order   = $pref['order'];
+		$defaultHidden = array_flip($this->getDefaultHiddenColumns());
+
+		// Re-order according to user pref: known cols in pref order
+		// come first; any cols not in pref keep their built-in order
+		// at the tail.
+		if ($order) {
+			$ordered = [];
+			foreach ($order as $key) {
+				if (isset($cols[$key])) {
+					$ordered[$key] = $cols[$key];
+				}
+			}
+			foreach ($cols as $key => $label) {
+				if (!isset($ordered[$key])) $ordered[$key] = $label;
+			}
+			$cols = $ordered;
+		}
+
 		$items = '';
 		foreach ($cols as $key => $label) {
-			$checked = isset($hidden[$key]) ? '' : ' checked';
+			$isVisible = array_key_exists($key, $visible)
+				? $visible[$key]
+				: !isset($defaultHidden[$key]);
+			$checked = $isVisible ? ' checked' : '';
 			$items .= '<li class="ml-col-item" draggable="true"><label>'
 				. '<input type="checkbox" class="ml-col-toggle" data-col="'
 				. $san->entities($key) . '"' . $checked . '>'
@@ -1068,11 +1122,7 @@ class ProcessMediaLibrary extends Process {
 
 			$customs = [];
 			foreach ($customByField[$row['fieldName']] ?? [] as $name) {
-				$val = $img->get($name);
-				if ($val === null) $val = '';
-				if (is_object($val)) $val = (string) $val;
-				if (is_array($val)) $val = $this->normalizeDescription($val);
-				$customs[$name] = (string) $val;
+				$customs[$name] = $this->exportSubfieldValue($img, $name);
 			}
 
 			$images[] = [
@@ -1091,8 +1141,8 @@ class ProcessMediaLibrary extends Process {
 					? ((int) $row['width']) . 'x' . ((int) $row['height'])
 					: '',
 				'filesize'    => (int) $row['filesize'],
-				'description' => $this->normalizeDescription($row['description']),
-				'tags'        => (string) $row['tags'],
+				'description' => $this->exportSubfieldValue($img, 'description'),
+				'tags'        => $this->exportSubfieldValue($img, 'tags'),
 				'custom'      => (object) $customs, // force {} when empty so the shape is consistent
 			];
 		}
@@ -1157,16 +1207,54 @@ class ProcessMediaLibrary extends Process {
 			foreach ($headers as $i => $h) {
 				if ($h === '') continue;
 				$val = (string) ($row[$i] ?? '');
-				if (strncmp($h, 'custom_', 7) === 0) {
-					$entry['custom'][substr($h, 7)] = $val;
-				} else {
-					$entry[$h] = $val;
+				$this->assignCsvCell($entry, $h, $val);
+			}
+			// After all columns are read, collapse multilang accumulators
+			// into the same shape the JSON path uses ({langId: value}).
+			foreach (['description', 'tags'] as $f) {
+				if (isset($entry[$f . '__langs'])) {
+					$entry[$f] = $entry[$f . '__langs'];
+					unset($entry[$f . '__langs']);
 				}
+			}
+			if (isset($entry['custom__langs']) && is_array($entry['custom__langs'])) {
+				foreach ($entry['custom__langs'] as $name => $map) {
+					$entry['custom'][$name] = $map;
+				}
+				unset($entry['custom__langs']);
 			}
 			$out[] = $entry;
 		}
 		fclose($stream);
 		return $out;
+	}
+
+	/**
+	 * Drop one CSV cell into the import entry array, handling the
+	 * four column-name shapes the export emits:
+	 *   id / pageId / pageTitle / …       → plain key
+	 *   description | tags                 → plain key
+	 *   description_<lid> | tags_<lid>     → accumulate into …__langs map
+	 *   custom_<name>                      → entry.custom[name]
+	 *   custom_<name>_<lid>                → entry.custom__langs[name][lid]
+	 *
+	 * @param array<string,mixed> $entry passed by reference
+	 */
+	protected function assignCsvCell(array &$entry, string $header, string $val): void {
+		if (strncmp($header, 'custom_', 7) === 0) {
+			$rest = substr($header, 7);
+			if (preg_match('/^(.+)_(\d+)$/', $rest, $m)) {
+				$entry['custom__langs'][$m[1]][(int) $m[2]] = $val;
+			} else {
+				$entry['custom'][$rest] = $val;
+			}
+			return;
+		}
+		if (preg_match('/^(description|tags)_(\d+)$/', $header, $m)) {
+			$entry[$m[1] . '__langs'][(int) $m[2]] = $val;
+			return;
+		}
+		$entry[$header] = $val;
 	}
 
 	/**
@@ -1180,43 +1268,114 @@ class ProcessMediaLibrary extends Process {
 	 * @param array<int,array<string,mixed>> $images
 	 */
 	protected function streamExportCsv(array $images): void {
-		$customCols = [];
+		// Walk all image entries first to compute the column set —
+		// multilang subfields expand into one column per language
+		// (suffix _<langId>), single-language stay as one column.
+		// Stable shape per export ensures every row has every cell.
+		$langCols = [];   // [field => [langId => true]]
+		$plainCols = [];  // [field => true]
+		$customCols = []; // [customName => [langId => true] | true]
+
+		$mark = function (string $key, $val) use (&$langCols, &$plainCols) {
+			if (is_array($val)) {
+				foreach ($val as $langId => $_) {
+					$langCols[$key][(int) $langId] = true;
+				}
+			} else {
+				$plainCols[$key] = true;
+			}
+		};
+
 		foreach ($images as $img) {
-			foreach ((array) $img['custom'] as $k => $_) {
-				$customCols[$k] = true;
+			$mark('description', $img['description'] ?? '');
+			$mark('tags', $img['tags'] ?? '');
+			foreach ((array) $img['custom'] as $c => $cval) {
+				if (is_array($cval)) {
+					foreach ($cval as $langId => $_) {
+						$customCols[$c][(int) $langId] = true;
+					}
+				} else {
+					if (!isset($customCols[$c])) $customCols[$c] = true;
+				}
 			}
 		}
-		ksort($customCols);
-		$customCols = array_keys($customCols);
 
-		$headers = [
-			'id', 'pageId', 'fieldName', 'basename', 'url',
-			'pageTitle', 'pageUrl', 'dimensions', 'filesize',
-			'description', 'tags',
-		];
-		foreach ($customCols as $c) $headers[] = 'custom_' . $c;
+		$headers = ['id', 'pageId', 'fieldName', 'basename', 'url',
+			'pageTitle', 'pageUrl', 'dimensions', 'filesize'];
+
+		// Build headers for description / tags — language-suffixed if
+		// any image carried multilang values for that subfield.
+		foreach (['description', 'tags'] as $f) {
+			if (isset($langCols[$f])) {
+				$lids = array_keys($langCols[$f]);
+				sort($lids);
+				foreach ($lids as $lid) $headers[] = $f . '_' . $lid;
+			} elseif (isset($plainCols[$f])) {
+				$headers[] = $f;
+			}
+		}
+
+		ksort($customCols);
+		foreach ($customCols as $c => $langs) {
+			if (is_array($langs)) {
+				$lids = array_keys($langs);
+				sort($lids);
+				foreach ($lids as $lid) $headers[] = 'custom_' . $c . '_' . $lid;
+			} else {
+				$headers[] = 'custom_' . $c;
+			}
+		}
 
 		$filename = sprintf('media-library-export-%s.csv', date('Ymd-His'));
 		header('Content-Type: text/csv; charset=utf-8');
 		header('Content-Disposition: attachment; filename="' . $filename . '"');
-		// UTF-8 BOM — keeps Excel from mangling umlauts.
 		echo "\xEF\xBB\xBF";
 		$out = fopen('php://output', 'w');
 		fputcsv($out, $headers);
 		foreach ($images as $img) {
 			$row = [];
 			foreach ($headers as $h) {
-				if (strncmp($h, 'custom_', 7) === 0) {
-					$key = substr($h, 7);
-					$customs = (array) $img['custom'];
-					$row[] = (string) ($customs[$key] ?? '');
-				} else {
-					$row[] = (string) ($img[$h] ?? '');
-				}
+				$row[] = (string) $this->csvCellValue($h, $img);
 			}
 			fputcsv($out, $row);
 		}
 		fclose($out);
+	}
+
+	/**
+	 * Resolve a CSV cell value by header name. Handles the four
+	 * shapes:
+	 *   - identity / metadata column ("id", "pageId" …)
+	 *   - language-suffixed multilang column ("description_1979")
+	 *   - language-suffixed multilang custom ("custom_summary_0")
+	 *   - plain single-language column ("description", "custom_code")
+	 *
+	 * @param array<string,mixed> $img
+	 */
+	protected function csvCellValue(string $header, array $img): string {
+		// custom_<name>_<lid> | custom_<name>
+		if (strncmp($header, 'custom_', 7) === 0) {
+			$rest = substr($header, 7);
+			$customs = (array) ($img['custom'] ?? []);
+			if (preg_match('/^(.+)_(\d+)$/', $rest, $m)) {
+				$name = $m[1];
+				$lid  = (int) $m[2];
+				$val  = $customs[$name] ?? '';
+				return is_array($val) ? (string) ($val[$lid] ?? '') : (string) $val;
+			}
+			$val = $customs[$rest] ?? '';
+			return is_array($val) ? $this->normalizeDescription($val) : (string) $val;
+		}
+		// description_<lid> / tags_<lid>
+		if (preg_match('/^(description|tags)_(\d+)$/', $header, $m)) {
+			$val = $img[$m[1]] ?? '';
+			$lid = (int) $m[2];
+			return is_array($val) ? (string) ($val[$lid] ?? '') : (string) $val;
+		}
+		// Plain description / tags or any identity column
+		$val = $img[$header] ?? '';
+		if (is_array($val)) return $this->normalizeDescription($val);
+		return (string) $val;
 	}
 
 	/**
@@ -1228,6 +1387,49 @@ class ProcessMediaLibrary extends Process {
 	 * whitelist when useTags=2. Items whose values match the page's
 	 * current state are skipped so we don't pile up empty saves.
 	 */
+	/**
+	 * Persist column visibility + order to the current user's meta
+	 * (mediaLibraryColumns key). JS debounces calls here whenever a
+	 * checkbox toggles or a column gets drag-reordered, so on next
+	 * page load — on any device — the user sees the same column
+	 * layout they left off with.
+	 */
+	public function ___executeUserPrefs() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$raw = (string) $this->wire('input')->post('columns');
+		$data = $raw !== '' ? json_decode($raw, true) : null;
+		if (!is_array($data)) {
+			return $this->jsonError('Invalid payload');
+		}
+
+		$clean = ['visible' => [], 'order' => []];
+		if (isset($data['visible']) && is_array($data['visible'])) {
+			foreach ($data['visible'] as $col => $vis) {
+				if (!is_string($col) || $col === '') continue;
+				$clean['visible'][$col] = (bool) $vis;
+			}
+		}
+		if (isset($data['order']) && is_array($data['order'])) {
+			foreach ($data['order'] as $col) {
+				if (is_string($col) && $col !== '') $clean['order'][] = $col;
+			}
+		}
+
+		$this->wire('user')->meta('mediaLibraryColumns', $clean);
+		return $this->jsonResponse(['ok' => true]);
+	}
+
 	public function ___executeImport() {
 		$config = $this->wire('config');
 		$config->ajax = true;
@@ -1334,31 +1536,31 @@ class ProcessMediaLibrary extends Process {
 				$dirty = false;
 
 				if (array_key_exists('description', $item)) {
-					$new = (string) $item['description'];
-					// Compare against the current-language string the export
-					// would have produced, so an unchanged value doesn't get
-					// re-written. writeLangValue() then touches only the
-					// editor's language, preserving translations.
-					if ($new !== $this->normalizeDescription($img->description)) {
-						$this->writeLangValue($img, 'description', $new);
+					if ($this->importSubfieldValue($img, 'description', $item['description'])) {
 						$dirty = true;
 					}
 				}
 
 				if (array_key_exists('tags', $item)) {
-					$new = (string) $item['tags'];
+					$raw = $item['tags'];
+					// Tag whitelist still needs validating on a per-string
+					// basis. For multilang tags (array shape), validate
+					// each language slot individually.
 					$cfg = $tagsConfig[$fn] ?? ['mode' => 0, 'allowed' => []];
+					$candidates = is_array($raw) ? $raw : ['_' => (string) $raw];
+					$invalid = false;
 					if ($cfg['mode'] === 2) {
-						$tokens = preg_split('/[\s,]+/', $new, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-						$bad = array_diff($tokens, $cfg['allowed']);
-						if ($bad) {
-							$failed[] = "Tag(s) not in whitelist for $fn: " . implode(', ', $bad);
-							continue;
+						foreach ($candidates as $cand) {
+							$tokens = preg_split('/[\s,]+/', (string) $cand, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+							$bad = array_diff($tokens, $cfg['allowed']);
+							if ($bad) {
+								$failed[] = "Tag(s) not in whitelist for $fn: " . implode(', ', $bad);
+								$invalid = true;
+								break;
+							}
 						}
-						$new = implode(' ', $tokens);
 					}
-					if ($new !== (string) $img->tags) {
-						$this->writeLangValue($img, 'tags', $new);
+					if (!$invalid && $this->importSubfieldValue($img, 'tags', $raw)) {
 						$dirty = true;
 					}
 				}
@@ -1368,9 +1570,7 @@ class ProcessMediaLibrary extends Process {
 					foreach ((array) $item['custom'] as $name => $val) {
 						$name = $sanitizer->fieldName((string) $name);
 						if (!in_array($name, $allowedCustoms, true)) continue;
-						$new = is_scalar($val) ? (string) $val : '';
-						if ($new !== $this->normalizeDescription($img->get($name))) {
-							$this->writeLangValue($img, $name, $new);
+						if ($this->importSubfieldValue($img, $name, $val)) {
 							$dirty = true;
 						}
 					}
@@ -2151,6 +2351,62 @@ class ProcessMediaLibrary extends Process {
 	 *
 	 * @return array<int,string>|null
 	 */
+	/**
+	 * Shape a subfield value for export: multilang fields yield an
+	 * {int langId: string value} map so external tooling can
+	 * round-trip every translation; single-language fields yield
+	 * the plain string. Single-language installs always yield the
+	 * plain string regardless of subfield.
+	 *
+	 * @return array<int,string>|string
+	 */
+	/**
+	 * Apply one incoming value (string, {langId: value} array, or
+	 * stdClass equivalent) to a Pagefile subfield. Multilang shapes
+	 * route through applyLangValues() so every language slot lands
+	 * via the right setter; single values reuse writeLangValue().
+	 *
+	 * Returns true if anything was actually written so the import
+	 * loop knows whether to mark the page dirty.
+	 */
+	protected function importSubfieldValue(Pagefile $img, string $subfield, $val): bool {
+		// Multilang shape — JSON object or arbitrary PHP array
+		// keyed by language id. stdClass arrives when JSON decoded
+		// without assoc=true upstream; cast for uniformity.
+		if (is_array($val) || is_object($val)) {
+			$map = (array) $val;
+			// Compare per-language; skip if nothing differs.
+			$existing = $this->readLangValues($img, $subfield) ?? [];
+			$changed = false;
+			foreach ($map as $k => $v) {
+				$lid = (int) $k;
+				$existingVal = isset($existing[$lid]) ? (string) $existing[$lid] : '';
+				if ((string) $v !== $existingVal) { $changed = true; break; }
+			}
+			if (!$changed) return false;
+			$this->applyLangValues($img, $subfield, $map);
+			return true;
+		}
+
+		// Scalar — single-language write.
+		$new = is_scalar($val) ? (string) $val : '';
+		$current = $img->get($subfield);
+		$currentStr = $this->normalizeDescription($current);
+		if ($new === $currentStr) return false;
+		$this->writeLangValue($img, $subfield, $new);
+		return true;
+	}
+
+	protected function exportSubfieldValue(Pagefile $img, string $subfield) {
+		$langValues = $this->readLangValues($img, $subfield);
+		if ($langValues !== null) return $langValues;
+		$val = $img->get($subfield);
+		if ($val === null) return '';
+		if (is_object($val)) return (string) $val;
+		if (is_array($val)) return $this->normalizeDescription($val);
+		return (string) $val;
+	}
+
 	protected function readLangValues(Pagefile $img, string $subfield): ?array {
 		$languages = $this->wire('languages');
 		if (!$languages || $languages->count() < 2) return null;
@@ -2398,6 +2654,11 @@ class ProcessMediaLibrary extends Process {
 			// matching popup tab so multilang edits open straight on
 			// the user's working language.
 			'currentLangId'        => $this->getCurrentLangKey(),
+			// Cross-device column prefs from user meta. JS reads this
+			// for its initial in-memory state and POSTs back to the
+			// user-prefs endpoint on changes.
+			'userColumns'          => $this->getUserColumnsPref(),
+			'userPrefsUrl'         => $this->wire('page')->url . 'user-prefs/',
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
