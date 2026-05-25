@@ -430,28 +430,31 @@
 					td.classList.remove('ml-cell-saving');
 					if (result && result.data && result.data.ok) {
 						td.textContent = result.data.value;
+						// Refresh the per-language data attrs from the
+						// post-save state so reopening the popup shows
+						// the fresh value in every tab, not the stale
+						// pre-save text.
+						if (result.data.langValues && typeof result.data.langValues === 'object') {
+							Object.keys(result.data.langValues).forEach(function (lid) {
+								td.setAttribute('data-lang-' + lid, String(result.data.langValues[lid]));
+							});
+						}
 						td.title = '';
 						flashCell(td, true);
 					} else {
-						// Show the error directly in the cell during the
-						// diagnostic phase so the actual server response is
-						// visible at a glance (the tooltip has it too, but
-						// hover-on-iPad isn't reliable). Click the cell
-						// once to dismiss and try again.
+						td.textContent = original;
 						var reason = (result && result.data && result.data.error)
-							|| ('HTTP ' + (result && result.status) + ' / ' + JSON.stringify(result && result.data));
+							|| ('HTTP ' + (result && result.status));
 						console.error('[MediaLibrary] save failed:', result);
-						td.textContent = '⚠ ' + reason;
 						td.title = reason;
 						flashCell(td, false);
 					}
 				}).catch(function (err) {
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
+					td.textContent = original;
 					console.error('[MediaLibrary] save errored:', err);
-					var msg = (err && err.message) || labels.error || 'Network error';
-					td.textContent = '⚠ ' + msg;
-					td.title = msg;
+					td.title = (err && err.message) || labels.error || 'Network error';
 					flashCell(td, false);
 				});
 			}
