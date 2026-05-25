@@ -763,10 +763,19 @@ class ProcessMediaLibrary extends Process {
 		// so the inline cell display matches what the editor sees.
 		$stored = $this->normalizeDescription($img->get($subfield));
 
-		return $this->jsonResponse([
+		$response = [
 			'ok'    => true,
 			'value' => (string) $stored,
-		]);
+		];
+		// Multilang fields: also hand back every language's value so
+		// the client can refresh the cell's data-lang-<id> attrs in
+		// place. Without this the next popup-open reads stale
+		// pre-save attrs and shows the old text in every tab.
+		$langValues = $this->readLangValues($img, $subfield);
+		if ($langValues !== null) {
+			$response['langValues'] = $langValues;
+		}
+		return $this->jsonResponse($response);
 	}
 
 	/**
@@ -2116,6 +2125,42 @@ class ProcessMediaLibrary extends Process {
 				. $san->entities((string) $langVal) . '"';
 		}
 		return $out;
+	}
+
+	/**
+	 * Read every language's stored value for a subfield as a flat
+	 * {langId: value} map. Returns null on single-language installs
+	 * and for fields whose stored value isn't multilang — callers
+	 * can use that as the cue to skip emitting per-language data
+	 * attrs in the save response.
+	 *
+	 * @return array<int,string>|null
+	 */
+	protected function readLangValues(Pagefile $img, string $subfield): ?array {
+		$languages = $this->wire('languages');
+		if (!$languages || $languages->count() < 2) return null;
+
+		// Pagefile.description has the dedicated per-language getter.
+		if ($subfield === 'description' && method_exists($img, 'description')) {
+			$out = [];
+			foreach ($languages as $lang) {
+				$key = $lang->isDefault() ? 0 : (int) $lang->id;
+				$out[$key] = (string) $img->description($lang);
+			}
+			return $out;
+		}
+
+		$val = $img->get($subfield);
+		if (is_object($val) && method_exists($val, 'getLanguageValue')) {
+			$out = [];
+			foreach ($languages as $lang) {
+				$key = $lang->isDefault() ? 0 : (int) $lang->id;
+				$out[$key] = (string) $val->getLanguageValue($lang);
+			}
+			return $out;
+		}
+		if (is_array($val)) return $val;
+		return null;
 	}
 
 	protected function langValueToStorable($val) {
