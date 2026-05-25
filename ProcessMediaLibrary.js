@@ -482,6 +482,7 @@
 				// New cells = lost ml-col-hidden classes; re-apply the
 				// user's column visibility prefs to the swapped DOM.
 				if (root._mlApplyColumnVisibility) root._mlApplyColumnVisibility();
+				if (root._mlApplyColumnOrder) root._mlApplyColumnOrder();
 				if (push) {
 					history.pushState({ ml: qs }, '', location.pathname + qs);
 				}
@@ -782,26 +783,68 @@
 			});
 		}
 
-		// -- Column visibility toggle ----------------------------------
-		// State lives in localStorage, scoped to the install. The
-		// server renders every checkbox checked + every cell visible,
-		// so on first load with no stored state the table looks the
-		// same as before. Checking/unchecking a Columns-fieldset box
-		// toggles every <th>/<td>[data-col="X"] in the document via a
-		// single class; re-applied after each AJAX results swap so
-		// the user's preference survives filter/sort/pagination.
+		// -- Column visibility + order toggle -------------------------
+		// State lives in localStorage. Visibility ("ml-columns-v1")
+		// holds per-column on/off; order ("ml-columns-order-v1")
+		// holds the user's drag-sorted column sequence. Admin can
+		// preset a default-hidden list via module config — that's
+		// what config.defaultHiddenColumns reflects, used only when
+		// the user has no explicit preference for a column yet.
 		var COLUMNS_STORAGE_KEY = 'ml-columns-v1';
+		var COLUMNS_ORDER_STORAGE_KEY = 'ml-columns-order-v1';
 		var columnsState = {};
+		var columnsOrder = [];
+		var defaultHidden = {};
+		(config.defaultHiddenColumns || []).forEach(function (k) { defaultHidden[k] = true; });
 		try {
-			var stored = localStorage.getItem(COLUMNS_STORAGE_KEY);
-			if (stored) columnsState = JSON.parse(stored) || {};
+			var storedVis = localStorage.getItem(COLUMNS_STORAGE_KEY);
+			if (storedVis) columnsState = JSON.parse(storedVis) || {};
 		} catch (e) { columnsState = {}; }
+		try {
+			var storedOrder = localStorage.getItem(COLUMNS_ORDER_STORAGE_KEY);
+			if (storedOrder) columnsOrder = JSON.parse(storedOrder) || [];
+			if (!Array.isArray(columnsOrder)) columnsOrder = [];
+		} catch (e) { columnsOrder = []; }
+
+		function isColumnHidden(col) {
+			if (col in columnsState) return columnsState[col] === false;
+			return !!defaultHidden[col];
+		}
 
 		function applyColumnVisibility() {
 			var cells = document.querySelectorAll('[data-col]');
 			Array.prototype.forEach.call(cells, function (cell) {
-				var hidden = columnsState[cell.dataset.col] === false;
-				cell.classList.toggle('ml-col-hidden', hidden);
+				cell.classList.toggle('ml-col-hidden', isColumnHidden(cell.dataset.col));
+			});
+		}
+
+		// Reorder both header + body cells to match columnsOrder.
+		// Cells without data-col (e.g. row-select checkbox column)
+		// stay anchored at their original position; columns the user
+		// hasn't reordered yet keep their server-rendered order at
+		// the tail.
+		function applyColumnOrder() {
+			if (!columnsOrder.length) return;
+			var posByCol = {};
+			columnsOrder.forEach(function (col, i) { posByCol[col] = i; });
+			var rows = document.querySelectorAll('.ml-table tr');
+			Array.prototype.forEach.call(rows, function (tr) {
+				var children = Array.prototype.slice.call(tr.children);
+				var fixed = [], movable = [];
+				children.forEach(function (c) {
+					if (c.dataset && c.dataset.col) movable.push(c);
+					else fixed.push(c);
+				});
+				movable.sort(function (a, b) {
+					var aP = posByCol[a.dataset.col];
+					var bP = posByCol[b.dataset.col];
+					if (aP === undefined && bP === undefined) return 0;
+					if (aP === undefined) return 1;
+					if (bP === undefined) return -1;
+					return aP - bP;
+				});
+				fixed.forEach(function (c) { tr.appendChild(c); });
+				movable.forEach(function (c) { tr.appendChild(c); });
 			});
 		}
 
@@ -810,17 +853,74 @@
 			catch (e) {}
 		}
 
+		function saveColumnsOrder() {
+			try { localStorage.setItem(COLUMNS_ORDER_STORAGE_KEY, JSON.stringify(columnsOrder)); }
+			catch (e) {}
+		}
+
+		// Sync the <li> order in the picker to match columnsOrder
+		// (after init from localStorage, before drag-drop wiring).
+		function syncColumnListOrder() {
+			var list = document.querySelector('.ml-columns-list');
+			if (!list || !columnsOrder.length) return;
+			var byCol = {};
+			Array.prototype.forEach.call(list.querySelectorAll('li'), function (li) {
+				var cb = li.querySelector('input[type="checkbox"]');
+				if (cb) byCol[cb.dataset.col] = li;
+			});
+			columnsOrder.forEach(function (col) {
+				if (byCol[col]) list.appendChild(byCol[col]);
+			});
+		}
+
+		// Native HTML5 drag-drop on the column-picker <li>s. On drop
+		// we re-read the list order from the DOM into columnsOrder,
+		// persist + re-sort the table to match.
+		function wireColumnDragDrop() {
+			var list = document.querySelector('.ml-columns-list');
+			if (!list) return;
+			var dragged = null;
+			Array.prototype.forEach.call(list.querySelectorAll('li'), function (li) {
+				li.addEventListener('dragstart', function (e) {
+					dragged = li;
+					li.classList.add('ml-dragging');
+					if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+				});
+				li.addEventListener('dragend', function () {
+					li.classList.remove('ml-dragging');
+					dragged = null;
+					columnsOrder = Array.prototype.map.call(
+						list.querySelectorAll('li input[type="checkbox"]'),
+						function (cb) { return cb.dataset.col; }
+					);
+					saveColumnsOrder();
+					applyColumnOrder();
+				});
+				li.addEventListener('dragover', function (e) {
+					if (!dragged || dragged === li) return;
+					e.preventDefault();
+					var rect = li.getBoundingClientRect();
+					var before = (e.clientY - rect.top) < rect.height / 2;
+					list.insertBefore(dragged, before ? li : li.nextSibling);
+				});
+			});
+		}
+
+		syncColumnListOrder();
+
 		var colToggles = document.querySelectorAll('.ml-col-toggle');
 		Array.prototype.forEach.call(colToggles, function (cb) {
 			var col = cb.dataset.col;
-			if (columnsState[col] === false) cb.checked = false;
+			cb.checked = !isColumnHidden(col);
 			cb.addEventListener('change', function () {
 				columnsState[col] = cb.checked;
 				saveColumnsState();
 				applyColumnVisibility();
 			});
 		});
+		wireColumnDragDrop();
 		applyColumnVisibility();
+		applyColumnOrder();
 
 		// -- Persisted page-size --------------------------------------
 		// Page size lives in the URL (so bookmarks reproduce the
@@ -830,7 +930,7 @@
 		// (and updates localStorage to match); otherwise we silently
 		// apply the stored value via the existing AJAX refresh path.
 		var PAGE_SIZE_STORAGE_KEY = 'ml-pagesize-v1';
-		var DEFAULT_PAGE_SIZE = 50;
+		var DEFAULT_PAGE_SIZE = parseInt(config.defaultPageSize, 10) || 50;
 		(function syncStoredPageSize() {
 			var picker = document.querySelector('.ml-page-size-picker');
 			if (!picker) return;
@@ -933,6 +1033,7 @@
 		// Expose applyColumnVisibility for replaceFromQs to call after
 		// it swaps results.innerHTML with freshly-rendered cells.
 		root._mlApplyColumnVisibility = applyColumnVisibility;
+		root._mlApplyColumnOrder      = applyColumnOrder;
 	}
 
 	if (document.readyState === 'loading') {

@@ -355,6 +355,15 @@ textarea.ml-cell-input {
 	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 	gap: 0.25rem 0.75rem;
 }
+.ml-columns-list li {
+	cursor: grab;
+}
+.ml-columns-list li:active {
+	cursor: grabbing;
+}
+.ml-columns-list li.ml-dragging {
+	opacity: 0.35;
+}
 .ml-columns-list label {
 	display: flex;
 	align-items: center;

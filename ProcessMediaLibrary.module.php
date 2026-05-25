@@ -19,6 +19,64 @@ class ProcessMediaLibrary extends Process {
 	const CACHE_PREFIX = 'media-library-';
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+	const THUMB_WIDTH_DEFAULT   = 120;
+	const THUMB_HEIGHT_DEFAULT  = 80;
+	const THUMB_QUALITY_DEFAULT = 80;
+
+	/**
+	 * Admin-configurable thumbnail dimensions + JPEG quality, used
+	 * for the per-row thumb in the table view. Each falls back to
+	 * the class constant when the module config isn't set.
+	 *
+	 * @return array{width:int,height:int,quality:int}
+	 */
+	protected function getThumbDims(): array {
+		return [
+			'width'   => max(1, (int) ($this->get('thumbWidth')   ?: self::THUMB_WIDTH_DEFAULT)),
+			'height'  => max(1, (int) ($this->get('thumbHeight')  ?: self::THUMB_HEIGHT_DEFAULT)),
+			'quality' => max(1, min(100, (int) ($this->get('thumbQuality') ?: self::THUMB_QUALITY_DEFAULT))),
+		];
+	}
+
+	/**
+	 * Admin-configurable per-page options (comma- or whitespace-
+	 * separated list in the config). Falls back to PAGE_SIZE_OPTIONS
+	 * when nothing's set; always sorted, deduped, positive ints.
+	 *
+	 * @return array<int,int>
+	 */
+	protected function getPageSizeOptions(): array {
+		$raw = trim((string) $this->get('pageSizeOptions'));
+		if ($raw === '') return self::PAGE_SIZE_OPTIONS;
+		$parts = preg_split('/[\s,]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+		$opts = array_values(array_unique(array_filter(
+			array_map('intval', $parts),
+			fn($n) => $n > 0
+		)));
+		sort($opts);
+		return $opts ?: self::PAGE_SIZE_OPTIONS;
+	}
+
+	protected function getDefaultPageSize(): int {
+		$opts = $this->getPageSizeOptions();
+		$configured = (int) $this->get('defaultPageSize');
+		if ($configured > 0 && in_array($configured, $opts, true)) return $configured;
+		return in_array(self::PAGE_SIZE_DEFAULT, $opts, true)
+			? self::PAGE_SIZE_DEFAULT
+			: ($opts[0] ?? self::PAGE_SIZE_DEFAULT);
+	}
+
+	/**
+	 * Admin-configured list of column keys to render hidden by
+	 * default. Per-user toggles in localStorage override this.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function getDefaultHiddenColumns(): array {
+		$val = $this->get('defaultHiddenColumns');
+		if (!is_array($val)) return [];
+		return array_values(array_filter(array_map('strval', $val)));
+	}
 
 	/**
 	 * Flat-row keys allowed as a sort column, mapped to compare type.
@@ -209,7 +267,7 @@ class ProcessMediaLibrary extends Process {
 		// URL without re-rendering this block — JS hijacks the click
 		// and rebuilds the URL from location.search so the download
 		// always matches what the user is currently looking at.
-		$initialQs = $this->buildUrl($filters, 1, '', '', self::PAGE_SIZE_DEFAULT);
+		$initialQs = $this->buildUrl($filters, 1, '', '', $this->getDefaultPageSize());
 		$exportUrl = $exportBase . ($initialQs !== './' && $initialQs !== '' ? $initialQs : '');
 		$importUrl = $this->wire('page')->url . 'import/';
 
@@ -280,11 +338,13 @@ class ProcessMediaLibrary extends Process {
 		foreach ($customCols as $name) {
 			$cols['custom:' . $name] = $name;
 		}
+		$hidden = array_flip($this->getDefaultHiddenColumns());
 		$items = '';
 		foreach ($cols as $key => $label) {
-			$items .= '<li><label>'
+			$checked = isset($hidden[$key]) ? '' : ' checked';
+			$items .= '<li class="ml-col-item" draggable="true"><label>'
 				. '<input type="checkbox" class="ml-col-toggle" data-col="'
-				. $san->entities($key) . '" checked>'
+				. $san->entities($key) . '"' . $checked . '>'
 				. ' ' . $san->entities($label)
 				. '</label></li>';
 		}
@@ -1622,7 +1682,8 @@ class ProcessMediaLibrary extends Process {
 	 */
 	protected function readPageSize(): int {
 		$ps = (int) $this->wire('input')->get('ps');
-		return in_array($ps, self::PAGE_SIZE_OPTIONS, true) ? $ps : self::PAGE_SIZE_DEFAULT;
+		$opts = $this->getPageSizeOptions();
+		return in_array($ps, $opts, true) ? $ps : $this->getDefaultPageSize();
 	}
 
 	/**
@@ -1755,6 +1816,7 @@ class ProcessMediaLibrary extends Process {
 			$pagesById[$p->id] = $p;
 		}
 		$customByField = $this->getCustomByField();
+		$thumb = $this->getThumbDims();
 
 		foreach ($slice as &$row) {
 			$row['thumbUrl']        = '';
@@ -1777,7 +1839,10 @@ class ProcessMediaLibrary extends Process {
 			}
 			if (!$img instanceof Pageimage) continue;
 
-			$row['thumbUrl'] = $img->size(120, 80, ['upscaling' => false, 'quality' => 80])->url;
+			$row['thumbUrl'] = $img->size($thumb['width'], $thumb['height'], [
+				'upscaling' => false,
+				'quality'   => $thumb['quality'],
+			])->url;
 			// Variations count — Phase 2 column from the concept,
 			// useful for pre-warm diagnosis and cleanup. getVariations()
 			// does a filesystem scan per image, but only for the 50-ish
@@ -1872,7 +1937,7 @@ class ProcessMediaLibrary extends Process {
 	 *
 	 * @return array<int,string>
 	 */
-	protected function collectCustomNames(): array {
+	public function collectCustomNames(): array {
 		$names = [];
 		foreach ($this->getCustomByField() as $list) {
 			foreach ($list as $n) {
@@ -1930,6 +1995,8 @@ class ProcessMediaLibrary extends Process {
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
 			'tplFields' => $this->getTemplateFieldsMap($imageFields, $eligibleTemplates),
+			'defaultPageSize'      => $this->getDefaultPageSize(),
+			'defaultHiddenColumns' => $this->getDefaultHiddenColumns(),
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
@@ -2202,6 +2269,7 @@ class ProcessMediaLibrary extends Process {
 	 */
 	protected function renderTable(array $slice, array $customCols, array $filters = [], string $sort = '', string $dir = '', array $tagsConfig = []): string {
 		$san = $this->wire('sanitizer');
+		$thumb = $this->getThumbDims();
 
 		// Per-subfield editor type — Textarea-backed customs render a
 		// <textarea> in the inline editor, everything else falls back to
@@ -2313,7 +2381,9 @@ class ProcessMediaLibrary extends Process {
 			if (!empty($row['thumbUrl'])) {
 				$out .= '<img src="' . $san->entities($row['thumbUrl']) . '"'
 					. ' alt="' . $san->entities($row['basename']) . '"'
-					. ' loading="lazy" width="120" height="80">';
+					. ' loading="lazy"'
+					. ' width="' . $thumb['width'] . '"'
+					. ' height="' . $thumb['height'] . '">';
 			}
 			$out .= '</td>';
 
@@ -2430,7 +2500,8 @@ class ProcessMediaLibrary extends Process {
 			. '</th>';
 	}
 
-	protected function renderPagination(int $total, int $page, int $totalPages, array $filters, string $sort = '', string $dir = '', int $pageSize = self::PAGE_SIZE_DEFAULT): string {
+	protected function renderPagination(int $total, int $page, int $totalPages, array $filters, string $sort = '', string $dir = '', ?int $pageSize = null): string {
+		$pageSize = $pageSize ?? $this->getDefaultPageSize();
 		$san = $this->wire('sanitizer');
 
 		$summary = sprintf(
@@ -2458,7 +2529,7 @@ class ProcessMediaLibrary extends Process {
 		$out .= '<label class="ml-page-size">'
 			. $san->entities($this->_('per page')) . ' '
 			. '<select class="ml-page-size-picker">';
-		foreach (self::PAGE_SIZE_OPTIONS as $opt) {
+		foreach ($this->getPageSizeOptions() as $opt) {
 			$sel = $opt === $pageSize ? ' selected' : '';
 			$out .= '<option value="' . $opt . '"' . $sel . '>' . $opt . '</option>';
 		}
@@ -2468,7 +2539,8 @@ class ProcessMediaLibrary extends Process {
 		return $out;
 	}
 
-	protected function buildUrl(array $filters, int $page, string $sort = '', string $dir = '', int $pageSize = self::PAGE_SIZE_DEFAULT): string {
+	protected function buildUrl(array $filters, int $page, string $sort = '', string $dir = '', ?int $pageSize = null): string {
+		$pageSize = $pageSize ?? $this->getDefaultPageSize();
 		$params = [
 			'q'              => $filters['q'],
 			'template'       => $filters['template'],
@@ -2479,7 +2551,7 @@ class ProcessMediaLibrary extends Process {
 			'p'              => $page > 1 ? (string) $page : '',
 			'sort'           => ($sort !== '' && $sort !== self::DEFAULT_SORT) ? $sort : '',
 			'dir'            => $dir === 'desc' ? 'desc' : '',
-			'ps'             => $pageSize !== self::PAGE_SIZE_DEFAULT ? (string) $pageSize : '',
+			'ps'             => $pageSize !== $this->getDefaultPageSize() ? (string) $pageSize : '',
 		];
 		foreach ($filters['no_custom'] ?? [] as $name => $on) {
 			if ($on) $params['no_custom_' . $name] = '1';
