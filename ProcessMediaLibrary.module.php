@@ -2153,6 +2153,11 @@ class ProcessMediaLibrary extends Process {
 			'tplFields' => $this->getTemplateFieldsMap($imageFields, $eligibleTemplates),
 			'defaultPageSize'      => $this->getDefaultPageSize(),
 			'defaultHiddenColumns' => $this->getDefaultHiddenColumns(),
+			// When >1 language is installed, route every inline-edit
+			// click straight to the per-image PW editor iframe so the
+			// editor gets PW-native per-language tabs (and our own
+			// popup doesn't try to reinvent multilang on its own).
+			'multilang'            => (bool) ($this->wire('languages') && $this->wire('languages')->count() > 1),
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
@@ -2503,10 +2508,11 @@ class ProcessMediaLibrary extends Process {
 			$size = $this->formatFilesize((int) $row['filesize']);
 
 			$editAttrs = sprintf(
-				'data-page-id="%d" data-field="%s" data-basename="%s"',
+				'data-page-id="%d" data-field="%s" data-basename="%s" data-file-hash="%s"',
 				(int) $row['pageId'],
 				$san->entities((string) $row['fieldName']),
-				$san->entities((string) $row['basename'])
+				$san->entities((string) $row['basename']),
+				md5((string) $row['basename'])
 			);
 
 			$selKey = sprintf('%d:%s:%s',
@@ -2528,11 +2534,10 @@ class ProcessMediaLibrary extends Process {
 			// (md5 of basename, matching Pagefile::hash()) lets the
 			// iframe filter find the matching gridImage via id
 			// selector instead of string-matching URLs.
-			$thumbAttrs = '';
-			if (!empty($row['pageEditUrl'])) {
-				$thumbAttrs = ' ' . $editAttrs
-					. ' data-file-hash="' . md5((string) $row['basename']) . '"';
-			}
+			// Thumb td only carries the hash + identity attrs when the
+			// host page is editable — that's what gates the click-
+			// through to the per-image editor iframe.
+			$thumbAttrs = !empty($row['pageEditUrl']) ? (' ' . $editAttrs) : '';
 			$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
 				$out .= '<img src="' . $san->entities($row['thumbUrl']) . '"'
