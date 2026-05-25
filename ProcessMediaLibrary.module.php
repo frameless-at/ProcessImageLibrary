@@ -787,22 +787,33 @@ class ProcessMediaLibrary extends Process {
 	 */
 	protected function jsonError(string $msg, int $status = 400): string {
 		http_response_code($status);
-		// Drop ONLY the buffer the endpoint opened — pre-existing PW
-		// admin buffers must stay intact, otherwise tearing them down
-		// here corrupts the response delivery and the client sees an
-		// empty body / "The string did not match the expected pattern".
-		if (ob_get_level() > 0) ob_end_clean();
-		return json_encode(['ok' => false, 'error' => $msg]);
+		$this->emitJson(['ok' => false, 'error' => $msg]);
+		return ''; // unreachable; emitJson exits
 	}
 
 	/**
-	 * Mirror of jsonError() for success paths — pops the one buffer
-	 * the endpoint started so any incidental output stays out of the
-	 * response, then returns the encoded payload.
+	 * Success-side mirror of jsonError. Both go through emitJson()
+	 * so the response body is delivered the same way regardless of
+	 * outcome.
 	 */
 	protected function jsonResponse(array $payload): string {
-		if (ob_get_level() > 0) ob_end_clean();
-		return json_encode($payload);
+		$this->emitJson($payload);
+		return ''; // unreachable; emitJson exits
+	}
+
+	/**
+	 * Hard-exit the request with a clean JSON body. Drops every
+	 * active output buffer (ours + anything PW stacked) so PHP
+	 * notices, debug prints, or admin chrome can't end up between
+	 * the Content-Type header and the JSON. exit() guarantees no
+	 * later PW code re-adds output and reverses what we set up
+	 * here.
+	 */
+	protected function emitJson(array $payload): void {
+		while (ob_get_level() > 0) ob_end_clean();
+		if (!headers_sent()) header('Content-Type: application/json');
+		echo json_encode($payload);
+		exit;
 	}
 
 	/**
