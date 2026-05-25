@@ -795,21 +795,21 @@ class ProcessMediaLibrary extends Process {
 	 */
 	protected function jsonError(string $msg, int $status = 400): string {
 		http_response_code($status);
-		// Drop anything PHP buffered (notices, warnings, stray prints)
-		// so the response body is pure JSON — otherwise an iOS Safari
-		// fetch.json() trips on the trailing prose with "The string
-		// did not match the expected pattern".
-		while (ob_get_level() > 0) ob_end_clean();
+		// Drop ONLY the buffer the endpoint opened — pre-existing PW
+		// admin buffers must stay intact, otherwise tearing them down
+		// here corrupts the response delivery and the client sees an
+		// empty body / "The string did not match the expected pattern".
+		if (ob_get_level() > 0) ob_end_clean();
 		return json_encode(['ok' => false, 'error' => $msg]);
 	}
 
 	/**
-	 * Mirror of jsonError() for success paths — discards any stray
-	 * buffered output then returns the encoded payload, so the JSON
-	 * the client receives is exactly what we encode here.
+	 * Mirror of jsonError() for success paths — pops the one buffer
+	 * the endpoint started so any incidental output stays out of the
+	 * response, then returns the encoded payload.
 	 */
 	protected function jsonResponse(array $payload): string {
-		while (ob_get_level() > 0) ob_end_clean();
+		if (ob_get_level() > 0) ob_end_clean();
 		return json_encode($payload);
 	}
 
@@ -2231,34 +2231,38 @@ class ProcessMediaLibrary extends Process {
 			return;
 		}
 
-		// Pagefile.description always goes through PW's dedicated
-		// signature first — that's the only path that's guaranteed
-		// to preserve every other language across PW versions.
-		// $img->set('description', [array]) has been unreliable here.
-		if ($subfield === 'description' && method_exists($img, 'description')) {
-			$img->description($lang, $value);
-			return;
-		}
-
-		// Custom subfields backed by a multilang Fieldtype: read the
-		// LanguagesPageFieldValue back out, mutate just the editor's
-		// language, write the same object back.
+		// Branch by the SHAPE of the actual stored value, so a
+		// single-language description on a multilang install (where
+		// the FieldtypeImage's useLanguages is off) doesn't get
+		// pushed through the 2-arg Pagefile::description() signature.
 		$current = $img->get($subfield);
+
+		// (1) Multilang LanguagesPageFieldValue — typical for custom
+		// subfields backed by a multilang Fieldtype.
 		if (is_object($current) && method_exists($current, 'setLanguageValue')) {
 			$current->setLanguageValue($lang, $value);
 			$img->set($subfield, $current);
 			return;
 		}
 
-		// Raw {langId: value} array shape — same idea, mutate the
-		// current language key only.
+		// (2) Raw {langId: value} array — typical for Pagefile's
+		// built-in description on a multilang-enabled image field.
+		// For description specifically PW's own signature is the
+		// safest writer; fall back to set() with the merged array
+		// for other subfields that arrive in this shape.
 		if (is_array($current)) {
-			$current[$lang->id] = $value;
-			$img->set($subfield, $current);
+			if ($subfield === 'description' && method_exists($img, 'description')) {
+				$img->description($lang, $value);
+			} else {
+				$current[$lang->id] = $value;
+				$img->set($subfield, $current);
+			}
 			return;
 		}
 
-		// Single-language field on a multilang install — plain set.
+		// (3) Plain string — single-language storage on a multilang
+		// install. Do NOT route through description($lang, $value)
+		// here; that signature is multilang-only.
 		$img->set($subfield, $value);
 	}
 
