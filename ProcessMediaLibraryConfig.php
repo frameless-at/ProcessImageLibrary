@@ -20,8 +20,8 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		];
 	}
 
-	public function getInputfields() {
-		$inputfields = parent::getInputfields();
+	public function ___getInputfields() {
+		$inputfields = parent::___getInputfields();
 		$modules = $this->wire('modules');
 
 		// --- Thumbnail rendering ---
