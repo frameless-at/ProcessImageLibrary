@@ -137,6 +137,17 @@ class ProcessMediaLibrary extends Process {
 	 */
 	public function init() {
 		parent::init();
+		// Pull the saved module config onto this instance so the
+		// runtime helpers ($this->get('thumbWidth') etc.) actually
+		// see the values the admin saved. PW does this for
+		// ConfigurableModule instances automatically in some load
+		// paths, but Process modules loaded via autoload don't get
+		// the same treatment everywhere — explicit setArray here
+		// makes the table render honour the config regardless of
+		// load path.
+		$saved = $this->wire('modules')->getModuleConfigData($this);
+		if (is_array($saved) && $saved) $this->setArray($saved);
+
 		// renderList() is declared on InputfieldFile (InputfieldImage
 		// just inherits it) and iterates its $value PARAMETER, not
 		// $this->value — so we must mutate $event->arguments(0)
