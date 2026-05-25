@@ -96,10 +96,116 @@
 			if (subfield === 'tags' && tagsMode === 1) {
 				return buildPopupTextInput(original, td.dataset.tagsListId || '');
 			}
+
+			// Multilang inputs get language tabs — one textarea / input
+			// per language, prefilled from the cell's data-lang-<id>
+			// attrs. Only kick in when there are actually >1 languages
+			// installed AND this cell carries lang attrs (i.e. the
+			// underlying subfield is configured multilang).
+			var langs = config.languages || [];
+			var hasLangData = langs.length > 1 && langs.some(function (l) {
+				return ('lang' + l.id) in td.dataset;
+			});
+			if (hasLangData) {
+				return buildPopupMultilang(td, original, td.dataset.input === 'textarea');
+			}
+
 			if (td.dataset.input === 'textarea') {
 				return buildPopupTextarea(original);
 			}
 			return buildPopupTextInput(original, '');
+		}
+
+		// Tabbed-textarea widget for multilang subfields. Reads each
+		// language's starting value from the matching data-lang-<id>
+		// attribute on the cell, keeps the per-tab DOM in a small map
+		// keyed by lang id, and reports back getValue() as a
+		// {langId: value} object so commit() can ship every language
+		// in one POST. getPrimaryValue() returns whatever the
+		// currently-active tab holds, used for the cell's optimistic
+		// post-save display.
+		function buildPopupMultilang(td, original, isTextarea) {
+			var langs = config.languages || [];
+
+			var wrap = document.createElement('div');
+			wrap.className = 'ml-langtabs';
+
+			var bar = document.createElement('div');
+			bar.className = 'ml-langtabs-bar';
+			var panes = document.createElement('div');
+			panes.className = 'ml-langtabs-panes';
+
+			var byId = Object.create(null);
+			var activeId = null;
+
+			langs.forEach(function (lang, idx) {
+				var tab = document.createElement('button');
+				tab.type = 'button';
+				tab.className = 'ml-langtabs-tab';
+				tab.dataset.langId = String(lang.id);
+				tab.textContent = lang.title || lang.name;
+				bar.appendChild(tab);
+
+				var pane;
+				if (isTextarea) {
+					pane = document.createElement('textarea');
+					pane.rows = 10;
+				} else {
+					pane = document.createElement('input');
+					pane.type = 'text';
+				}
+				pane.className = 'ml-langtabs-pane';
+				pane.dataset.langId = String(lang.id);
+				// data-lang-N attr on td reflects the stored value;
+				// fall back to "original" only when nothing's stored
+				// AND this is the first tab.
+				var stored = td.dataset['lang' + lang.id];
+				pane.value = (stored != null) ? stored : (idx === 0 ? original : '');
+				panes.appendChild(pane);
+				byId[lang.id] = pane;
+
+				if (idx === 0) {
+					tab.classList.add('ml-langtabs-tab-active');
+					activeId = lang.id;
+				} else {
+					pane.style.display = 'none';
+				}
+
+				tab.addEventListener('click', function () {
+					Array.prototype.forEach.call(
+						bar.querySelectorAll('.ml-langtabs-tab'),
+						function (t) { t.classList.remove('ml-langtabs-tab-active'); }
+					);
+					tab.classList.add('ml-langtabs-tab-active');
+					Object.keys(byId).forEach(function (id) {
+						byId[id].style.display = (String(id) === String(lang.id)) ? '' : 'none';
+					});
+					activeId = lang.id;
+					byId[lang.id].focus();
+				});
+			});
+
+			wrap.appendChild(bar);
+			wrap.appendChild(panes);
+
+			return {
+				element: wrap,
+				multilang: true,
+				getValue: function () {
+					var out = {};
+					Object.keys(byId).forEach(function (id) {
+						out[id] = byId[id].value;
+					});
+					return out;
+				},
+				getPrimaryValue: function () {
+					return (activeId !== null && byId[activeId]) ? byId[activeId].value : '';
+				},
+				focus: function () {
+					var pane = (activeId !== null) ? byId[activeId] : null;
+					if (pane) { pane.focus(); pane.select(); }
+				}
+			};
 		}
 
 		function buildPopupTextarea(original) {
@@ -169,16 +275,6 @@
 		// backdrop click dismiss; Save commits.
 		function activateEditor(td) {
 			if (td.classList.contains('ml-editing')) return;
-
-			// Multilang installs: punt to the per-image PW editor
-			// iframe instead of our reduced-feature popup. The user
-			// gets PW-native language tabs for description / tags /
-			// customs and save round-trips through PW's own flow —
-			// none of our writeLangValue heuristics needed.
-			if (config.multilang && td.dataset.fileHash) {
-				return openImageEditor(td);
-			}
-
 			td.classList.add('ml-editing');
 
 			var original = td.textContent;
@@ -253,38 +349,47 @@
 			function commit(mode) {
 				if (committed) return;
 				committed = true;
-				var newValue = widget.getValue();
+
+				// Multilang widgets hand back an object {langId: value};
+				// single-lang widgets hand back a plain string. Pull
+				// the primary value (active tab for multilang) for
+				// display, and serialize the full lang map separately
+				// so the save endpoints can apply each language.
+				var raw = widget.getValue();
+				var isMultilang = widget.multilang === true && raw && typeof raw === 'object';
+				var primaryValue = isMultilang
+					? (typeof widget.getPrimaryValue === 'function' ? widget.getPrimaryValue() : '')
+					: raw;
+				var langValuesJson = isMultilang ? JSON.stringify(raw) : '';
 
 				if (batch) {
-					var sendValue = newValue;
-					if ((mode || 'replace') === 'add') {
+					var sendValue = primaryValue;
+					if ((mode || 'replace') === 'add' && !isMultilang) {
 						if (td.dataset.subfield === 'tags') {
 							// Tag Add: ship only the delta vs. starting set
 							// so we don't broadcast pre-existing tags back
 							// to siblings. Server unions anyway, but this
 							// keeps the payload honest.
 							var origToks = original.split(/\s+/).filter(Boolean);
-							var newToks  = newValue.split(/\s+/).filter(Boolean);
+							var newToks  = sendValue.split(/\s+/).filter(Boolean);
 							var origSet  = Object.create(null);
 							origToks.forEach(function (t) { origSet[t] = true; });
 							sendValue = newToks.filter(function (t) { return !origSet[t]; }).join(' ');
-						} else if (newValue.indexOf(original) === 0) {
-							// Text / textarea Add: strip the editor's
-							// starting prefix so only the new tail goes
-							// out. If the user edited mid-string, ship
-							// the full value as a safe fallback.
-							sendValue = newValue.substring(original.length).replace(/^\s+/, '');
+						} else if (sendValue.indexOf(original) === 0) {
+							sendValue = sendValue.substring(original.length).replace(/^\s+/, '');
 						}
 						if (sendValue === '') { teardown(); return; }
 					}
 					teardown();
 					td.textContent = '…';
 					td.classList.add('ml-cell-saving');
-					runBulk('set', {
+					var bulkExtra = {
 						subfield: td.dataset.subfield,
 						value:    sendValue,
 						mode:     mode || 'replace'
-					}).then(function (result) {
+					};
+					if (langValuesJson) bulkExtra.langValues = langValuesJson;
+					runBulk('set', bulkExtra).then(function (result) {
 						var ok = reportBulk(result);
 						replaceFromQs(location.search, false);
 						if (!ok && td.isConnected) {
@@ -301,21 +406,23 @@
 					return;
 				}
 
-				if (newValue === original) { teardown(); return; }
+				if (!isMultilang && primaryValue === original) { teardown(); return; }
 
 				teardown();
-				td.textContent = newValue;
+				td.textContent = primaryValue;
 				td.classList.add('ml-cell-saving');
 				td.title = labels.saving || 'Saving…';
 
 				enqueueSave(td.dataset.pageId, function () {
-					return postSave({
+					var payload = {
 						pageId:    td.dataset.pageId,
 						fieldName: td.dataset.field,
 						basename:  td.dataset.basename,
 						subfield:  td.dataset.subfield,
-						value:     newValue
-					});
+						value:     primaryValue
+					};
+					if (langValuesJson) payload.langValues = langValuesJson;
+					return postSave(payload);
 				}).then(function (result) {
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');

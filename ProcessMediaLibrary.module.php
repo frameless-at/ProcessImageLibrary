@@ -729,8 +729,31 @@ class ProcessMediaLibrary extends Process {
 		// Output formatting off before mutating: setters work on the raw value
 		// and avoid double-encoding for fields like description.
 		$page->of(false);
+
+		// Multilang popup ships a per-language map alongside the
+		// primary value. When that's present, write each language
+		// directly instead of letting writeLangValue() pick one.
+		$langValuesJson = (string) $this->wire('input')->post('langValues');
+		$langValues = null;
+		if ($langValuesJson !== '') {
+			$decoded = json_decode($langValuesJson, true);
+			if (is_array($decoded)) $langValues = $decoded;
+		}
+
 		try {
-			$this->writeLangValue($img, $subfield, $value);
+			if ($langValues !== null) {
+				$languages = $this->wire('languages');
+				foreach ($langValues as $langKey => $langValue) {
+					$lang = (int) $langKey === 0
+						? ($languages ? $languages->getDefault() : null)
+						: ($languages ? $languages->get((int) $langKey) : null);
+					if ($lang && $lang->id) {
+						$this->writeLangValue($img, $subfield, (string) $langValue, $lang);
+					}
+				}
+			} else {
+				$this->writeLangValue($img, $subfield, $value);
+			}
 			$saved = $page->save($fieldName);
 		} catch (\Throwable $e) {
 			return $this->jsonError('Save error: ' . $e->getMessage());
@@ -830,6 +853,17 @@ class ProcessMediaLibrary extends Process {
 		$value     = (string) $input->post('value');
 		$subfield  = $sanitizer->fieldName((string) $input->post('subfield'));
 		$mode      = (string) $input->post('mode'); // 'replace' (default) | 'add'
+
+		// Multilang batch: same {langId: value} JSON shape as the
+		// single-row save endpoint. When present, the bulk loop
+		// writes each language directly instead of going through the
+		// add/replace heuristics on a single value.
+		$langValuesJson = (string) $input->post('langValues');
+		$langValues = null;
+		if ($langValuesJson !== '') {
+			$decoded = json_decode($langValuesJson, true);
+			if (is_array($decoded)) $langValues = $decoded;
+		}
 		if ($mode !== 'add') $mode = 'replace';
 		$itemsJson = (string) $input->post('items');
 
@@ -936,7 +970,19 @@ class ProcessMediaLibrary extends Process {
 					}
 				}
 
-				$this->writeLangValue($img, $subfield, $itemValue);
+				if ($langValues !== null) {
+					$languages = $this->wire('languages');
+					foreach ($langValues as $langKey => $langValue) {
+						$lang = (int) $langKey === 0
+							? ($languages ? $languages->getDefault() : null)
+							: ($languages ? $languages->get((int) $langKey) : null);
+						if ($lang && $lang->id) {
+							$this->writeLangValue($img, $subfield, (string) $langValue, $lang);
+						}
+					}
+				} else {
+					$this->writeLangValue($img, $subfield, $itemValue);
+				}
 				$fieldsTouched[$fn] = true;
 				$succeeded++;
 			}
@@ -1430,7 +1476,7 @@ class ProcessMediaLibrary extends Process {
 		// the v2 path keeps them as raw {langId: value} arrays so
 		// normalizeDescription() can pick the editor's language at
 		// display time.
-		return 'rows-v2-' . substr(md5((string) json_encode($keyData)), 0, 16);
+		return 'rows-v3-' . substr(md5((string) json_encode($keyData)), 0, 16);
 	}
 
 	/**
@@ -1916,7 +1962,7 @@ class ProcessMediaLibrary extends Process {
 				if (isset($row['custom'][$customName])) continue; // already filled by bulk pass
 				$val = $img->get($customName);
 				if ($val === null || $val === '') continue;
-				$row['custom'][$customName] = $this->normalizeDescription($val);
+				$row['custom'][$customName] = $this->langValueToStorable($val);
 			}
 		}
 		unset($row);
@@ -1976,10 +2022,11 @@ class ProcessMediaLibrary extends Process {
 			foreach ($customNames as $name) {
 				$val = $img->get($name);
 				if ($val === null) continue;
-				// Reduce to the current-user-language string instead of
-				// JSON-encoding the raw {langId: value} map — that's what
-				// the table and the inline editor expect downstream.
-				$row['custom'][$name] = $this->normalizeDescription($val);
+				// Keep the raw shape — multilang LanguagesPageFieldValue
+				// objects get flattened to a cacheable {langId: value}
+				// array so the popup's tabs UI can read every language
+				// straight off the row without a follow-up fetch.
+				$row['custom'][$name] = $this->langValueToStorable($val);
 			}
 		}
 		unset($row);
@@ -2016,6 +2063,102 @@ class ProcessMediaLibrary extends Process {
 	 *
 	 * @param mixed $val
 	 */
+	/**
+	 * Compact list of installed languages for the popup-tabs UI.
+	 * Returns [] on single-language installs so JS can flip to its
+	 * simpler render path without further checks.
+	 *
+	 * @return array<int,array{id:int,name:string,title:string}>
+	 */
+	protected function buildLanguagesPayload(): array {
+		$languages = $this->wire('languages');
+		if (!$languages || $languages->count() < 2) return [];
+		$out = [];
+		foreach ($languages as $lang) {
+			$out[] = [
+				'id'    => $lang->isDefault() ? 0 : (int) $lang->id,
+				'name'  => (string) $lang->name,
+				'title' => (string) ($lang->get('title') ?: $lang->name),
+			];
+		}
+		return $out;
+	}
+
+	/**
+	 * If $val is (or decodes to) a per-language {langId: value}
+	 * array, return that array. Otherwise return null. Used by the
+	 * table render to emit per-language data attributes on multilang
+	 * cells so the popup can populate its tabs without a follow-up
+	 * round-trip.
+	 *
+	 * @return array<int|string,string>|null
+	 */
+	/**
+	 * Coerce a Pagefile subfield value into a cacheable shape that
+	 * still preserves every language slot. LanguagesPageFieldValue
+	 * objects can't be serialized into WireCache as-is; this flips
+	 * them to a {langId: value} array so the popup can read each
+	 * language tab without re-loading the image. Plain strings pass
+	 * through untouched.
+	 *
+	 * @param mixed $val
+	 * @return mixed
+	 */
+	/**
+	 * For multilang cells, emit one data-lang-<id> attribute per
+	 * language so the popup-tabs UI can read each language's value
+	 * straight off the cell. Returns '' (and emits nothing) for
+	 * single-language values so non-multilang cells stay lean.
+	 */
+	protected function buildLangAttrs($val): string {
+		$arr = $this->decodeLangArray($val);
+		if (!$arr) return '';
+		$san = $this->wire('sanitizer');
+		$out = '';
+		foreach ($arr as $langId => $langVal) {
+			if (!is_int($langId) && !ctype_digit((string) $langId)) continue;
+			$out .= ' data-lang-' . (int) $langId . '="'
+				. $san->entities((string) $langVal) . '"';
+		}
+		return $out;
+	}
+
+	protected function langValueToStorable($val) {
+		if (is_object($val) && method_exists($val, 'getLanguageValue')) {
+			$languages = $this->wire('languages');
+			if ($languages && $languages->count() > 1) {
+				$arr = [];
+				foreach ($languages as $lang) {
+					$key = $lang->isDefault() ? 0 : (int) $lang->id;
+					$arr[$key] = (string) $val->getLanguageValue($lang);
+				}
+				return $arr;
+			}
+			return (string) $val;
+		}
+		if (is_object($val)) return (string) $val;
+		return $val;
+	}
+
+	protected function decodeLangArray($val): ?array {
+		if (is_array($val)) return $val;
+		if (is_string($val) && $val !== '' && ($val[0] === '{' || $val[0] === '[')) {
+			$decoded = json_decode($val, true);
+			if (is_array($decoded)) return $decoded;
+		}
+		if (is_object($val) && method_exists($val, 'getLanguages')) {
+			$arr = [];
+			foreach ($this->wire('languages') as $lang) {
+				$key = $lang->isDefault() ? 0 : $lang->id;
+				$arr[$key] = method_exists($val, 'getLanguageValue')
+					? (string) $val->getLanguageValue($lang)
+					: '';
+			}
+			return $arr;
+		}
+		return null;
+	}
+
 	protected function normalizeDescription($val): string {
 		if ($val === null) return '';
 		if (is_string($val)) {
@@ -2070,17 +2213,19 @@ class ProcessMediaLibrary extends Process {
 	 * setLanguageValue() for custom subfields, and finally to a
 	 * plain set() for installs without multilang.
 	 */
-	protected function writeLangValue(Pagefile $img, string $subfield, string $value): void {
+	protected function writeLangValue(Pagefile $img, string $subfield, string $value, ?Language $lang = null): void {
 		$languages = $this->wire('languages');
 		if (!$languages || $languages->count() < 2) {
 			$img->set($subfield, $value);
 			return;
 		}
 
-		$user = $this->wire('user');
-		$lang = ($user && $user->language && $user->language->id)
-			? $user->language
-			: $languages->getDefault();
+		if (!$lang) {
+			$user = $this->wire('user');
+			$lang = ($user && $user->language && $user->language->id)
+				? $user->language
+				: $languages->getDefault();
+		}
 		if (!$lang) {
 			$img->set($subfield, $value);
 			return;
@@ -2153,11 +2298,12 @@ class ProcessMediaLibrary extends Process {
 			'tplFields' => $this->getTemplateFieldsMap($imageFields, $eligibleTemplates),
 			'defaultPageSize'      => $this->getDefaultPageSize(),
 			'defaultHiddenColumns' => $this->getDefaultHiddenColumns(),
-			// When >1 language is installed, route every inline-edit
-			// click straight to the per-image PW editor iframe so the
-			// editor gets PW-native per-language tabs (and our own
-			// popup doesn't try to reinvent multilang on its own).
-			'multilang'            => (bool) ($this->wire('languages') && $this->wire('languages')->count() > 1),
+			// Languages list for the popup's multilang tabs. Each
+			// entry: { id: <storage key>, name: <api name>,
+			// title: <display title> }. The "id" is the key PW uses
+			// in the multilang value array — 0 for the default
+			// language, the language page id otherwise.
+			'languages'            => $this->buildLanguagesPayload(),
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
@@ -2561,7 +2707,7 @@ class ProcessMediaLibrary extends Process {
 			$out .= '<td data-col="field"><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
 			$out .= '<td data-col="filename"><code>' . $san->entities((string) $row['basename']) . '</code></td>';
 			$out .= '<td class="ml-cell-desc ml-cell-editable" data-col="description" ' . $editAttrs
-				. ' data-subfield="description" data-input="textarea">'
+				. ' data-subfield="description" data-input="textarea"' . $this->buildLangAttrs($row['description']) . '>'
 				. $san->entities($desc) . '</td>';
 			if ($showTagsCol) {
 				$tagCfg = $tagsConfig[$row['fieldName']] ?? ['mode' => 0, 'allowed' => []];
@@ -2612,14 +2758,13 @@ class ProcessMediaLibrary extends Process {
 						)) . '">—</td>';
 					continue;
 				}
-				// The hydration pass already reduces multilang values to the
-				// editor's current language; the defensive normalize here
-				// handles older row-cache entries that still carry arrays.
-				$val = $this->normalizeDescription($row['custom'][$name] ?? '');
+				$raw = $row['custom'][$name] ?? '';
+				$val = $this->normalizeDescription($raw);
 				$inputType = $customInputTypes[$name] ?? 'text';
 				$out .= '<td class="ml-cell-editable"' . $colAttr . ' ' . $editAttrs
 					. ' data-subfield="' . $san->entities($name) . '"'
-					. ' data-input="' . $san->entities($inputType) . '">'
+					. ' data-input="' . $san->entities($inputType) . '"'
+					. $this->buildLangAttrs($raw) . '>'
 					. $san->entities((string) $val) . '</td>';
 			}
 

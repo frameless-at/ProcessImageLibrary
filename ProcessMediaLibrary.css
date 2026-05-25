@@ -338,6 +338,56 @@ textarea.ml-cell-input {
 	border: 1px solid #c0c0c0;
 	border-radius: 3px;
 }
+/* Multilang tabs inside the popup — minimal styling that matches
+   the rest of the popup (tab bar above a single visible pane). */
+.ml-langtabs {
+	display: flex;
+	flex-direction: column;
+}
+.ml-langtabs-bar {
+	display: flex;
+	gap: 0.25rem;
+	border-bottom: 1px solid #d0d0d0;
+	margin-bottom: 0.5rem;
+}
+.ml-langtabs-tab {
+	background: #f5f5f5;
+	border: 1px solid #d0d0d0;
+	border-bottom: 0;
+	border-radius: 3px 3px 0 0;
+	padding: 0.35rem 0.75rem;
+	font: inherit;
+	cursor: pointer;
+	color: #555;
+}
+.ml-langtabs-tab:hover {
+	background: #e5e5e5;
+}
+.ml-langtabs-tab.ml-langtabs-tab-active {
+	background: #fff;
+	border-color: #c0c0c0;
+	color: #111;
+	font-weight: 600;
+	margin-bottom: -1px;
+}
+.ml-langtabs-pane {
+	display: block;
+	width: 100%;
+	box-sizing: border-box;
+	font: inherit;
+	padding: 0.5rem;
+	border: 1px solid #c0c0c0;
+	border-radius: 3px;
+	resize: vertical;
+}
+.ml-langtabs-pane:focus {
+	outline: 2px solid #5b8cd6;
+	outline-offset: -1px;
+}
+textarea.ml-langtabs-pane {
+	min-height: 12em;
+}
+
 /* Whitelist-mode tags: grid of checkboxes. Caps the height so a
    long whitelist scrolls inside the dialog instead of pushing the
    footer off-screen. */
