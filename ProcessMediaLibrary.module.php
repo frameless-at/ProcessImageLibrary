@@ -659,6 +659,10 @@ class ProcessMediaLibrary extends Process {
 		$config = $this->wire('config');
 		$config->ajax = true;
 		header('Content-Type: application/json');
+		// Buffer everything — any stray notice or PW startup warning
+		// would otherwise land before our json_encode in the response
+		// body and break the client's JSON.parse.
+		ob_start();
 
 		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
 			return $this->jsonError('POST required', 405);
@@ -744,7 +748,7 @@ class ProcessMediaLibrary extends Process {
 		// so the inline cell display matches what the editor sees.
 		$stored = $this->normalizeDescription($img->get($subfield));
 
-		return json_encode([
+		return $this->jsonResponse([
 			'ok'    => true,
 			'value' => (string) $stored,
 		]);
@@ -768,7 +772,22 @@ class ProcessMediaLibrary extends Process {
 	 */
 	protected function jsonError(string $msg, int $status = 400): string {
 		http_response_code($status);
+		// Drop anything PHP buffered (notices, warnings, stray prints)
+		// so the response body is pure JSON — otherwise an iOS Safari
+		// fetch.json() trips on the trailing prose with "The string
+		// did not match the expected pattern".
+		while (ob_get_level() > 0) ob_end_clean();
 		return json_encode(['ok' => false, 'error' => $msg]);
+	}
+
+	/**
+	 * Mirror of jsonError() for success paths — discards any stray
+	 * buffered output then returns the encoded payload, so the JSON
+	 * the client receives is exactly what we encode here.
+	 */
+	protected function jsonResponse(array $payload): string {
+		while (ob_get_level() > 0) ob_end_clean();
+		return json_encode($payload);
 	}
 
 	/**
@@ -793,6 +812,7 @@ class ProcessMediaLibrary extends Process {
 		$config = $this->wire('config');
 		$config->ajax = true;
 		header('Content-Type: application/json');
+		ob_start();
 
 		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
 			return $this->jsonError('POST required', 405);
@@ -936,7 +956,7 @@ class ProcessMediaLibrary extends Process {
 			$this->wire('cache')->deleteFor($this);
 		}
 
-		return json_encode([
+		return $this->jsonResponse([
 			'ok'        => true,
 			'succeeded' => $succeeded,
 			'failed'    => $failed,
@@ -1162,6 +1182,7 @@ class ProcessMediaLibrary extends Process {
 		$config = $this->wire('config');
 		$config->ajax = true;
 		header('Content-Type: application/json');
+		ob_start();
 
 		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
 			return $this->jsonError('POST required', 405);
@@ -1324,7 +1345,7 @@ class ProcessMediaLibrary extends Process {
 			$this->wire('cache')->deleteFor($this);
 		}
 
-		return json_encode([
+		return $this->jsonResponse([
 			'ok'        => true,
 			'succeeded' => $succeeded,
 			'skipped'   => $skipped,
