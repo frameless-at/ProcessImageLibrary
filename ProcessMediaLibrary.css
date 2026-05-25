@@ -453,9 +453,9 @@ textarea.ml-cell-input {
 	margin: 0.75rem 0 0;
 }
 
-/* Export / Import for LLM round-trip — collapsed fieldset at the
-   bottom of the page. The download is a direct <a>, the upload is
-   AJAX-posted so the user stays on their current filter view. */
+/* Export / Import — collapsed fieldset at the bottom of the page.
+   The download is a direct <a>, the upload is AJAX-posted so the
+   user stays on their current filter view. */
 .ml-export-import {
 	margin-top: 1.5rem;
 }

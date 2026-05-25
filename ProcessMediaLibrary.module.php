@@ -305,11 +305,11 @@ class ProcessMediaLibrary extends Process {
 
 		return '<div class="Inputfield InputfieldFieldset InputfieldStateCollapsed ml-export-import">'
 			. '<label class="InputfieldHeader InputfieldStateToggle">'
-			. $san->entities($this->_('Export / Import for LLM round-trip'))
+			. $san->entities($this->_('Export / Import'))
 			. '</label>'
 			. '<div class="InputfieldContent">'
 			. '<p class="ml-ei-help">' . $san->entities(
-				$this->_('Export hands an LLM the current filter set (image URL, page context, current values). The LLM fills empty fields, you re-upload the JSON to apply changes.')
+				$this->_('Export the current filter set as JSON or CSV — image URL, page context, current values. Edit externally, re-upload to apply changes.')
 			) . '</p>'
 			. '<p>'
 			. '<a class="uk-button uk-button-primary uk-button-small ml-export-link"'
@@ -939,12 +939,11 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Streams the currently-filtered row set as a JSON file download,
-	 * shaped to be handed straight to an LLM. Each image carries
-	 * everything needed to (a) let the LLM see / understand the
-	 * picture (absolute URL, page context) and (b) round-trip the
-	 * payload back through ___executeImport without us needing to
-	 * trust anything but the identity triple.
+	 * Streams the currently-filtered row set as a JSON file download.
+	 * Each image carries everything an external editor / processor
+	 * needs to (a) see the picture (absolute URL, page context) and
+	 * (b) round-trip the payload back through ___executeImport
+	 * without us needing to trust anything but the identity triple.
 	 *
 	 * Filter state is read from the same GET params as the main
 	 * listing — so the user just builds the filter they care about
@@ -969,8 +968,8 @@ class ProcessMediaLibrary extends Process {
 
 		// Full hydration — no pagination. The export deliberately
 		// produces the entire filtered set so the operator can hand
-		// it all to an LLM at once; users with very large libraries
-		// should narrow the filter before exporting.
+		// it all to an external editor at once; users with very large
+		// libraries should narrow the filter before exporting.
 		$pageIds = array_values(array_unique(array_column($rows, 'pageId')));
 		$pagesById = [];
 		foreach ($this->wire('pages')->getById($pageIds) as $p) {
@@ -1019,7 +1018,7 @@ class ProcessMediaLibrary extends Process {
 				'filesize'    => (int) $row['filesize'],
 				'description' => $this->normalizeDescription($row['description']),
 				'tags'        => (string) $row['tags'],
-				'custom'      => (object) $customs, // force {} when empty so the LLM sees a key
+				'custom'      => (object) $customs, // force {} when empty so the shape is consistent
 			];
 		}
 
@@ -1033,14 +1032,7 @@ class ProcessMediaLibrary extends Process {
 				'imageCount'     => count($images),
 				'appliedFilter'  => (object) $this->summarizeActiveFilters($filters),
 				'editableFields' => ['description', 'tags', 'custom.*'],
-				'instructions'   => [
-					'Each entry in "images" represents one editable image.',
-					'KEEP UNCHANGED: id, pageId, fieldName, basename, url, dimensions, filesize, pageTitle, pageUrl.',
-					'YOU MAY FILL OR REPLACE: description (string), tags (whitespace-separated string), custom.<subfield> (string per declared subfield).',
-					'An empty string means "no value yet". Use the url to fetch the image and fill any field you can.',
-					'Return the same JSON shape; only items whose values actually differ from the export will be touched on Import.',
-					'Tags whitelist (useTags=2) is enforced server-side — unknown tags on whitelisted fields are rejected.',
-				],
+				'readOnlyFields' => ['id', 'pageId', 'fieldName', 'basename', 'url', 'dimensions', 'filesize', 'pageTitle', 'pageUrl'],
 			],
 			'images' => $images,
 		];
@@ -1153,7 +1145,7 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Apply a previously-exported (and presumably LLM-augmented)
+	 * Apply a previously-exported (and externally edited)
 	 * JSON file back to the live pages. Every value goes through the
 	 * same whitelist gates as the inline-edit save endpoint:
 	 * per-page editable() check, image-field whitelist, subfield
