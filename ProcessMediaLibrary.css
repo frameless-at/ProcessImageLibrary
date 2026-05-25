@@ -11,6 +11,31 @@
 	margin: 0;
 }
 
+/* Module-settings cog. Sits absolute in the .ml-root so it lifts
+   into the page-heading row regardless of where the admin theme
+   draws that row. Adjust top offset if the theme's heading sits
+   at a different height. */
+.ml-root {
+	position: relative;
+}
+.ml-config-link {
+	position: absolute;
+	top: -3rem;
+	right: 0;
+	z-index: 5;
+	font-size: 1.5rem;
+	line-height: 1;
+	color: #888;
+	text-decoration: none;
+	padding: 0.25rem 0.4rem;
+}
+.ml-config-link:hover {
+	color: #333;
+}
+.ml-config-link .fa {
+	display: block;
+}
+
 /* Horizontal-scroll wrapper so the wide table degrades to a swipe
    on narrow viewports rather than blowing out the layout. */
 .ml-table-scroll {

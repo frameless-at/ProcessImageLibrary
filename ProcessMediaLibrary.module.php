@@ -233,6 +233,15 @@ class ProcessMediaLibrary extends Process {
 		);
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
+		// Cog → module settings. Position-absolute via CSS so it sits
+		// in the heading row instead of taking a row of its own; the
+		// link target is PW's standard module-edit URL.
+		$cfgUrl = $this->wire('config')->urls->admin . 'module/edit/?name=' . urlencode($this->className());
+		$out .= '<a class="ml-config-link" href="' . $sanitizer->entities($cfgUrl) . '"'
+			. ' title="' . $sanitizer->entities($this->_('Module settings')) . '"'
+			. ' aria-label="' . $sanitizer->entities($this->_('Module settings')) . '">'
+			. '<i class="fa fa-cog" aria-hidden="true"></i>'
+			. '</a>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		$out .= $this->renderExportImportBar($filters);
