@@ -23,6 +23,7 @@
 			bulkUrl:   pwCfg.bulkUrl   || root.dataset.bulkUrl   || '',
 			adminUrl:  pwCfg.adminUrl  || root.dataset.adminUrl  || '',
 			tplFields: pwCfg.tplFields || {},
+			multilang: !!pwCfg.multilang,
 			csrf: pwCfg.csrf || {
 				name:  root.dataset.csrfName  || '',
 				value: root.dataset.csrfValue || ''
@@ -168,6 +169,16 @@
 		// backdrop click dismiss; Save commits.
 		function activateEditor(td) {
 			if (td.classList.contains('ml-editing')) return;
+
+			// Multilang installs: punt to the per-image PW editor
+			// iframe instead of our reduced-feature popup. The user
+			// gets PW-native language tabs for description / tags /
+			// customs and save round-trips through PW's own flow —
+			// none of our writeLangValue heuristics needed.
+			if (config.multilang && td.dataset.fileHash) {
+				return openImageEditor(td);
+			}
+
 			td.classList.add('ml-editing');
 
 			var original = td.textContent;
