@@ -24,6 +24,7 @@
 			adminUrl:  pwCfg.adminUrl  || root.dataset.adminUrl  || '',
 			tplFields: pwCfg.tplFields || {},
 			languages: Array.isArray(pwCfg.languages) ? pwCfg.languages : [],
+			currentLangId: (pwCfg.currentLangId != null) ? pwCfg.currentLangId : null,
 			csrf: pwCfg.csrf || {
 				name:  root.dataset.csrfName  || '',
 				value: root.dataset.csrfValue || ''
@@ -140,7 +141,20 @@
 			var byId = Object.create(null);
 			var activeId = null;
 
-			langs.forEach(function (lang, idx) {
+			// Pre-pick the tab to land on: server tells us the editor's
+			// current admin-language id (matching the same 0=default
+			// scheme as data-lang-<id>). Falls back to the first
+			// language in the list if no match.
+			var preferredId = null;
+			if (config.currentLangId !== null) {
+				var found = langs.some(function (l) {
+					return Number(l.id) === Number(config.currentLangId);
+				});
+				if (found) preferredId = Number(config.currentLangId);
+			}
+			if (preferredId === null && langs.length) preferredId = Number(langs[0].id);
+
+			langs.forEach(function (lang) {
 				var tab = document.createElement('button');
 				tab.type = 'button';
 				tab.className = 'ml-langtabs-tab';
@@ -158,15 +172,17 @@
 				}
 				pane.className = 'ml-langtabs-pane';
 				pane.dataset.langId = String(lang.id);
-				// data-lang-N attr on td reflects the stored value;
-				// fall back to "original" only when nothing's stored
-				// AND this is the first tab.
+				// data-lang-<id> attr is the stored value; the cell's
+				// textContent reflects the current user-lang display,
+				// so only that tab gets "original" as a fallback when
+				// no attr is set.
 				var stored = td.getAttribute('data-lang-' + lang.id);
-				pane.value = (stored !== null) ? stored : (idx === 0 ? original : '');
+				var isPreferred = Number(lang.id) === preferredId;
+				pane.value = (stored !== null) ? stored : (isPreferred ? original : '');
 				panes.appendChild(pane);
 				byId[lang.id] = pane;
 
-				if (idx === 0) {
+				if (isPreferred) {
 					tab.classList.add('ml-langtabs-tab-active');
 					activeId = lang.id;
 				} else {

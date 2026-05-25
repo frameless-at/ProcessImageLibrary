@@ -2074,6 +2074,21 @@ class ProcessMediaLibrary extends Process {
 	 *
 	 * @return array<int,array{id:int,name:string,title:string}>
 	 */
+	/**
+	 * The "0 = default / else id" key for the current user's
+	 * admin language. Returns null on single-language installs.
+	 */
+	protected function getCurrentLangKey(): ?int {
+		$languages = $this->wire('languages');
+		if (!$languages || $languages->count() < 2) return null;
+		$user = $this->wire('user');
+		$lang = ($user && $user->language && $user->language->id)
+			? $user->language
+			: $languages->getDefault();
+		if (!$lang || !$lang->id) return null;
+		return $lang->isDefault() ? 0 : (int) $lang->id;
+	}
+
 	protected function buildLanguagesPayload(): array {
 		$languages = $this->wire('languages');
 		if (!$languages || $languages->count() < 2) return [];
@@ -2377,6 +2392,12 @@ class ProcessMediaLibrary extends Process {
 			// in the multilang value array — 0 for the default
 			// language, the language page id otherwise.
 			'languages'            => $this->buildLanguagesPayload(),
+			// Editor's current admin language, expressed in the same
+			// "0 = default lang, else page id" key scheme that
+			// buildLanguagesPayload uses. JS pre-activates the
+			// matching popup tab so multilang edits open straight on
+			// the user's working language.
+			'currentLangId'        => $this->getCurrentLangKey(),
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
