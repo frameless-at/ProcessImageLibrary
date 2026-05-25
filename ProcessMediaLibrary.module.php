@@ -742,15 +742,7 @@ class ProcessMediaLibrary extends Process {
 
 		try {
 			if ($langValues !== null) {
-				$languages = $this->wire('languages');
-				foreach ($langValues as $langKey => $langValue) {
-					$lang = (int) $langKey === 0
-						? ($languages ? $languages->getDefault() : null)
-						: ($languages ? $languages->get((int) $langKey) : null);
-					if ($lang && $lang->id) {
-						$this->writeLangValue($img, $subfield, (string) $langValue, $lang);
-					}
-				}
+				$this->applyLangValues($img, $subfield, $langValues);
 			} else {
 				$this->writeLangValue($img, $subfield, $value);
 			}
@@ -971,15 +963,7 @@ class ProcessMediaLibrary extends Process {
 				}
 
 				if ($langValues !== null) {
-					$languages = $this->wire('languages');
-					foreach ($langValues as $langKey => $langValue) {
-						$lang = (int) $langKey === 0
-							? ($languages ? $languages->getDefault() : null)
-							: ($languages ? $languages->get((int) $langKey) : null);
-						if ($lang && $lang->id) {
-							$this->writeLangValue($img, $subfield, (string) $langValue, $lang);
-						}
-					}
+					$this->applyLangValues($img, $subfield, $langValues);
 				} else {
 					$this->writeLangValue($img, $subfield, $itemValue);
 				}
@@ -2213,6 +2197,37 @@ class ProcessMediaLibrary extends Process {
 	 * setLanguageValue() for custom subfields, and finally to a
 	 * plain set() for installs without multilang.
 	 */
+	/**
+	 * Apply a {langId: value} map to a multilang subfield. The
+	 * presence of this map already implies the field is multilang
+	 * (we only emit langValues when the cell carries data-lang
+	 * attrs), so for description we go straight to Pagefile's
+	 * dedicated $img->description($lang, $value) signature without
+	 * letting writeLangValue() second-guess via shape detection.
+	 * Other subfields stay on the generic writer.
+	 *
+	 * @param array<int|string,string> $langValues
+	 */
+	protected function applyLangValues(Pagefile $img, string $subfield, array $langValues): void {
+		$languages = $this->wire('languages');
+		if (!$languages) return;
+		$isDescription = $subfield === 'description' && method_exists($img, 'description');
+
+		foreach ($langValues as $langKey => $langValue) {
+			$langKeyInt = (int) $langKey;
+			$lang = $langKeyInt === 0
+				? $languages->getDefault()
+				: $languages->get($langKeyInt);
+			if (!$lang || !$lang->id) continue;
+
+			if ($isDescription) {
+				$img->description($lang, (string) $langValue);
+			} else {
+				$this->writeLangValue($img, $subfield, (string) $langValue, $lang);
+			}
+		}
+	}
+
 	protected function writeLangValue(Pagefile $img, string $subfield, string $value, ?Language $lang = null): void {
 		$languages = $this->wire('languages');
 		if (!$languages || $languages->count() < 2) {
