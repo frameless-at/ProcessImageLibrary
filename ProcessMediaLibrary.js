@@ -434,13 +434,17 @@
 						flashCell(td, true);
 					} else {
 						td.textContent = original;
-						td.title = (result && result.data && result.data.error) || labels.error || 'Save failed';
+						var reason = (result && result.data && result.data.error)
+							|| ('HTTP ' + (result && result.status) + ' / ' + JSON.stringify(result && result.data));
+						console.error('[MediaLibrary] save failed:', result);
+						td.title = reason;
 						flashCell(td, false);
 					}
 				}).catch(function (err) {
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
 					td.textContent = original;
+					console.error('[MediaLibrary] save errored:', err);
 					td.title = (err && err.message) || labels.error || 'Network error';
 					flashCell(td, false);
 				});

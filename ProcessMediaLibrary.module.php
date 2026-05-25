@@ -2231,36 +2231,34 @@ class ProcessMediaLibrary extends Process {
 			return;
 		}
 
-		// Branch by the SHAPE of the current value, not by subfield
-		// name — the field might be single-language even on a
-		// multilang install. We pick the multilang path only when
-		// what we read back is actually multilang.
-		$current = $img->get($subfield);
+		// Pagefile.description always goes through PW's dedicated
+		// signature first — that's the only path that's guaranteed
+		// to preserve every other language across PW versions.
+		// $img->set('description', [array]) has been unreliable here.
+		if ($subfield === 'description' && method_exists($img, 'description')) {
+			$img->description($lang, $value);
+			return;
+		}
 
-		// (1) LanguagesPageFieldValue object — typical for custom
-		// subfields backed by a multilang Fieldtype.
+		// Custom subfields backed by a multilang Fieldtype: read the
+		// LanguagesPageFieldValue back out, mutate just the editor's
+		// language, write the same object back.
+		$current = $img->get($subfield);
 		if (is_object($current) && method_exists($current, 'setLanguageValue')) {
 			$current->setLanguageValue($lang, $value);
 			$img->set($subfield, $current);
 			return;
 		}
 
-		// (2) Raw {langId: value} array — typical for Pagefile's
-		// built-in description on a multilang-enabled image field.
+		// Raw {langId: value} array shape — same idea, mutate the
+		// current language key only.
 		if (is_array($current)) {
 			$current[$lang->id] = $value;
 			$img->set($subfield, $current);
 			return;
 		}
 
-		// (3) Pagefile-specific dedicated setter, only when nothing
-		// above matched. PW's signature is description($lang, $value).
-		if ($subfield === 'description' && method_exists($img, 'description')) {
-			$img->description($lang, $value);
-			return;
-		}
-
-		// (4) Plain string field — single-language storage.
+		// Single-language field on a multilang install — plain set.
 		$img->set($subfield, $value);
 	}
 
