@@ -725,9 +725,14 @@ class ProcessMediaLibrary extends Process {
 		// Output formatting off before mutating: setters work on the raw value
 		// and avoid double-encoding for fields like description.
 		$page->of(false);
-		$this->writeLangValue($img, $subfield, $value);
-		if (!$page->save($fieldName)) {
-			return $this->jsonError('Save failed');
+		try {
+			$this->writeLangValue($img, $subfield, $value);
+			$saved = $page->save($fieldName);
+		} catch (\Throwable $e) {
+			return $this->jsonError('Save error: ' . $e->getMessage());
+		}
+		if (!$saved) {
+			return $this->jsonError('Save returned false — value may not have persisted');
 		}
 		// Belt + suspenders: ensure the cache is gone before any subsequent
 		// re-fetch reads it. Matches the behavior in executeBulk.
