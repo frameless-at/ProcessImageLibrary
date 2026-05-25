@@ -1992,7 +1992,18 @@ class ProcessMediaLibrary extends Process {
 	 */
 	protected function normalizeDescription($val): string {
 		if ($val === null) return '';
-		if (is_string($val)) return $val;
+		if (is_string($val)) {
+			// findRaw hands multilang subfield values back as JSON-
+			// encoded strings ({"0":"…","1979":"…"} or [""] for the
+			// empty-default-only case), not arrays. Decode + recurse
+			// so the rest of this function still gets to pick the
+			// editor's language out of the data.
+			if ($val !== '' && ($val[0] === '{' || $val[0] === '[')) {
+				$decoded = json_decode($val, true);
+				if (is_array($decoded)) return $this->normalizeDescription($decoded);
+			}
+			return $val;
+		}
 		if (is_object($val)) {
 			// LanguagesPageFieldValue::__toString returns the current
 			// user-language value (with PW's own fallback rules).
@@ -2000,8 +2011,9 @@ class ProcessMediaLibrary extends Process {
 		}
 		if (!is_array($val)) return (string) $val;
 
-		// Raw {langId: string} shape (typical for findRaw and for
-		// $img->get('description') on a multilang Pagefile).
+		// Raw {langId: string} shape (typical for findRaw after we
+		// json_decode above, and for $img->get('description') on a
+		// multilang Pagefile).
 		$user = $this->wire('user');
 		$userLangId = ($user && $user->language && $user->language->id) ? (int) $user->language->id : 0;
 		if (isset($val[$userLangId]) && $val[$userLangId] !== '') {
@@ -2043,24 +2055,41 @@ class ProcessMediaLibrary extends Process {
 		$lang = ($user && $user->language && $user->language->id)
 			? $user->language
 			: $languages->getDefault();
-
-		if ($subfield === 'description') {
-			// Pagefile has a dedicated per-language setter.
-			$img->description($lang, $value);
+		if (!$lang) {
+			$img->set($subfield, $value);
 			return;
 		}
 
-		// Custom subfields backed by a multilang Fieldtype expose a
-		// LanguagesPageFieldValue — update only the current lang and
-		// write the same object back so the other lang slots survive.
+		// Branch by the SHAPE of the current value, not by subfield
+		// name — the field might be single-language even on a
+		// multilang install. We pick the multilang path only when
+		// what we read back is actually multilang.
 		$current = $img->get($subfield);
+
+		// (1) LanguagesPageFieldValue object — typical for custom
+		// subfields backed by a multilang Fieldtype.
 		if (is_object($current) && method_exists($current, 'setLanguageValue')) {
 			$current->setLanguageValue($lang, $value);
 			$img->set($subfield, $current);
 			return;
 		}
 
-		// Non-multilang field on a multilang install — plain set is fine.
+		// (2) Raw {langId: value} array — typical for Pagefile's
+		// built-in description on a multilang-enabled image field.
+		if (is_array($current)) {
+			$current[$lang->id] = $value;
+			$img->set($subfield, $current);
+			return;
+		}
+
+		// (3) Pagefile-specific dedicated setter, only when nothing
+		// above matched. PW's signature is description($lang, $value).
+		if ($subfield === 'description' && method_exists($img, 'description')) {
+			$img->description($lang, $value);
+			return;
+		}
+
+		// (4) Plain string field — single-language storage.
 		$img->set($subfield, $value);
 	}
 
