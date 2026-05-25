@@ -642,6 +642,7 @@
 					// Drop ?p — the current page number rarely makes
 					// sense at the new size; landing back on page 1 is
 					// the least surprising default.
+					try { localStorage.setItem(PAGE_SIZE_STORAGE_KEY, t.value); } catch (e) {}
 					var url = new URL(location.href);
 					url.searchParams.set('ps', t.value);
 					url.searchParams.delete('p');
@@ -820,6 +821,38 @@
 			});
 		});
 		applyColumnVisibility();
+
+		// -- Persisted page-size --------------------------------------
+		// Page size lives in the URL (so bookmarks reproduce the
+		// view) but the user's preferred default is also stored
+		// locally — without it, the picker resets to 50 every time
+		// the user opens the library fresh. URL wins when present
+		// (and updates localStorage to match); otherwise we silently
+		// apply the stored value via the existing AJAX refresh path.
+		var PAGE_SIZE_STORAGE_KEY = 'ml-pagesize-v1';
+		var DEFAULT_PAGE_SIZE = 50;
+		(function syncStoredPageSize() {
+			var picker = document.querySelector('.ml-page-size-picker');
+			if (!picker) return;
+			var validSizes = Array.prototype.map.call(picker.options, function (o) {
+				return parseInt(o.value, 10);
+			}).filter(function (n) { return !isNaN(n) && n > 0; });
+
+			var params = new URLSearchParams(location.search);
+			var urlPs  = parseInt(params.get('ps') || '0', 10);
+			if (urlPs && validSizes.indexOf(urlPs) !== -1) {
+				try { localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(urlPs)); } catch (e) {}
+				return;
+			}
+			var stored = 0;
+			try { stored = parseInt(localStorage.getItem(PAGE_SIZE_STORAGE_KEY) || '0', 10); }
+			catch (e) {}
+			if (!stored || stored === DEFAULT_PAGE_SIZE) return;
+			if (validSizes.indexOf(stored) === -1) return;
+			params.set('ps', String(stored));
+			params.delete('p');
+			replaceFromQs('?' + params.toString(), true);
+		})();
 
 		// -- Export link ----------------------------------------------
 		// Server renders the link with the filter URL it knew at
