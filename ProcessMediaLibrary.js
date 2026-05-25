@@ -433,19 +433,25 @@
 						td.title = '';
 						flashCell(td, true);
 					} else {
-						td.textContent = original;
+						// Show the error directly in the cell during the
+						// diagnostic phase so the actual server response is
+						// visible at a glance (the tooltip has it too, but
+						// hover-on-iPad isn't reliable). Click the cell
+						// once to dismiss and try again.
 						var reason = (result && result.data && result.data.error)
 							|| ('HTTP ' + (result && result.status) + ' / ' + JSON.stringify(result && result.data));
 						console.error('[MediaLibrary] save failed:', result);
+						td.textContent = '⚠ ' + reason;
 						td.title = reason;
 						flashCell(td, false);
 					}
 				}).catch(function (err) {
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
-					td.textContent = original;
 					console.error('[MediaLibrary] save errored:', err);
-					td.title = (err && err.message) || labels.error || 'Network error';
+					var msg = (err && err.message) || labels.error || 'Network error';
+					td.textContent = '⚠ ' + msg;
+					td.title = msg;
 					flashCell(td, false);
 				});
 			}
