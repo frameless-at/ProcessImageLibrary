@@ -1241,20 +1241,46 @@ class ProcessMediaLibrary extends Process {
 	 * @param array<string,mixed> $entry passed by reference
 	 */
 	protected function assignCsvCell(array &$entry, string $header, string $val): void {
+		// custom_<name>_<langName> | custom_<name>_<langId> | custom_<name>
 		if (strncmp($header, 'custom_', 7) === 0) {
 			$rest = substr($header, 7);
-			if (preg_match('/^(.+)_(\d+)$/', $rest, $m)) {
-				$entry['custom__langs'][$m[1]][(int) $m[2]] = $val;
+			if (preg_match('/^(.+)_([^_]+)$/', $rest, $m)
+				&& $this->isLangKey($m[2])
+			) {
+				$entry['custom__langs'][$m[1]][$m[2]] = $val;
 			} else {
 				$entry['custom'][$rest] = $val;
 			}
 			return;
 		}
-		if (preg_match('/^(description|tags)_(\d+)$/', $header, $m)) {
-			$entry[$m[1] . '__langs'][(int) $m[2]] = $val;
+		// description_<lang> | tags_<lang>
+		if (preg_match('/^(description|tags)_(.+)$/', $header, $m)
+			&& $this->isLangKey($m[2])
+		) {
+			$entry[$m[1] . '__langs'][$m[2]] = $val;
 			return;
 		}
 		$entry[$header] = $val;
+	}
+
+	/**
+	 * Is the given string a valid language identifier in this
+	 * install — either a numeric id (any of our ids, including 0
+	 * for default) or a known language name? Backstop for the CSV
+	 * column-name parser so a field literally called "summary_extra"
+	 * doesn't get mistaken for a language-suffixed column.
+	 */
+	protected function isLangKey(string $key): bool {
+		$languages = $this->wire('languages');
+		if (!$languages) return false;
+		if (ctype_digit($key)) {
+			$id = (int) $key;
+			if ($id === 0) return true;
+			$lang = $languages->get($id);
+			return $lang && $lang->id ? true : false;
+		}
+		$lang = $languages->get($key);
+		return $lang && $lang->id ? true : false;
 	}
 
 	/**
@@ -1268,18 +1294,19 @@ class ProcessMediaLibrary extends Process {
 	 * @param array<int,array<string,mixed>> $images
 	 */
 	protected function streamExportCsv(array $images): void {
-		// Walk all image entries first to compute the column set —
-		// multilang subfields expand into one column per language
-		// (suffix _<langId>), single-language stay as one column.
-		// Stable shape per export ensures every row has every cell.
-		$langCols = [];   // [field => [langId => true]]
+		// Walk all image entries first to compute the column set.
+		// Multilang subfields expand into one column per language
+		// (suffix _<langName>, e.g. description_english); single-
+		// language stay as one column. Stable shape per export
+		// ensures every row has every cell.
+		$langCols = [];   // [field => [langName => true]]
 		$plainCols = [];  // [field => true]
-		$customCols = []; // [customName => [langId => true] | true]
+		$customCols = []; // [customName => [langName => true] | true]
 
 		$mark = function (string $key, $val) use (&$langCols, &$plainCols) {
 			if (is_array($val)) {
-				foreach ($val as $langId => $_) {
-					$langCols[$key][(int) $langId] = true;
+				foreach ($val as $langName => $_) {
+					$langCols[$key][(string) $langName] = true;
 				}
 			} else {
 				$plainCols[$key] = true;
@@ -1291,8 +1318,8 @@ class ProcessMediaLibrary extends Process {
 			$mark('tags', $img['tags'] ?? '');
 			foreach ((array) $img['custom'] as $c => $cval) {
 				if (is_array($cval)) {
-					foreach ($cval as $langId => $_) {
-						$customCols[$c][(int) $langId] = true;
+					foreach ($cval as $langName => $_) {
+						$customCols[$c][(string) $langName] = true;
 					}
 				} else {
 					if (!isset($customCols[$c])) $customCols[$c] = true;
@@ -1307,9 +1334,9 @@ class ProcessMediaLibrary extends Process {
 		// any image carried multilang values for that subfield.
 		foreach (['description', 'tags'] as $f) {
 			if (isset($langCols[$f])) {
-				$lids = array_keys($langCols[$f]);
-				sort($lids);
-				foreach ($lids as $lid) $headers[] = $f . '_' . $lid;
+				$names = array_keys($langCols[$f]);
+				sort($names);
+				foreach ($names as $n) $headers[] = $f . '_' . $n;
 			} elseif (isset($plainCols[$f])) {
 				$headers[] = $f;
 			}
@@ -1318,9 +1345,9 @@ class ProcessMediaLibrary extends Process {
 		ksort($customCols);
 		foreach ($customCols as $c => $langs) {
 			if (is_array($langs)) {
-				$lids = array_keys($langs);
-				sort($lids);
-				foreach ($lids as $lid) $headers[] = 'custom_' . $c . '_' . $lid;
+				$names = array_keys($langs);
+				sort($names);
+				foreach ($names as $n) $headers[] = 'custom_' . $c . '_' . $n;
 			} else {
 				$headers[] = 'custom_' . $c;
 			}
@@ -1353,24 +1380,27 @@ class ProcessMediaLibrary extends Process {
 	 * @param array<string,mixed> $img
 	 */
 	protected function csvCellValue(string $header, array $img): string {
-		// custom_<name>_<lid> | custom_<name>
+		// custom_<name>_<langName> | custom_<name>
 		if (strncmp($header, 'custom_', 7) === 0) {
 			$rest = substr($header, 7);
 			$customs = (array) ($img['custom'] ?? []);
-			if (preg_match('/^(.+)_(\d+)$/', $rest, $m)) {
+			// Multilang custom: try the longest "<name>_<lang>" split
+			// that resolves to an actual custom + lang slot.
+			if (preg_match('/^(.+)_([^_]+)$/', $rest, $m)) {
 				$name = $m[1];
-				$lid  = (int) $m[2];
-				$val  = $customs[$name] ?? '';
-				return is_array($val) ? (string) ($val[$lid] ?? '') : (string) $val;
+				$langName = $m[2];
+				if (isset($customs[$name]) && is_array($customs[$name])) {
+					return (string) ($customs[$name][$langName] ?? '');
+				}
 			}
 			$val = $customs[$rest] ?? '';
 			return is_array($val) ? $this->normalizeDescription($val) : (string) $val;
 		}
-		// description_<lid> / tags_<lid>
-		if (preg_match('/^(description|tags)_(\d+)$/', $header, $m)) {
+		// description_<langName> / tags_<langName>
+		if (preg_match('/^(description|tags)_(.+)$/', $header, $m)) {
 			$val = $img[$m[1]] ?? '';
-			$lid = (int) $m[2];
-			return is_array($val) ? (string) ($val[$lid] ?? '') : (string) $val;
+			$langName = $m[2];
+			return is_array($val) ? (string) ($val[$langName] ?? '') : (string) $val;
 		}
 		// Plain description / tags or any identity column
 		$val = $img[$header] ?? '';
@@ -2374,12 +2404,15 @@ class ProcessMediaLibrary extends Process {
 		// keyed by language id. stdClass arrives when JSON decoded
 		// without assoc=true upstream; cast for uniformity.
 		if (is_array($val) || is_object($val)) {
-			$map = (array) $val;
-			// Compare per-language; skip if nothing differs.
+			// Incoming map may be keyed by language name (new exports)
+			// or by int id (old exports / direct API callers).
+			// Normalize to int ids so the change-detection +
+			// applyLangValues paths only have to know one shape.
+			$map = $this->langNamesToIds((array) $val);
+			if (!$map) return false;
 			$existing = $this->readLangValues($img, $subfield) ?? [];
 			$changed = false;
-			foreach ($map as $k => $v) {
-				$lid = (int) $k;
+			foreach ($map as $lid => $v) {
 				$existingVal = isset($existing[$lid]) ? (string) $existing[$lid] : '';
 				if ((string) $v !== $existingVal) { $changed = true; break; }
 			}
@@ -2397,9 +2430,66 @@ class ProcessMediaLibrary extends Process {
 		return true;
 	}
 
+	/**
+	 * Convert an {int langId: value} map to {string langName: value}
+	 * for export — column names like description_english read better
+	 * than description_1979. langName() handles unknown IDs by
+	 * passing the id-string through unchanged.
+	 *
+	 * @param array<int|string,string> $idMap
+	 * @return array<string,string>
+	 */
+	protected function langIdsToNames(array $idMap): array {
+		$out = [];
+		foreach ($idMap as $id => $val) {
+			$out[$this->langName($id)] = (string) $val;
+		}
+		return $out;
+	}
+
+	/**
+	 * Reverse of langIdsToNames — accepts a map keyed by language
+	 * name OR int id (numeric strings count as ids, for backward-
+	 * compat with old exports), returns one keyed by int ids using
+	 * our 0=default convention. Unresolvable keys are dropped.
+	 *
+	 * @param array<int|string,mixed> $nameMap
+	 * @return array<int,string>
+	 */
+	protected function langNamesToIds(array $nameMap): array {
+		$languages = $this->wire('languages');
+		$out = [];
+		foreach ($nameMap as $key => $val) {
+			$keyStr = (string) $key;
+			if (ctype_digit($keyStr)) {
+				$out[(int) $keyStr] = (string) $val;
+				continue;
+			}
+			if (!$languages) continue;
+			$lang = $languages->get($keyStr);
+			if (!$lang || !$lang->id) continue;
+			$id = $lang->isDefault() ? 0 : (int) $lang->id;
+			$out[$id] = (string) $val;
+		}
+		return $out;
+	}
+
+	/**
+	 * Look up a language's name by its internal id (0 = default).
+	 * Falls back to the id as a string when nothing resolves.
+	 */
+	protected function langName($id): string {
+		$languages = $this->wire('languages');
+		if (!$languages) return (string) $id;
+		$lang = (int) $id === 0
+			? $languages->getDefault()
+			: $languages->get((int) $id);
+		return ($lang && $lang->id) ? (string) $lang->name : (string) $id;
+	}
+
 	protected function exportSubfieldValue(Pagefile $img, string $subfield) {
 		$langValues = $this->readLangValues($img, $subfield);
-		if ($langValues !== null) return $langValues;
+		if ($langValues !== null) return $this->langIdsToNames($langValues);
 		$val = $img->get($subfield);
 		if ($val === null) return '';
 		if (is_object($val)) return (string) $val;
