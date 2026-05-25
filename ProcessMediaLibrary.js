@@ -23,7 +23,7 @@
 			bulkUrl:   pwCfg.bulkUrl   || root.dataset.bulkUrl   || '',
 			adminUrl:  pwCfg.adminUrl  || root.dataset.adminUrl  || '',
 			tplFields: pwCfg.tplFields || {},
-			multilang: !!pwCfg.multilang,
+			languages: Array.isArray(pwCfg.languages) ? pwCfg.languages : [],
 			csrf: pwCfg.csrf || {
 				name:  root.dataset.csrfName  || '',
 				value: root.dataset.csrfValue || ''
@@ -103,8 +103,10 @@
 			// installed AND this cell carries lang attrs (i.e. the
 			// underlying subfield is configured multilang).
 			var langs = config.languages || [];
+			// hasAttribute is the reliable check for data-lang-<id>;
+			// `in` on DOMStringMap can be flaky across browsers.
 			var hasLangData = langs.length > 1 && langs.some(function (l) {
-				return ('lang' + l.id) in td.dataset;
+				return td.hasAttribute('data-lang-' + l.id);
 			});
 			if (hasLangData) {
 				return buildPopupMultilang(td, original, td.dataset.input === 'textarea');
@@ -159,8 +161,8 @@
 				// data-lang-N attr on td reflects the stored value;
 				// fall back to "original" only when nothing's stored
 				// AND this is the first tab.
-				var stored = td.dataset['lang' + lang.id];
-				pane.value = (stored != null) ? stored : (idx === 0 ? original : '');
+				var stored = td.getAttribute('data-lang-' + lang.id);
+				pane.value = (stored !== null) ? stored : (idx === 0 ? original : '');
 				panes.appendChild(pane);
 				byId[lang.id] = pane;
 
