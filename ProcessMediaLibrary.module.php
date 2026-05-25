@@ -1399,7 +1399,12 @@ class ProcessMediaLibrary extends Process {
 			'imgs'  => $imageFields,
 			'cust'  => $this->getCustomByField(),
 		];
-		return 'rows-' . substr(md5((string) json_encode($keyData)), 0, 16);
+		// Bump suffix when the cached row shape changes — older
+		// entries stored multilang values as JSON-encoded strings;
+		// the v2 path keeps them as raw {langId: value} arrays so
+		// normalizeDescription() can pick the editor's language at
+		// display time.
+		return 'rows-v2-' . substr(md5((string) json_encode($keyData)), 0, 16);
 	}
 
 	/**
