@@ -7,6 +7,19 @@
  */
 class ProcessMediaLibraryConfig extends ModuleConfig {
 
+	public function getDefaults() {
+		return [
+			'thumbWidth'           => ProcessMediaLibrary::THUMB_WIDTH_DEFAULT,
+			'thumbHeight'          => ProcessMediaLibrary::THUMB_HEIGHT_DEFAULT,
+			'thumbQuality'         => ProcessMediaLibrary::THUMB_QUALITY_DEFAULT,
+			'thumbCrop'            => 1,
+			'pageSizeOptions'      => '25, 50, 100, 200',
+			'defaultPageSize'      => ProcessMediaLibrary::PAGE_SIZE_DEFAULT,
+			'defaultHiddenColumns' => [],
+			'blacklistedTemplates' => [],
+		];
+	}
+
 	public function getInputfields() {
 		$inputfields = parent::getInputfields();
 		$modules = $this->wire('modules');
@@ -39,6 +52,19 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->min = 1;
 		$f->max = 100;
 		$f->columnWidth = 34;
+		$fs->add($f);
+
+		$f = $modules->get('InputfieldCheckbox');
+		$f->name = 'thumbCrop';
+		$f->label = $this->_('Crop thumbnail to exact dimensions');
+		$f->label2 = $this->_('Enabled');
+		$f->description = $this->_('When enabled, the thumb fills the full width × height box (center-crop). When disabled, the thumb fits within the box keeping the original aspect ratio — heights may vary per row.');
+		// PW InputfieldCheckbox reads "1"/"" — null on the very first
+		// load (no module data yet) should still render as checked
+		// to match the previous hardcoded crop behaviour.
+		$saved = $this->get('thumbCrop');
+		$f->attr('checked', ($saved === null ? true : (bool) $saved) ? 'checked' : '');
+		$f->columnWidth = 100;
 		$fs->add($f);
 
 		$inputfields->add($fs);

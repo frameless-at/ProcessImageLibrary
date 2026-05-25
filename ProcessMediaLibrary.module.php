@@ -24,17 +24,21 @@ class ProcessMediaLibrary extends Process {
 	const THUMB_QUALITY_DEFAULT = 80;
 
 	/**
-	 * Admin-configurable thumbnail dimensions + JPEG quality, used
-	 * for the per-row thumb in the table view. Each falls back to
-	 * the class constant when the module config isn't set.
+	 * Admin-configurable thumbnail dimensions, JPEG quality and
+	 * crop behaviour, used for the per-row thumb in the table view.
+	 * Each falls back to the class constant when the module config
+	 * isn't set; thumbCrop defaults to true to match PW's own
+	 * $img->size() behaviour and the pre-config table layout.
 	 *
-	 * @return array{width:int,height:int,quality:int}
+	 * @return array{width:int,height:int,quality:int,crop:bool}
 	 */
 	protected function getThumbDims(): array {
+		$crop = $this->get('thumbCrop');
 		return [
 			'width'   => max(1, (int) ($this->get('thumbWidth')   ?: self::THUMB_WIDTH_DEFAULT)),
 			'height'  => max(1, (int) ($this->get('thumbHeight')  ?: self::THUMB_HEIGHT_DEFAULT)),
 			'quality' => max(1, min(100, (int) ($this->get('thumbQuality') ?: self::THUMB_QUALITY_DEFAULT))),
+			'crop'    => $crop === null ? true : (bool) $crop,
 		];
 	}
 
@@ -1839,10 +1843,14 @@ class ProcessMediaLibrary extends Process {
 			}
 			if (!$img instanceof Pageimage) continue;
 
-			$row['thumbUrl'] = $img->size($thumb['width'], $thumb['height'], [
+			$thumbImg = $img->size($thumb['width'], $thumb['height'], [
 				'upscaling' => false,
 				'quality'   => $thumb['quality'],
-			])->url;
+				'cropping'  => $thumb['crop'],
+			]);
+			$row['thumbUrl']    = $thumbImg->url;
+			$row['thumbWidth']  = (int) $thumbImg->width;
+			$row['thumbHeight'] = (int) $thumbImg->height;
 			// Variations count — Phase 2 column from the concept,
 			// useful for pre-warm diagnosis and cleanup. getVariations()
 			// does a filesystem scan per image, but only for the 50-ish
@@ -2382,8 +2390,8 @@ class ProcessMediaLibrary extends Process {
 				$out .= '<img src="' . $san->entities($row['thumbUrl']) . '"'
 					. ' alt="' . $san->entities($row['basename']) . '"'
 					. ' loading="lazy"'
-					. ' width="' . $thumb['width'] . '"'
-					. ' height="' . $thumb['height'] . '">';
+					. ' width="' . ((int) ($row['thumbWidth'] ?? $thumb['width'])) . '"'
+					. ' height="' . ((int) ($row['thumbHeight'] ?? $thumb['height'])) . '">';
 			}
 			$out .= '</td>';
 
