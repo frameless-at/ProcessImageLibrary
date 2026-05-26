@@ -895,7 +895,7 @@ class ProcessMediaLibrary extends Process {
 		if ($subfield === 'tags') {
 			$tagsCfg = $this->getTagsConfig()[$fieldName] ?? ['mode' => 0, 'allowed' => []];
 			if ($tagsCfg['mode'] === 2) {
-				$tokens = preg_split('/[\s,]+/', $value, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+				$tokens = $this->splitTags($value);
 				$disallowed = array_diff($tokens, $tagsCfg['allowed']);
 				if ($disallowed) {
 					return $this->jsonError(
@@ -1123,7 +1123,7 @@ class ProcessMediaLibrary extends Process {
 				$itemValue = $value;
 
 				if ($subfield === 'tags') {
-					$tokens = preg_split('/[\s,]+/', $itemValue, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+					$tokens = $this->splitTags($itemValue);
 					// Whitelist gate per item: tag whitelist can differ per
 					// field, so we check per item rather than rejecting the
 					// whole batch up front.
@@ -1705,7 +1705,7 @@ class ProcessMediaLibrary extends Process {
 					$invalid = false;
 					if ($cfg['mode'] === 2) {
 						foreach ($candidates as $cand) {
-							$tokens = preg_split('/[\s,]+/', (string) $cand, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+							$tokens = $this->splitTags((string) $cand);
 							$bad = array_diff($tokens, $cfg['allowed']);
 							if ($bad) {
 								$failed[] = "Tag(s) not in whitelist for $fn: " . implode(', ', $bad);
@@ -1846,6 +1846,20 @@ class ProcessMediaLibrary extends Process {
 	 * appropriate "image not found" outcome (404 in AJAX endpoints,
 	 * skip-row in render / export).
 	 */
+	/**
+	 * Split a raw tag string into an ordered list of non-empty tokens.
+	 * Matches PW's own tag parser semantics: whitespace and commas are
+	 * the separators, runs of separators collapse, empty fragments
+	 * are dropped. Used wherever the module reads a "tag-shaped"
+	 * value out of a config field, a form post, a URL parameter or
+	 * a whitelist string.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function splitTags(string $raw): array {
+		return preg_split('/[\s,]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+	}
+
 	protected function resolvePageimage(Page $page, string $fieldName, string $basename): ?Pageimage {
 		$value = $page->getUnformatted($fieldName);
 		if ($value instanceof Pageimages) {
@@ -1897,7 +1911,7 @@ class ProcessMediaLibrary extends Process {
 
 			$useTagsRaw = $field->useTags;
 			$rawList    = (string) $field->tagsList;
-			$allowed    = preg_split('/[\s,]+/', $rawList, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			$allowed    = $this->splitTags($rawList);
 
 			$effective = 0;
 			if ($useTagsRaw) {
@@ -2100,7 +2114,7 @@ class ProcessMediaLibrary extends Process {
 				if ($t !== '') $tags[] = $t;
 			}
 		} elseif (is_string($rawTags) && $rawTags !== '') {
-			foreach (preg_split('/[\s,]+/', $rawTags, -1, PREG_SPLIT_NO_EMPTY) as $t) {
+			foreach ($this->splitTags($rawTags) as $t) {
 				$tags[] = $t;
 			}
 		}
@@ -2324,6 +2338,18 @@ class ProcessMediaLibrary extends Process {
 			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
 			if (!$img) continue;
 
+			// File-extension is exposed to the row so the cell markup
+			// can flag formats that need visual hints (e.g. animated
+			// GIFs that can't be conveyed by a static thumb).
+			$row['ext'] = strtolower((string) $img->ext);
+
+			// Non-rasterisable / animation-preserving formats: serve
+			// the original instead of running it through ImageSizer.
+			// SVG loses its vector nature on size(); GIF loses its
+			// animation when re-encoded. CSS still keeps the cell
+			// compact via max-width / object-fit.
+			$skipResize = in_array($row['ext'], ['svg', 'gif'], true);
+
 			// Source-file decision: try to ride PW's lazily-generated
 			// admin variation (260 px on the shorter axis — same call
 			// signature InputfieldImage::getAdminThumb uses) whenever
@@ -2335,7 +2361,9 @@ class ProcessMediaLibrary extends Process {
 			// exist on disk.
 			$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
 
-			if ($thumb['keepRatio']) {
+			if ($skipResize) {
+				$thumbImg = $img;
+			} elseif ($thumb['keepRatio']) {
 				// Keep-ratio mode — single "longer-side" cap from
 				// the user's config drives display. ≤ 260 ⇒ admin
 				// variation (the longer axis is always ≥ 260, so
@@ -3357,6 +3385,11 @@ class ProcessMediaLibrary extends Process {
 				$thumbAttrs = ' ' . $editAttrs . $editA11y . $thumbAria;
 			} else {
 				$thumbAttrs = '';
+			}
+			// data-ext drives the CSS "GIF" badge so animated frames
+			// aren't silently flattened in the user's perception.
+			if (!empty($row['ext'])) {
+				$thumbAttrs .= ' data-ext="' . $san->entities((string) $row['ext']) . '"';
 			}
 			$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {

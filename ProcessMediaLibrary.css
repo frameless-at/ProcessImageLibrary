@@ -129,6 +129,27 @@
 	max-height: none;
 	object-fit: cover;
 }
+/* Animated GIFs get a badge in the bottom-right of the cell since
+   the static thumbnail can't convey motion. SVG cells stay
+   unmarked — the file is vector and "live", but visually there's
+   nothing to flag. */
+.ml-cell-thumb {
+	position: relative;
+}
+.ml-cell-thumb[data-ext="gif"]::after {
+	content: "GIF";
+	position: absolute;
+	right: 0.5rem;
+	bottom: 0.5rem;
+	font-size: 0.65rem;
+	font-weight: 700;
+	letter-spacing: 0.05em;
+	color: #fff;
+	background: rgba(0, 0, 0, 0.7);
+	padding: 1px 4px;
+	border-radius: 2px;
+	pointer-events: none;
+}
 /* Clickable when host page is editable — JS opens the PW image
    editor in a modal iframe. data-file-hash is only set in that case
    (and is the matching key for finding the gridImage item there). */
@@ -525,6 +546,64 @@ textarea.ml-langtabs-pane {
 	margin-top: 1rem;
 }
 .ml-columns-close {
+	font: inherit;
+	padding: 0.3rem 0.9rem;
+	cursor: pointer;
+}
+
+/* Bulk-result modal — replaces the old alert() for the
+   selection-as-paintbrush save report. Same chrome as the columns
+   dialog (border, padding, backdrop), but a touch wider to keep
+   long failure messages readable, and the inner list scrolls
+   when the report runs long. */
+.ml-bulk-result-dialog {
+	border: 1px solid #ccc;
+	border-radius: 4px;
+	padding: 1.25rem;
+	width: min(640px, 92vw);
+	max-height: 85vh;
+	overflow: auto;
+	background: #fff;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ml-bulk-result-dialog::backdrop {
+	background: rgba(0, 0, 0, 0.4);
+}
+.ml-bulk-result-header {
+	font-weight: 600;
+	font-size: 1.05em;
+	margin-bottom: 0.75rem;
+}
+.ml-bulk-result-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	max-height: 50vh;
+	overflow-y: auto;
+	border: 1px solid #e5e5e5;
+	border-radius: 3px;
+	background: #fafafa;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 0.85em;
+}
+.ml-bulk-result-list[hidden] {
+	display: none;
+}
+.ml-bulk-result-list li {
+	padding: 0.35rem 0.6rem;
+	border-bottom: 1px solid #eee;
+	word-break: break-word;
+	color: #c0392b;
+}
+.ml-bulk-result-list li:last-child {
+	border-bottom: 0;
+}
+.ml-bulk-result-dialog footer {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 1rem;
+}
+.ml-bulk-result-close {
 	font: inherit;
 	padding: 0.3rem 0.9rem;
 	cursor: pointer;
