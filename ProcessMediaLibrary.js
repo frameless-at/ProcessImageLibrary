@@ -17,20 +17,25 @@
 		root.classList.add('ml-js-loaded');
 
 		var pwCfg = (window.ProcessWire && window.ProcessWire.config && window.ProcessWire.config.ProcessMediaLibrary) || {};
-		var config = {
-			saveUrl:   pwCfg.saveUrl   || root.dataset.saveUrl   || '',
-			renderUrl: pwCfg.renderUrl || root.dataset.renderUrl || '',
-			bulkUrl:   pwCfg.bulkUrl   || root.dataset.bulkUrl   || '',
-			adminUrl:  pwCfg.adminUrl  || root.dataset.adminUrl  || '',
-			tplFields: pwCfg.tplFields || {},
-			languages: Array.isArray(pwCfg.languages) ? pwCfg.languages : [],
-			currentLangId: (pwCfg.currentLangId != null) ? pwCfg.currentLangId : null,
-			csrf: pwCfg.csrf || {
-				name:  root.dataset.csrfName  || '',
-				value: root.dataset.csrfValue || ''
-			},
-			labels: pwCfg.labels || {}
+		// Start from everything the server pushed via $config->js so
+		// new PHP-side keys (userColumns, userPrefsUrl, defaultHiddenColumns,
+		// …) land in JS without a whitelist update. Fall back to
+		// root.dataset for the boot-critical URLs + CSRF token on
+		// admin themes that don't populate window.ProcessWire.config.
+		var config = Object.assign({
+			tplFields: {},
+			labels:    {}
+		}, pwCfg);
+		config.saveUrl   = config.saveUrl   || root.dataset.saveUrl   || '';
+		config.renderUrl = config.renderUrl || root.dataset.renderUrl || '';
+		config.bulkUrl   = config.bulkUrl   || root.dataset.bulkUrl   || '';
+		config.adminUrl  = config.adminUrl  || root.dataset.adminUrl  || '';
+		config.csrf = config.csrf || {
+			name:  root.dataset.csrfName  || '',
+			value: root.dataset.csrfValue || ''
 		};
+		if (!Array.isArray(config.languages)) config.languages = [];
+		if (config.currentLangId == null) config.currentLangId = null;
 		if (!config.saveUrl) return;
 
 		var labels     = config.labels;
