@@ -1887,19 +1887,6 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * @return array<int,string> names of image fields with maxFiles != 1 (galleries)
-	 */
-	protected function galleryFieldNames(): array {
-		$names = [];
-		foreach ($this->wire('fields') as $field) {
-			if ($field->type instanceof FieldtypeImage && (int) $field->maxFiles !== 1) {
-				$names[] = $field->name;
-			}
-		}
-		return $names;
-	}
-
-	/**
 	 * Build the field list passed to $pages->findRaw().
 	 *
 	 * Standard subfields only — custom-fields-on-images live in a separate
@@ -2035,7 +2022,6 @@ class ProcessMediaLibrary extends Process {
 			'field'          => in_array($field, $imageFields, true) ? $field : '',
 			'no_desc'        => (bool) $input->get('no_desc'),
 			'no_tags'        => (bool) $input->get('no_tags'),
-			'only_galleries' => (bool) $input->get('only_galleries'),
 			'no_custom'      => $noCustom,
 			'tags'           => $tags,
 		];
@@ -2137,10 +2123,9 @@ class ProcessMediaLibrary extends Process {
 		$field    = $filters['field'];
 		$noDesc   = $filters['no_desc'];
 		$noTags   = $filters['no_tags'];
-		$onlyGal  = $filters['only_galleries'];
 		$noCustom = $filters['no_custom'] ?? [];
 
-		if (!$hasQ && $tplName === '' && $field === '' && !$noDesc && !$noTags && !$onlyGal && !$noCustom) {
+		if (!$hasQ && $tplName === '' && $field === '' && !$noDesc && !$noTags && !$noCustom) {
 			return $rows;
 		}
 
@@ -2152,14 +2137,11 @@ class ProcessMediaLibrary extends Process {
 			if ($tpl && $tpl->id) $tplId = (int) $tpl->id;
 		}
 
-		$galleryFields = $onlyGal ? array_flip($this->galleryFieldNames()) : [];
-
 		return array_values(array_filter($rows, function ($r) use (
-			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $onlyGal, $galleryFields, $noCustom
+			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $noCustom
 		) {
 			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
 			if ($field !== '' && $r['fieldName'] !== $field) return false;
-			if ($onlyGal && !isset($galleryFields[$r['fieldName']])) return false;
 
 			$desc = $this->normalizeDescription($r['description']);
 			$tags = (string) $r['tags'];
@@ -2982,7 +2964,7 @@ class ProcessMediaLibrary extends Process {
 			$outer->add($tagsFs);
 		}
 
-		// Missing-X + galleries-only — each as InputfieldCheckbox, 25% wide.
+		// Missing-X — each as InputfieldCheckbox, 25% wide.
 		$missingDef = [
 			'no_desc' => $this->_('Missing description'),
 			'no_tags' => $this->_('Missing tags'),
@@ -2990,16 +2972,14 @@ class ProcessMediaLibrary extends Process {
 		foreach ($customCols as $name) {
 			$missingDef['no_custom_' . $name] = sprintf($this->_('Missing %s'), $name);
 		}
-		$missingDef['only_galleries'] = $this->_('Galleries only');
 
 		foreach ($missingDef as $name => $label) {
 			$cb = $modules->get('InputfieldCheckbox');
 			$cb->name        = $name;
 			$cb->label       = $label;
 			$cb->columnWidth = 25;
-			if ($name === 'no_desc'        && !empty($filters['no_desc']))        $cb->attr('checked', 'checked');
-			if ($name === 'no_tags'        && !empty($filters['no_tags']))        $cb->attr('checked', 'checked');
-			if ($name === 'only_galleries' && !empty($filters['only_galleries'])) $cb->attr('checked', 'checked');
+			if ($name === 'no_desc' && !empty($filters['no_desc'])) $cb->attr('checked', 'checked');
+			if ($name === 'no_tags' && !empty($filters['no_tags'])) $cb->attr('checked', 'checked');
 			if (strpos($name, 'no_custom_') === 0) {
 				$key = substr($name, strlen('no_custom_'));
 				if (!empty($filters['no_custom'][$key])) $cb->attr('checked', 'checked');
@@ -3036,7 +3016,6 @@ class ProcessMediaLibrary extends Process {
 			|| $filters['field'] !== ''
 			|| $filters['no_desc']
 			|| $filters['no_tags']
-			|| $filters['only_galleries']
 			|| !empty($filters['no_custom'])
 			|| !empty($filters['tags']);
 	}
@@ -3371,7 +3350,6 @@ class ProcessMediaLibrary extends Process {
 			'field'          => $filters['field'],
 			'no_desc'        => $filters['no_desc'] ? '1' : '',
 			'no_tags'        => $filters['no_tags'] ? '1' : '',
-			'only_galleries' => $filters['only_galleries'] ? '1' : '',
 			'p'              => $page > 1 ? (string) $page : '',
 			'sort'           => ($sort !== '' && $sort !== self::DEFAULT_SORT) ? $sort : '',
 			'dir'            => $dir === 'desc' ? 'desc' : '',
