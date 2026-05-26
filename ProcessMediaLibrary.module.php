@@ -287,13 +287,22 @@ class ProcessMediaLibrary extends Process {
 
 		$session   = $this->wire('session');
 		$sanitizer = $this->wire('sanitizer');
+		$thumbDims = $this->getThumbDims();
+		// CSS custom properties carry the configured thumb dims so the
+		// stylesheet's --ml-thumb-w / --ml-thumb-h references reflect
+		// the user's settings without inline width / height per image.
+		$rootStyle = sprintf(
+			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;',
+			(int) $thumbDims['width'], (int) $thumbDims['height']
+		);
 		$rootAttrs = sprintf(
-			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-csrf-name="%s" data-csrf-value="%s"',
+			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-csrf-name="%s" data-csrf-value="%s" style="%s"',
 			$sanitizer->entities($this->wire('page')->url . 'save/'),
 			$sanitizer->entities($this->wire('page')->url . 'data/'),
 			$sanitizer->entities($this->wire('page')->url . 'bulk/'),
 			$sanitizer->entities($session->CSRF->getTokenName()),
-			$sanitizer->entities($session->CSRF->getTokenValue())
+			$sanitizer->entities($session->CSRF->getTokenValue()),
+			$sanitizer->entities($rootStyle)
 		);
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
@@ -2275,44 +2284,41 @@ class ProcessMediaLibrary extends Process {
 			}
 			if (!$img instanceof Pageimage) continue;
 
-			// Keep-ratio mode mirrors PW's admin image-field UI
-			// (InputfieldImage::getAdminThumb): for landscape /
-			// square originals the SHORTER axis (height) is capped
-			// to the configured size via $img->size(0, $cap), for
-			// portraits the SHORTER axis (width) is capped via
-			// $img->size($cap, 0). That's the same call signature
-			// PW makes itself on first render of the image in the
-			// field UI, so the variation it lazily produced
-			// (basename.0x260.jpg for landscapes or basename.260x0.jpg
-			// for portraits with PW's defaults) is reused byte-for-byte
-			// — no second resize pass per row.
-			//
-			// Note this means the longer axis stays proportional and
-			// can be wider than $cap. In CSS the table thumb is
-			// constrained via max-width, so a 392×260 source still
-			// renders at the same visible size as a 120×80 crop;
-			// the bigger source just gives sharper HiDPI rendering.
-			//
-			// Pass-through when the original is already ≤ $cap on
-			// its shorter axis — admin behaves the same (skip resize).
-			if ($thumb['keepRatio']) {
-				$cap  = $thumb['width'];
-				$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
-				if ($img->width >= $img->height) {
-					$thumbImg = ($img->height > $cap)
-						? $img->size(0, $cap, $opts)
-						: $img;
-				} else {
-					$thumbImg = ($img->width > $cap)
-						? $img->size($cap, 0, $opts)
-						: $img;
-				}
+			// Thumb source: try to reuse PW's admin image-field
+			// variation (260 px on the shorter axis, generated lazily
+			// by InputfieldImage::getAdminThumb on first view of the
+			// image in its host field UI). When the user-configured
+			// display target fits within that variation, we use it
+			// directly — no module-specific resize, no extra cache
+			// file on disk. CSS handles the visible sizing /
+			// cropping. Only when the target is bigger than the
+			// admin variation can carry (e.g. 500×500 for editorial
+			// big-thumb modes) do we fall back to a custom
+			// $img->size($w, $h, cropping=true) call.
+			$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
+			if ($img->width >= $img->height) {
+				$adminVar = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
 			} else {
-				$thumbImg = $img->size($thumb['width'], $thumb['height'], [
-					'upscaling' => false,
-					'quality'   => $thumb['quality'],
-					'cropping'  => true,
-				]);
+				$adminVar = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
+			}
+
+			if ($thumb['keepRatio']) {
+				// Proportional display — admin variation is always
+				// the source; CSS caps the rendered width.
+				$thumbImg = $adminVar;
+			} else {
+				// Crop mode — use admin variation when both
+				// configured display dimensions fit inside it
+				// (longer-side crop is handled by object-fit: cover
+				// in CSS). Otherwise generate an exact-size variation
+				// so the requested W × H actually exists in pixels.
+				$tW = (int) $thumb['width'];
+				$tH = (int) $thumb['height'];
+				if ($tW <= (int) $adminVar->width && $tH <= (int) $adminVar->height) {
+					$thumbImg = $adminVar;
+				} else {
+					$thumbImg = $img->size($tW, $tH, $opts + ['cropping' => true]);
+				}
 			}
 			$row['thumbUrl']    = $thumbImg->url;
 			$row['thumbWidth']  = (int) $thumbImg->width;
@@ -3287,11 +3293,32 @@ class ProcessMediaLibrary extends Process {
 			$thumbAttrs = !empty($row['pageEditUrl']) ? (' ' . $editAttrs) : '';
 			$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
-				$out .= '<img src="' . $san->entities($row['thumbUrl']) . '"'
+				// Display dimensions are derived from the user's
+				// configured target, NOT the source file. In keep-
+				// ratio mode the source may be 392×260 (admin
+				// variation) while we render at the configured width
+				// proportionally; in crop mode the source may be
+				// the same admin variation while CSS object-fit:cover
+				// constrains the visible box to W × H. Pre-computed
+				// here so the <img> width / height attributes prevent
+				// layout shift before the bytes land.
+				$srcW = (int) ($row['thumbWidth']  ?? 0);
+				$srcH = (int) ($row['thumbHeight'] ?? 0);
+				if ($thumb['keepRatio']) {
+					$dispW = $srcW > 0 ? min($thumb['width'], $srcW) : $thumb['width'];
+					$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
+					$cls   = 'ml-thumb';
+				} else {
+					$dispW = $thumb['width'];
+					$dispH = $thumb['height'];
+					$cls   = 'ml-thumb ml-thumb-crop';
+				}
+				$out .= '<img class="' . $cls . '"'
+					. ' src="' . $san->entities($row['thumbUrl']) . '"'
 					. ' alt="' . $san->entities($row['basename']) . '"'
 					. ' loading="lazy"'
-					. ' width="' . ((int) ($row['thumbWidth'] ?? $thumb['width'])) . '"'
-					. ' height="' . ((int) ($row['thumbHeight'] ?? $thumb['height'])) . '">';
+					. ' width="' . $dispW . '"'
+					. ' height="' . $dispH . '">';
 			}
 			$out .= '</td>';
 

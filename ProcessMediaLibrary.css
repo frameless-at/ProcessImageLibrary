@@ -115,12 +115,25 @@
 .ml-table tbody tr:hover {
 	background: #fafafa;
 }
+/* Thumb cell — dimensions driven by --ml-thumb-w / --ml-thumb-h
+   custom props set on .ml-root from the module's thumb config.
+   Default (keep-ratio mode) renders the source proportionally,
+   capped to the configured width. Crop variant fixes the visible
+   box to the exact configured W × H and lets the browser handle
+   the center crop via object-fit so we can keep using the
+   admin's lazily-generated 260px variation as source. */
 .ml-cell-thumb img {
 	display: block;
-	max-width: 120px;
+	max-width: var(--ml-thumb-w, 120px);
 	height: auto;
 	border: 1px solid #e5e5e5;
 	background: #fafafa;
+}
+.ml-cell-thumb img.ml-thumb-crop {
+	width: var(--ml-thumb-w, 120px);
+	height: var(--ml-thumb-h, 80px);
+	max-width: none;
+	object-fit: cover;
 }
 /* Clickable when host page is editable — JS opens the PW image
    editor in a modal iframe. data-file-hash is only set in that case
