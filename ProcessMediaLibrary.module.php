@@ -286,6 +286,12 @@ class ProcessMediaLibrary extends Process {
 			. '</a>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
+		// Column picker lives in a sibling <dialog> so it survives
+		// AJAX re-renders of .ml-results — the drag/toggle handlers
+		// stay bound to the same DOM nodes for the life of the page.
+		// Full $customCols set (not the field-narrowed one) so the
+		// picker shows every column regardless of the active filter.
+		$out .= $this->renderColumnsDialog($customCols);
 		$out .= $this->renderExportImportBar($filters);
 		$out .= '</div>';
 
@@ -378,13 +384,13 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Just the <ul> of column-toggle checkboxes — wrapped in an
-	 * InputfieldMarkup inside the "Filters & Columns" outer
-	 * fieldset, so the toggle UI lives alongside the filters
-	 * without polluting the form's URL state. The checkboxes
-	 * deliberately have NO name= attribute, so FormData skips
-	 * them and the JS visibility hook (.ml-col-toggle, localStorage
-	 * -backed) is the only path that reads their state.
+	 * The <ul> of column-toggle checkboxes consumed by the columns
+	 * dialog (renderColumnsDialog) above the table. Checkboxes have
+	 * NO name= attribute so they never enter any form's URL state;
+	 * the JS visibility hook (.ml-col-toggle, $user->meta-backed)
+	 * is the only path that reads them. Initial checked + sort order
+	 * are server-rendered from $user->meta so the picker matches the
+	 * table the user sees before JS even runs.
 	 *
 	 * @param array<int,string> $customCols
 	 */
@@ -443,6 +449,29 @@ class ProcessMediaLibrary extends Process {
 				. '</label></li>';
 		}
 		return '<ul class="ml-columns-list">' . $items . '</ul>';
+	}
+
+	/**
+	 * Native <dialog> housing the column visibility + reorder picker.
+	 * Sits outside .ml-results so AJAX refreshes don't destroy the
+	 * already-wired drag/toggle handlers, and the dialog itself can
+	 * stay open across a re-render. Opened from the "Columns…" link
+	 * in the pagination row.
+	 *
+	 * @param array<int,string> $customCols
+	 */
+	protected function renderColumnsDialog(array $customCols): string {
+		$san = $this->wire('sanitizer');
+		$title = $san->entities($this->_('Columns'));
+		$close = $san->entities($this->_('Close'));
+		$out  = '<dialog class="ml-columns-dialog">';
+		$out .= '<header>' . $title . '</header>';
+		$out .= $this->renderColumnsListMarkup($customCols);
+		$out .= '<footer>';
+		$out .= '<button type="button" class="ml-columns-close">' . $close . '</button>';
+		$out .= '</footer>';
+		$out .= '</dialog>';
+		return $out;
 	}
 
 	/**
@@ -2892,32 +2921,14 @@ class ProcessMediaLibrary extends Process {
 
 		// Outer "Filters" fieldset wraps everything. Collapsed by default;
 		// auto-opens on initial render when any filter is active so the
-		// user immediately sees what's filtering the view.
+		// user immediately sees what's filtering the view. Column
+		// visibility / order moved into the pagination-row "Columns…"
+		// dialog (renderColumnsDialog), out of the filter form entirely.
 		/** @var \ProcessWire\InputfieldFieldset $outer */
 		$outer = $modules->get('InputfieldFieldset');
 		$outer->name      = 'mlFilters';
-		$outer->label     = $this->_('Filters & Columns');
+		$outer->label     = $this->_('Filters');
 		$outer->collapsed = $active ? Inputfield::collapsedNo : Inputfield::collapsedYes;
-
-		// Columns sub-fieldset first — checkboxes have no name= so they
-		// don't enter the filter form's URL params, and the JS toggle
-		// hook (.ml-col-toggle, localStorage-backed) works regardless
-		// of where in the DOM the checkboxes live.
-		/** @var \ProcessWire\InputfieldFieldset $columnsFs */
-		$columnsFs = $modules->get('InputfieldFieldset');
-		$columnsFs->name      = 'mlColumns';
-		$columnsFs->label     = $this->_('Columns');
-		$columnsFs->collapsed = Inputfield::collapsedYes;
-
-		$columnsMarkup = $modules->get('InputfieldMarkup');
-		$columnsMarkup->skipLabel = Inputfield::skipLabelHeader;
-		// InputfieldMarkup picks up "value" first, then "markup" as a
-		// legacy fallback — setting both is harmless but value is what
-		// the modern render path actually reads.
-		$columnsMarkup->value = $this->renderColumnsListMarkup($customCols);
-		$columnsFs->add($columnsMarkup);
-
-		$outer->add($columnsFs);
 
 		// Row 1: q + template + field, 33% each.
 		$q = $modules->get('InputfieldText');
@@ -3300,9 +3311,14 @@ class ProcessMediaLibrary extends Process {
 			$page, $totalPages, $total, $total === 1 ? '' : 's'
 		);
 
+		// Three-zone layout: left = summary + prev/next, center =
+		// columns dialog opener, right = per-page picker. Grid in
+		// the stylesheet keeps the center node truly centered
+		// regardless of how wide the side groups grow.
 		$out  = '<div class="ml-pagination">';
-		$out .= '<span class="ml-pagination-summary">' . $san->entities($summary) . '</span>';
 
+		$out .= '<div class="ml-pagination-left">';
+		$out .= '<span class="ml-pagination-summary">' . $san->entities($summary) . '</span>';
 		if ($totalPages > 1) {
 			if ($page > 1) {
 				$out .= '<a class="ml-pagination-link" href="' . $san->entities($this->buildUrl($filters, $page - 1, $sort, $dir, $pageSize)) . '">'
@@ -3313,7 +3329,17 @@ class ProcessMediaLibrary extends Process {
 					. $san->entities($this->_('Next →')) . '</a>';
 			}
 		}
+		$out .= '</div>';
 
+		// Opens the column-visibility dialog rendered as a sibling of
+		// .ml-results. <button> (not <a>) since there's no fallback
+		// URL — without JS the picker is unavailable, which matches
+		// every other JS-only feature on the page.
+		$out .= '<button type="button" class="ml-columns-toggle">'
+			. $san->entities($this->_('Columns…'))
+			. '</button>';
+
+		$out .= '<div class="ml-pagination-right">';
 		// Per-page picker. Client-side JS intercepts the change event,
 		// rewrites the URL and triggers the AJAX refresh; non-JS users
 		// see the picker but it requires a manual reload to take effect.
@@ -3325,6 +3351,7 @@ class ProcessMediaLibrary extends Process {
 			$out .= '<option value="' . $opt . '"' . $sel . '>' . $opt . '</option>';
 		}
 		$out .= '</select></label>';
+		$out .= '</div>';
 
 		$out .= '</div>';
 		return $out;

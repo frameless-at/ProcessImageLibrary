@@ -1113,6 +1113,40 @@
 		applyColumnVisibility();
 		applyColumnOrder();
 
+		// -- Columns dialog open / close ------------------------------
+		// The "Columns…" button lives in the pagination row inside
+		// .ml-results, so it's recreated on every AJAX swap — handler
+		// is delegated on document to survive that. The <dialog>
+		// itself is a sibling of .ml-results and stays put for the
+		// life of the page, which is why the drag/toggle wiring above
+		// (bound once at init) keeps working.
+		var columnsDialog = document.querySelector('.ml-columns-dialog');
+		if (columnsDialog) {
+			document.addEventListener('click', function (e) {
+				var openBtn = e.target.closest && e.target.closest('.ml-columns-toggle');
+				if (openBtn) {
+					e.preventDefault();
+					if (typeof columnsDialog.showModal === 'function') {
+						columnsDialog.showModal();
+					} else {
+						columnsDialog.setAttribute('open', '');
+					}
+					return;
+				}
+				if (e.target.classList && e.target.classList.contains('ml-columns-close')) {
+					e.preventDefault();
+					columnsDialog.close();
+				}
+			});
+			// Click on the dialog's backdrop (outside the inner content
+			// box) closes too. Native <dialog> fires the click on the
+			// dialog itself for backdrop clicks; we check that the
+			// event target is the dialog (not a child).
+			columnsDialog.addEventListener('click', function (e) {
+				if (e.target === columnsDialog) columnsDialog.close();
+			});
+		}
+
 		// -- Export link ----------------------------------------------
 		// Server renders the link with the filter URL it knew at
 		// render time, but AJAX filter swaps push new state into

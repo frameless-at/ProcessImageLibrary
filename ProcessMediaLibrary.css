@@ -232,12 +232,25 @@ textarea.ml-cell-input {
 	font-weight: normal;
 }
 
-/* Pagination */
+/* Pagination row — three zones via grid: left group (summary +
+   prev/next), centered "Columns…" opener, right group (per-page
+   picker). 1fr/auto/1fr keeps the center cell truly centered
+   regardless of how wide the side groups grow. */
 .ml-pagination {
+	display: grid;
+	grid-template-columns: 1fr auto 1fr;
+	align-items: center;
+	column-gap: 1rem;
+	margin: 1rem 0 0;
+}
+.ml-pagination-left,
+.ml-pagination-right {
 	display: flex;
 	gap: 1rem;
 	align-items: center;
-	margin: 1rem 0 0;
+}
+.ml-pagination-right {
+	justify-content: flex-end;
 }
 .ml-pagination-summary {
 	color: #555;
@@ -245,8 +258,20 @@ textarea.ml-cell-input {
 .ml-pagination-link {
 	text-decoration: none;
 }
+.ml-columns-toggle {
+	font: inherit;
+	color: #555;
+	background: transparent;
+	border: 0;
+	padding: 0.15rem 0.4rem;
+	cursor: pointer;
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+.ml-columns-toggle:hover {
+	color: #111;
+}
 .ml-page-size {
-	margin-left: auto;
 	color: #555;
 	display: inline-flex;
 	align-items: center;
@@ -265,16 +290,19 @@ textarea.ml-cell-input {
 }
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
-   columnWidth handling; here we just keep the pagination from
-   overflowing and shrink the gallery thumbs a touch so a row fits
-   without horizontal scrolling becoming the only option. */
+   columnWidth handling; here we collapse the pagination grid into a
+   single column so each zone stacks vertically, and shrink the
+   gallery thumbs a touch so a row fits without horizontal scrolling
+   becoming the only option. */
 @media (max-width: 640px) {
 	.ml-pagination {
-		flex-wrap: wrap;
+		grid-template-columns: 1fr;
 		row-gap: 0.5rem;
 	}
-	.ml-page-size {
-		margin-left: 0;
+	.ml-pagination-left,
+	.ml-pagination-right {
+		justify-content: flex-start;
+		flex-wrap: wrap;
 	}
 	.ml-cell-thumb img {
 		max-width: 80px;
@@ -413,14 +441,40 @@ textarea.ml-langtabs-pane {
 	background: #f5f5f5;
 }
 
-/* Columns toggle — collapsible fieldset of checkboxes below the
-   filter bar that controls which table columns render. CSS hides
-   matching [data-col] cells; state lives in localStorage. */
+/* Column visibility — picker lives inside .ml-columns-dialog,
+   opened from the "Columns…" button in the pagination row. CSS
+   hides matching [data-col] cells; state syncs to $user->meta
+   via the user-prefs endpoint. */
 .ml-col-hidden {
 	display: none !important;
 }
-.ml-columns-bar {
+.ml-columns-dialog {
+	border: 1px solid #ccc;
+	border-radius: 4px;
+	padding: 1.25rem;
+	width: min(640px, 92vw);
+	max-height: 85vh;
+	overflow: auto;
+	background: #fff;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ml-columns-dialog::backdrop {
+	background: rgba(0, 0, 0, 0.4);
+}
+.ml-columns-dialog header {
+	font-weight: 600;
+	font-size: 1.05em;
 	margin-bottom: 0.75rem;
+}
+.ml-columns-dialog footer {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 1rem;
+}
+.ml-columns-close {
+	font: inherit;
+	padding: 0.3rem 0.9rem;
+	cursor: pointer;
 }
 .ml-columns-list {
 	list-style: none;
