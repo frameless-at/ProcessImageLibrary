@@ -951,11 +951,20 @@
 			filterForm.addEventListener('submit', function (e) {
 				e.preventDefault();
 				var params = new URLSearchParams();
+				// PW's InputfieldCheckboxes renders multi-checkboxes with
+				// name="tags[]", which URLSearchParams percent-encodes
+				// to %5B%5D. Collapse the selected values into a single
+				// comma-separated ?tags=foo,bar so the URL stays readable.
+				var tagsList = [];
 				new FormData(filterForm).forEach(function (v, k) {
-					// "apply" is the submit-button name; not a filter value.
 					if (k === 'apply') return;
-					if (v !== '') params.append(k, v);
+					if (k === 'tags[]') {
+						if (v !== '') tagsList.push(v);
+					} else if (v !== '') {
+						params.append(k, v);
+					}
 				});
+				if (tagsList.length) params.append('tags', tagsList.join(','));
 				var qs = params.toString() ? '?' + params.toString() : '';
 				replaceFromQs(qs, true);
 				recomputeFilterLabels();

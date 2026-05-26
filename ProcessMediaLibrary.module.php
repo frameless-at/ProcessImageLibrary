@@ -474,7 +474,7 @@ class ProcessMediaLibrary extends Process {
 	protected function renderColumnsDialog(array $customCols): string {
 		$san = $this->wire('sanitizer');
 		$title = $san->entities($this->_('Columns'));
-		$hint  = $san->entities($this->_('Toggle a row to show / hide the column. Drag a row to reorder columns.'));
+		$hint  = $san->entities($this->_('Toggle to show / hide the column. Drag to reorder columns.'));
 		$close = $san->entities($this->_('Close'));
 		$out  = '<dialog class="ml-columns-dialog">';
 		$out .= '<header>' . $title . '</header>';
@@ -2016,7 +2016,10 @@ class ProcessMediaLibrary extends Process {
 			}
 		}
 
-		// tags filter: ?tags[]=foo&tags[]=bar — AND-match against row tags.
+		// Tags filter — AND-match against row tags. Accepts either the
+		// comma-separated form (?tags=foo,bar) that buildUrl emits, or
+		// the legacy PHP-array bracket form (?tags[]=foo&tags[]=bar)
+		// from older bookmarks / direct form submissions.
 		$rawTags = $input->get('tags');
 		$tags = [];
 		if (is_array($rawTags)) {
@@ -2921,8 +2924,6 @@ class ProcessMediaLibrary extends Process {
 			$customCols = $this->getCustomByField()[$filters['field']] ?? [];
 		}
 
-		$active = $this->hasActiveFilter($filters);
-
 		/** @var \ProcessWire\InputfieldForm $form */
 		$form = $modules->get('InputfieldForm');
 		$form->method = 'get';
@@ -2950,13 +2951,14 @@ class ProcessMediaLibrary extends Process {
 			$form->add($h);
 		}
 
-		// Outer "Filters" fieldset wraps everything. Collapsed by default;
-		// auto-opens on initial render when any filter is active so the
-		// user immediately sees what's filtering the view. Column
-		// visibility / order moved into the pagination-row "Columns…"
-		// dialog (renderColumnsDialog), out of the filter form entirely.
-		// Label carries a "(N)" suffix when filters are active so the
-		// count stays visible even while the fieldset is collapsed.
+		// Outer "Filters" fieldset wraps everything. Always rendered
+		// collapsed — the user opens it when they want to narrow, and
+		// the JS submit handler re-collapses it after Apply so it
+		// doesn't occlude results. The "(N)" suffix on the label
+		// keeps the active-filter count visible while collapsed, so
+		// the closed state isn't information-hiding. Column visibility
+		// / order moved into the pagination-row "Columns…" dialog
+		// (renderColumnsDialog), out of the filter form entirely.
 		$activeCount = $this->countActiveFilters($filters);
 		/** @var \ProcessWire\InputfieldFieldset $outer */
 		$outer = $modules->get('InputfieldFieldset');
@@ -2964,7 +2966,7 @@ class ProcessMediaLibrary extends Process {
 		$outer->label     = $activeCount > 0
 			? sprintf($this->_('Filters (%d)'), $activeCount)
 			: $this->_('Filters');
-		$outer->collapsed = $active ? Inputfield::collapsedNo : Inputfield::collapsedYes;
+		$outer->collapsed = Inputfield::collapsedYes;
 
 		// Row 1: Search + Template + Image field, 33/33/34.
 		$q = $modules->get('InputfieldText');
@@ -3443,8 +3445,13 @@ class ProcessMediaLibrary extends Process {
 		foreach ($filters['no_custom'] ?? [] as $name => $on) {
 			if ($on) $params['no_custom_' . $name] = '1';
 		}
+		// Tags as a single comma-separated value (?tags=foo,bar) so
+		// the URL stays readable. The PHP-array bracket form
+		// (?tags[]=foo&tags[]=bar) is still accepted by readFilterInput
+		// for older bookmarks, but new URLs we emit avoid the
+		// %5B%5D-encoded brackets entirely.
 		if (!empty($filters['tags'])) {
-			$params['tags'] = array_values($filters['tags']);
+			$params['tags'] = implode(',', array_values($filters['tags']));
 		}
 		// Filter out empty scalars but keep non-empty arrays.
 		$params = array_filter($params, fn($v) =>
