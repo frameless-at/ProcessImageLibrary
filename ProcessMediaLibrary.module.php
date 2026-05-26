@@ -906,8 +906,8 @@ class ProcessMediaLibrary extends Process {
 	 * Placeholder syntax (resolveRenamePattern):
 	 *   (n)         counter (integer)
 	 *   (n2)…(n5)   zero-padded counter, N digits
-	 *   (slug)      page name (PW URL slug)
-	 *   (field)     image field name
+	 *   (p)         page name (PW URL slug)
+	 *   (f)         image field name
 	 *
 	 * For single-image rename n is always 1; batch will iterate.
 	 * Unrecognised placeholders survive into the sanitiser, which
@@ -1058,14 +1058,14 @@ class ProcessMediaLibrary extends Process {
 	/**
 	 * Expand the rename pattern into a concrete stem for a given
 	 * image's context. Used by performRename() so a pattern like
-	 * "(slug)-(n2)" produces e.g. "summer-festival-03" on the
-	 * third row of a batch.
+	 * "(p)-(n2)" produces e.g. "summer-festival-03" on the third
+	 * row of a batch.
 	 *
 	 * Supported tokens:
 	 *   (n)              counter — $ctx['n']
 	 *   (n2) … (n5)      zero-padded counter, N digits
-	 *   (slug)           page name (PW URL slug) — $ctx['page']->name
-	 *   (field)          image field name — $ctx['field']
+	 *   (p)              page name (PW URL slug) — $ctx['page']->name
+	 *   (f)              image field name — $ctx['field']
 	 *
 	 * Unknown tokens are passed through verbatim; the sanitiser
 	 * downstream usually strips the parens. The helper itself does
@@ -1081,12 +1081,12 @@ class ProcessMediaLibrary extends Process {
 		$field = (string) ($ctx['field'] ?? '');
 
 		return preg_replace_callback(
-			'/\((n[2-5]?|slug|field)\)/',
+			'/\((n[2-5]?|p|f)\)/',
 			function ($m) use ($n, $page, $field) {
 				$key = $m[1];
-				if ($key === 'n')     return (string) $n;
-				if ($key === 'slug')  return ($page instanceof Page && $page->id) ? (string) $page->name : '';
-				if ($key === 'field') return $field;
+				if ($key === 'n') return (string) $n;
+				if ($key === 'p') return ($page instanceof Page && $page->id) ? (string) $page->name : '';
+				if ($key === 'f') return $field;
 				// n2 … n5 — zero-padded counter
 				$digits = (int) substr($key, 1);
 				return str_pad((string) $n, $digits, '0', STR_PAD_LEFT);
@@ -2041,7 +2041,7 @@ class ProcessMediaLibrary extends Process {
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
 				'rename'           => $this->_('New filename'),
-				'renameHint'       => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (slug) page slug, (field) field name.'),
+				'renameHint'       => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
 				'importSaved'      => $this->_('Saved'),
