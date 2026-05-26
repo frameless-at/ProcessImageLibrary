@@ -1,13 +1,13 @@
 <?php namespace ProcessWire;
 
 /**
- * Multilang plumbing for ProcessMediaLibrary.
+ * Multilang plumbing for ProcessImageLibrary.
  *
  * Pulled out of the main module file because PW's multilang
  * subfield handling (Pagefile::description($lang) vs. generic
  * setLanguageValue() vs. raw {langId: value} arrays from findRaw)
  * has enough fan-out that mixing it inline with the render and
- * AJAX code obscured both. Composed into ProcessMediaLibrary via
+ * AJAX code obscured both. Composed into ProcessImageLibrary via
  * `use`.
  *
  * Conventions used everywhere in here:
@@ -19,7 +19,7 @@
  *   - Export round-trips through language NAMES (langIdsToNames /
  *     langNamesToIds) so CSV column suffixes stay readable.
  */
-trait MediaLibraryMultilang {
+trait ImageLibraryMultilang {
 
 	/**
 	 * The "0 = default / else id" key for the current user's
