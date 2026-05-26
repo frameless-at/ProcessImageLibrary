@@ -18,7 +18,7 @@
 
 		var pwCfg = (window.ProcessWire && window.ProcessWire.config && window.ProcessWire.config.ProcessMediaLibrary) || {};
 		// Start from everything the server pushed via $config->js so
-		// new PHP-side keys (userColumns, userPrefsUrl, defaultHiddenColumns,
+		// new PHP-side keys (userPrefs, userPrefsUrl, defaultHiddenColumns,
 		// …) land in JS without a whitelist update. Fall back to
 		// root.dataset for the boot-critical URLs + CSRF token on
 		// admin themes that don't populate window.ProcessWire.config.
@@ -796,8 +796,10 @@
 				} else if (t.classList.contains('ml-page-size-picker')) {
 					// Drop ?p — the current page number rarely makes
 					// sense at the new size; landing back on page 1 is
-					// the least surprising default.
-					try { localStorage.setItem(PAGE_SIZE_STORAGE_KEY, t.value); } catch (e) {}
+					// the least surprising default. Persist the new
+					// size to user meta so a fresh visit (clean URL)
+					// on any device opens at the same size.
+					saveUserPrefs();
 					var url = new URL(location.href);
 					url.searchParams.set('ps', t.value);
 					url.searchParams.delete('p');
@@ -937,26 +939,39 @@
 			});
 		}
 
-		// -- Column visibility + order toggle -------------------------
+		// -- View prefs (columns + page size) -------------------------
 		// State is per-user, stored server-side in $user->meta via
 		// the user-prefs endpoint. Cross-device by design — the same
-		// user on a different browser sees the same column layout.
-		// Admin can preset a default-hidden list via module config;
-		// that's only consulted when the user has no saved
-		// preference for a column yet.
+		// user on a different browser sees the same column layout
+		// and chosen page size. Admin can preset default-hidden
+		// columns and a default page size via module config; those
+		// kick in only when the user has no saved preference yet.
+		var userPrefs    = (config.userPrefs && typeof config.userPrefs === 'object') ? config.userPrefs : {};
+		var savedColumns = (userPrefs.columns && typeof userPrefs.columns === 'object') ? userPrefs.columns : {};
 		var columnsState = {};
 		var columnsOrder = [];
 		var defaultHidden = {};
 		(config.defaultHiddenColumns || []).forEach(function (k) { defaultHidden[k] = true; });
-		if (config.userColumns) {
-			if (config.userColumns.visible && typeof config.userColumns.visible === 'object') {
-				Object.keys(config.userColumns.visible).forEach(function (k) {
-					columnsState[k] = !!config.userColumns.visible[k];
-				});
+		if (savedColumns.visible && typeof savedColumns.visible === 'object') {
+			Object.keys(savedColumns.visible).forEach(function (k) {
+				columnsState[k] = !!savedColumns.visible[k];
+			});
+		}
+		if (Array.isArray(savedColumns.order)) {
+			columnsOrder = savedColumns.order.slice();
+		}
+		// Read the currently-selected page size off the server-
+		// rendered picker. Re-queried on every save so we don't
+		// hold a stale copy across AJAX re-renders that swap the
+		// pagination block.
+		function readCurrentPageSize() {
+			var picker = document.querySelector('.ml-page-size-picker');
+			if (picker) {
+				var n = parseInt(picker.value, 10);
+				if (n > 0) return n;
 			}
-			if (Array.isArray(config.userColumns.order)) {
-				columnsOrder = config.userColumns.order.slice();
-			}
+			var saved = parseInt(userPrefs.pageSize, 10);
+			return saved > 0 ? saved : null;
 		}
 
 		function isColumnHidden(col) {
@@ -1003,17 +1018,23 @@
 
 		// Debounced POST to the user-prefs endpoint. Avoids
 		// hammering the server when the user flips checkboxes
-		// quickly or drags a column through several positions —
-		// only the last state within the window goes over the wire.
+		// quickly, drags a column through several positions, or
+		// scrubs the page-size picker — only the last state within
+		// the window goes over the wire. Always sends the full
+		// {columns, pageSize} state so the server record stays
+		// authoritative regardless of which control changed.
 		var savePrefsTimer = null;
-		function saveColumnsPrefs() {
+		function saveUserPrefs() {
 			if (!config.userPrefsUrl) return;
 			clearTimeout(savePrefsTimer);
 			savePrefsTimer = setTimeout(function () {
 				var fd = new FormData();
-				fd.append('columns', JSON.stringify({
-					visible: columnsState,
-					order:   columnsOrder
+				fd.append('prefs', JSON.stringify({
+					columns: {
+						visible: columnsState,
+						order:   columnsOrder
+					},
+					pageSize: readCurrentPageSize()
 				}));
 				if (config.csrf && config.csrf.name) {
 					fd.append(config.csrf.name, config.csrf.value);
@@ -1023,13 +1044,13 @@
 					body: fd,
 					credentials: 'same-origin'
 				}).catch(function (err) {
-					console.error('[MediaLibrary] save column prefs failed:', err);
+					console.error('[MediaLibrary] save user prefs failed:', err);
 				});
 			}, 400);
 		}
 
 		// Sync the <li> order in the picker to match columnsOrder
-		// (after init from localStorage, before drag-drop wiring).
+		// (after init from user-meta, before drag-drop wiring).
 		function syncColumnListOrder() {
 			var list = document.querySelector('.ml-columns-list');
 			if (!list || !columnsOrder.length) return;
@@ -1063,7 +1084,7 @@
 						list.querySelectorAll('li input[type="checkbox"]'),
 						function (cb) { return cb.dataset.col; }
 					);
-					saveColumnsPrefs();
+					saveUserPrefs();
 					applyColumnOrder();
 				});
 				li.addEventListener('dragover', function (e) {
@@ -1084,45 +1105,13 @@
 			cb.checked = !isColumnHidden(col);
 			cb.addEventListener('change', function () {
 				columnsState[col] = cb.checked;
-				saveColumnsPrefs();
+				saveUserPrefs();
 				applyColumnVisibility();
 			});
 		});
 		wireColumnDragDrop();
 		applyColumnVisibility();
 		applyColumnOrder();
-
-		// -- Persisted page-size --------------------------------------
-		// Page size lives in the URL (so bookmarks reproduce the
-		// view) but the user's preferred default is also stored
-		// locally — without it, the picker resets to 50 every time
-		// the user opens the library fresh. URL wins when present
-		// (and updates localStorage to match); otherwise we silently
-		// apply the stored value via the existing AJAX refresh path.
-		var PAGE_SIZE_STORAGE_KEY = 'ml-pagesize-v1';
-		var DEFAULT_PAGE_SIZE = parseInt(config.defaultPageSize, 10) || 50;
-		(function syncStoredPageSize() {
-			var picker = document.querySelector('.ml-page-size-picker');
-			if (!picker) return;
-			var validSizes = Array.prototype.map.call(picker.options, function (o) {
-				return parseInt(o.value, 10);
-			}).filter(function (n) { return !isNaN(n) && n > 0; });
-
-			var params = new URLSearchParams(location.search);
-			var urlPs  = parseInt(params.get('ps') || '0', 10);
-			if (urlPs && validSizes.indexOf(urlPs) !== -1) {
-				try { localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(urlPs)); } catch (e) {}
-				return;
-			}
-			var stored = 0;
-			try { stored = parseInt(localStorage.getItem(PAGE_SIZE_STORAGE_KEY) || '0', 10); }
-			catch (e) {}
-			if (!stored || stored === DEFAULT_PAGE_SIZE) return;
-			if (validSizes.indexOf(stored) === -1) return;
-			params.set('ps', String(stored));
-			params.delete('p');
-			replaceFromQs('?' + params.toString(), true);
-		})();
 
 		// -- Export link ----------------------------------------------
 		// Server renders the link with the filter URL it knew at
