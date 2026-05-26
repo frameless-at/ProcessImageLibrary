@@ -55,24 +55,13 @@
 	top: -3rem;
 	right: 0;
 	z-index: 5;
-	display: inline-flex;
-	align-items: center;
-	gap: 0.4rem;
-	font-size: 1.05rem;
-	line-height: 1;
 	color: #888;
 	text-decoration: none;
 	padding: 0.25rem 0.4rem;
+	font-size: 0.9rem;
 }
 .ml-config-link:hover {
 	color: #333;
-}
-.ml-config-link .fa {
-	font-size: 1.35em;
-	line-height: 1;
-}
-.ml-config-label {
-	font-size: 0.85em;
 }
 
 /* Horizontal-scroll wrapper so the wide table degrades to a swipe
