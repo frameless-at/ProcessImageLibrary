@@ -2338,17 +2338,16 @@ class ProcessMediaLibrary extends Process {
 			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
 			if (!$img) continue;
 
-			// File-extension is exposed to the row so the cell markup
-			// can flag formats that need visual hints (e.g. animated
-			// GIFs that can't be conveyed by a static thumb).
-			$row['ext'] = strtolower((string) $img->ext);
-
 			// Non-rasterisable / animation-preserving formats: serve
 			// the original instead of running it through ImageSizer.
 			// SVG loses its vector nature on size(); GIF loses its
-			// animation when re-encoded. CSS still keeps the cell
-			// compact via max-width / object-fit.
-			$skipResize = in_array($row['ext'], ['svg', 'gif'], true);
+			// animation when re-encoded — and browsers render
+			// animated GIFs in <img> tags natively, so the original
+			// played at CSS-constrained size is exactly what the user
+			// wants to see. CSS still keeps the cell compact via
+			// max-width / object-fit.
+			$ext = strtolower((string) $img->ext);
+			$skipResize = $ext === 'svg' || $ext === 'gif';
 
 			// Source-file decision: try to ride PW's lazily-generated
 			// admin variation (260 px on the shorter axis — same call
@@ -3385,11 +3384,6 @@ class ProcessMediaLibrary extends Process {
 				$thumbAttrs = ' ' . $editAttrs . $editA11y . $thumbAria;
 			} else {
 				$thumbAttrs = '';
-			}
-			// data-ext drives the CSS "GIF" badge so animated frames
-			// aren't silently flattened in the user's perception.
-			if (!empty($row['ext'])) {
-				$thumbAttrs .= ' data-ext="' . $san->entities((string) $row['ext']) . '"';
 			}
 			$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
