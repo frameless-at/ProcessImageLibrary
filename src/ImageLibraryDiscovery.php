@@ -1,13 +1,13 @@
 <?php namespace ProcessWire;
 
 /**
- * Read-only schema introspection for ProcessMediaLibrary.
+ * Read-only schema introspection for ProcessImageLibrary.
  *
  * Pulled out of the main module file because the discovery layer is
  * a self-contained read-only slice — it asks "which image fields,
  * templates, custom subfields and tag whitelists exist on this site"
  * without writing anything and without depending on render-, AJAX-
- * or filter-side state. Composed into ProcessMediaLibrary via a `use`
+ * or filter-side state. Composed into ProcessImageLibrary via a `use`
  * statement.
  *
  * Methods rely on the host class providing:
@@ -17,7 +17,7 @@
  *   - $this->customByFieldCache       (instance property)
  *   - self::STANDARD_SUBFIELDS        (class constant)
  */
-trait MediaLibraryDiscovery {
+trait ImageLibraryDiscovery {
 
 	/**
 	 * @return array<int,string> names of every FieldtypeImage field in the system,

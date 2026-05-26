@@ -1,13 +1,13 @@
 <?php namespace ProcessWire;
 
 /**
- * Export / import for ProcessMediaLibrary.
+ * Export / import for ProcessImageLibrary.
  *
  * Pulled out of the main module file because the round-trip
  * (JSON + CSV emit, CSV parse, language-aware column expansion,
  * idempotent re-apply on import) is a sizeable self-contained
  * slice — it doesn't depend on render or filter state beyond what
- * the AJAX endpoints hand it. Composed into ProcessMediaLibrary
+ * the AJAX endpoints hand it. Composed into ProcessImageLibrary
  * via `use`.
  *
  * Methods rely on the host class providing:
@@ -18,10 +18,10 @@
  *     $this->getDefaultPageSize(), $this->buildUrl()
  *   - $this->resolvePageimage(), $this->splitTags(),
  *     $this->readFilterInput(), $this->readSortInput()
- *   - Multilang helpers via MediaLibraryMultilang
+ *   - Multilang helpers via ImageLibraryMultilang
  *   - $this->jsonError(), $this->jsonResponse() AJAX response helpers
  */
-trait MediaLibraryExportImport {
+trait ImageLibraryExportImport {
 
 	/**
 	 * Reduce a filters array to just the entries that actually
@@ -203,7 +203,7 @@ trait MediaLibraryExportImport {
 			exit;
 		}
 
-		$filename = sprintf('media-library-export-%s.json', date('Ymd-His'));
+		$filename = sprintf('image-library-export-%s.json', date('Ymd-His'));
 		header('Content-Type: application/json; charset=utf-8');
 		header('Content-Disposition: attachment; filename="' . $filename . '"');
 		echo json_encode(
@@ -368,7 +368,7 @@ trait MediaLibraryExportImport {
 			}
 		}
 
-		$filename = sprintf('media-library-export-%s.csv', date('Ymd-His'));
+		$filename = sprintf('image-library-export-%s.csv', date('Ymd-His'));
 		header('Content-Type: text/csv; charset=utf-8');
 		header('Content-Disposition: attachment; filename="' . $filename . '"');
 		echo "\xEF\xBB\xBF";

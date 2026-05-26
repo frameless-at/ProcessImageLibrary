@@ -1,11 +1,11 @@
 <?php namespace ProcessWire;
 
-require_once __DIR__ . '/src/MediaLibraryDiscovery.php';
-require_once __DIR__ . '/src/MediaLibraryMultilang.php';
-require_once __DIR__ . '/src/MediaLibraryExportImport.php';
+require_once __DIR__ . '/src/ImageLibraryDiscovery.php';
+require_once __DIR__ . '/src/ImageLibraryMultilang.php';
+require_once __DIR__ . '/src/ImageLibraryExportImport.php';
 
 /**
- * Process Media Library
+ * Process Image Library
  *
  * Central table view of all images across all pages and image fields.
  * Editors can filter and inline-edit image metadata (description, tags,
@@ -13,11 +13,11 @@ require_once __DIR__ . '/src/MediaLibraryExportImport.php';
  *
  * The module is sliced into small composable traits under src/ to keep
  * this file scannable:
- *   - MediaLibraryDiscovery    — image-field / template / tags-config /
+ *   - ImageLibraryDiscovery    — image-field / template / tags-config /
  *     custom-subfield introspection (read-only).
- *   - MediaLibraryMultilang    — per-language read / write helpers and
+ *   - ImageLibraryMultilang    — per-language read / write helpers and
  *     name⇄id mapping for export / import.
- *   - MediaLibraryExportImport — JSON + CSV emit, CSV parse, the
+ *   - ImageLibraryExportImport — JSON + CSV emit, CSV parse, the
  *     idempotent re-apply path, and the Export / Import UI block at
  *     the bottom of the table.
  *
@@ -26,17 +26,17 @@ require_once __DIR__ . '/src/MediaLibraryExportImport.php';
  * renders, the row-cache pipeline, install / uninstall, and the small
  * primitives (resolvePageimage, splitTags, blacklist parsers).
  *
- * See MediaLibrary-Konzept.md for the architecture overview.
+ * See ImageLibrary-Konzept.md for the architecture overview.
  */
-class ProcessMediaLibrary extends Process {
+class ProcessImageLibrary extends Process {
 
-	use MediaLibraryDiscovery;
-	use MediaLibraryMultilang;
-	use MediaLibraryExportImport;
+	use ImageLibraryDiscovery;
+	use ImageLibraryMultilang;
+	use ImageLibraryExportImport;
 
-	const ADMIN_PAGE_NAME = 'media-library';
-	const PERMISSION_NAME = 'media-library-access';
-	const CACHE_PREFIX = 'media-library-';
+	const ADMIN_PAGE_NAME = 'image-library';
+	const PERMISSION_NAME = 'image-library-access';
+	const CACHE_PREFIX = 'image-library-';
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 	// THUMB_LONGER_SIDE_DEFAULT is the keep-ratio display target —
@@ -118,7 +118,7 @@ class ProcessMediaLibrary extends Process {
 
 	/**
 	 * Admin-configured list of column keys to render hidden by
-	 * default. The per-user prefs in $user->meta('mediaLibraryPrefs')
+	 * default. The per-user prefs in $user->meta('imageLibraryPrefs')
 	 * override this on a column-by-column basis.
 	 *
 	 * @return array<int,string>
@@ -135,7 +135,15 @@ class ProcessMediaLibrary extends Process {
 	 * @return array{columns:array{visible:array<string,bool>,order:array<int,string>},pageSize:int|null}
 	 */
 	protected function getUserPrefs(): array {
-		$raw = $this->wire('user')->meta('mediaLibraryPrefs');
+		// Read the current key, fall back to the pre-rename
+		// "mediaLibraryPrefs" so an upgrade from the previous module
+		// name picks up the saved column / page-size prefs without
+		// the user noticing. First write through executeUserPrefs
+		// migrates the value to the new key.
+		$raw = $this->wire('user')->meta('imageLibraryPrefs');
+		if ($raw === null || $raw === '') {
+			$raw = $this->wire('user')->meta('mediaLibraryPrefs');
+		}
 		$visible = [];
 		$order   = [];
 		$pageSize = null;
@@ -246,7 +254,7 @@ class ProcessMediaLibrary extends Process {
 		// Cross-context cache invalidation: every Page save invalidates
 		// our flat-row cache when the saved page carries at least one
 		// managed image field. Without this, editing a description in
-		// the native page-edit UI would leave the media-library table
+		// the native page-edit UI would leave the image-library table
 		// showing stale values until the cache expired naturally.
 		$this->addHookAfter('Pages::saved', $this, 'invalidateRowCacheOnPageSave');
 	}
@@ -317,7 +325,7 @@ class ProcessMediaLibrary extends Process {
 		if (!$imageFields || !$eligibleTemplates) {
 			return $this->renderEmptyState($imageFields, $eligibleTemplates);
 		}
-		// Boot gate: the media-library-access permission is the hard
+		// Boot gate: the image-library-access permission is the hard
 		// security check, but the module is only useful to someone
 		// who can actually edit at least one image-field page. If
 		// they can't, short-circuit with a tailored message instead
@@ -595,7 +603,7 @@ class ProcessMediaLibrary extends Process {
 	/**
 	 * Render a verbose dump of every pipeline intermediate for diagnostics.
 	 *
-	 * Hit /processwire/setup/media-library/?debug=1.
+	 * Hit /processwire/setup/image-library/?debug=1.
 	 */
 	protected function renderDebug(): string {
 		$sanitizer = $this->wire('sanitizer');
@@ -1350,7 +1358,7 @@ class ProcessMediaLibrary extends Process {
 	 */
 	/**
 	 * Persist the user's view preferences (column visibility / order
-	 * and chosen page size) to $user->meta('mediaLibraryPrefs'). JS
+	 * and chosen page size) to $user->meta('imageLibraryPrefs'). JS
 	 * debounces calls here whenever the user toggles a checkbox,
 	 * drag-reorders a column, or picks a different page size, and
 	 * always sends the full state so the saved record stays
@@ -1402,7 +1410,7 @@ class ProcessMediaLibrary extends Process {
 			}
 		}
 
-		$this->wire('user')->meta('mediaLibraryPrefs', $clean);
+		$this->wire('user')->meta('imageLibraryPrefs', $clean);
 		return $this->jsonResponse(['ok' => true]);
 	}
 
@@ -1991,13 +1999,13 @@ class ProcessMediaLibrary extends Process {
 		$session = $this->wire('session');
 		$baseUrl = $config->urls($this);
 		$version = $this->wire('modules')->getModuleInfoProperty($this, 'version');
-		$config->styles->add($baseUrl . 'ProcessMediaLibrary.css?v=' . $version);
-		$config->scripts->add($baseUrl . 'ProcessMediaLibrary.js?v=' . $version);
+		$config->styles->add($baseUrl . 'ProcessImageLibrary.css?v=' . $version);
+		$config->scripts->add($baseUrl . 'ProcessImageLibrary.js?v=' . $version);
 
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
 
-		$config->js('ProcessMediaLibrary', [
+		$config->js('ProcessImageLibrary', [
 			'saveUrl'   => $this->wire('page')->url . 'save/',
 			'renderUrl' => $this->wire('page')->url . 'data/',
 			'bulkUrl'   => $this->wire('page')->url . 'bulk/',
@@ -2779,7 +2787,7 @@ class ProcessMediaLibrary extends Process {
 		$permissions = $this->wire('permissions');
 		if (!$permissions->get(self::PERMISSION_NAME)->id) {
 			$p = $permissions->add(self::PERMISSION_NAME);
-			$p->title = $this->_('Access the Media Library admin page');
+			$p->title = $this->_('Access the Image Library admin page');
 			$p->save();
 			$this->message("Created permission: " . self::PERMISSION_NAME);
 		}

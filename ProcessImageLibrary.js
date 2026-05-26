@@ -1,4 +1,4 @@
-/* ProcessMediaLibrary — admin script.
+/* ProcessImageLibrary — admin script.
  *
  * Inline-edit for cells marked with .ml-cell-editable + AJAX re-render
  * of the results region (.ml-results) on filter / sort / pagination.
@@ -16,7 +16,7 @@
 
 		root.classList.add('ml-js-loaded');
 
-		var pwCfg = (window.ProcessWire && window.ProcessWire.config && window.ProcessWire.config.ProcessMediaLibrary) || {};
+		var pwCfg = (window.ProcessWire && window.ProcessWire.config && window.ProcessWire.config.ProcessImageLibrary) || {};
 		// Start from everything the server pushed via $config->js so
 		// new PHP-side keys (userPrefs, userPrefsUrl, defaultHiddenColumns,
 		// …) land in JS without a whitelist update. Fall back to
@@ -510,14 +510,14 @@
 						} else {
 							var reason = (result && result.data && result.data.error)
 								|| ('HTTP ' + (result && result.status));
-							console.error('[MediaLibrary] rename failed:', result);
+							console.error('[ImageLibrary] rename failed:', result);
 							td.title = reason;
 							flashCell(td, false);
 						}
 					}).catch(function (err) {
 						if (!td.isConnected) return;
 						td.classList.remove('ml-cell-saving');
-						console.error('[MediaLibrary] rename errored:', err);
+						console.error('[ImageLibrary] rename errored:', err);
 						td.title = (err && err.message) || labels.error || 'Network error';
 						flashCell(td, false);
 					});
@@ -617,7 +617,7 @@
 						td.textContent = original;
 						var reason = (result && result.data && result.data.error)
 							|| ('HTTP ' + (result && result.status));
-						console.error('[MediaLibrary] save failed:', result);
+						console.error('[ImageLibrary] save failed:', result);
 						td.title = reason;
 						flashCell(td, false);
 					}
@@ -625,7 +625,7 @@
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
 					td.textContent = original;
-					console.error('[MediaLibrary] save errored:', err);
+					console.error('[ImageLibrary] save errored:', err);
 					td.title = (err && err.message) || labels.error || 'Network error';
 					flashCell(td, false);
 				});
@@ -1323,7 +1323,7 @@
 					body: fd,
 					credentials: 'same-origin'
 				}).catch(function (err) {
-					console.error('[MediaLibrary] save user prefs failed:', err);
+					console.error('[ImageLibrary] save user prefs failed:', err);
 				});
 			}, 400);
 		}

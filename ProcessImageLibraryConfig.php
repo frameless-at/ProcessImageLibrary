@@ -1,14 +1,14 @@
 <?php namespace ProcessWire;
 
 /**
- * Admin config UI for ProcessMediaLibrary. PW picks this up via
- * info.json's "configurable": "ProcessMediaLibraryConfig.php".
+ * Admin config UI for ProcessImageLibrary. PW picks this up via
+ * info.json's "configurable": "ProcessImageLibraryConfig.php".
  *
  * We override getInputfields() programmatically so the dynamic
  * option lists (custom subfields, eligible templates, image fields)
  * can be filled live from the install at render time.
  */
-class ProcessMediaLibraryConfig extends ModuleConfig {
+class ProcessImageLibraryConfig extends ModuleConfig {
 
 	public function getInputfields() {
 		$inputfields = parent::getInputfields();
@@ -31,9 +31,9 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbWidth';
 		$f->label = $this->_('Width (px)');
-		$f->value = (int) ($this->get('thumbWidth') ?: ProcessMediaLibrary::THUMB_WIDTH_DEFAULT);
+		$f->value = (int) ($this->get('thumbWidth') ?: ProcessImageLibrary::THUMB_WIDTH_DEFAULT);
 		$f->min = 16;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_WIDTH_DEFAULT);
+		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_WIDTH_DEFAULT);
 		$f->showIf = 'thumbKeepRatio!=1';
 		$f->columnWidth = 33;
 		$fs->add($f);
@@ -41,9 +41,9 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbHeight';
 		$f->label = $this->_('Height (px)');
-		$f->value = (int) ($this->get('thumbHeight') ?: ProcessMediaLibrary::THUMB_HEIGHT_DEFAULT);
+		$f->value = (int) ($this->get('thumbHeight') ?: ProcessImageLibrary::THUMB_HEIGHT_DEFAULT);
 		$f->min = 16;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_HEIGHT_DEFAULT);
+		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_HEIGHT_DEFAULT);
 		$f->showIf = 'thumbKeepRatio!=1';
 		$f->columnWidth = 33;
 		$fs->add($f);
@@ -56,9 +56,9 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbLongerSide';
 		$f->label = $this->_('Longer side (px)');
-		$f->value = (int) ($this->get('thumbLongerSide') ?: ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
+		$f->value = (int) ($this->get('thumbLongerSide') ?: ProcessImageLibrary::THUMB_LONGER_SIDE_DEFAULT);
 		$f->min = 16;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
+		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_LONGER_SIDE_DEFAULT);
 		$f->showIf = 'thumbKeepRatio=1';
 		$f->columnWidth = 66;
 		$fs->add($f);
@@ -69,10 +69,10 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbQuality';
 		$f->label = $this->_('JPEG quality (1–100)');
-		$f->value = (int) ($this->get('thumbQuality') ?: ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
+		$f->value = (int) ($this->get('thumbQuality') ?: ProcessImageLibrary::THUMB_QUALITY_DEFAULT);
 		$f->min = 1;
 		$f->max = 100;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
+		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_QUALITY_DEFAULT);
 		$f->columnWidth = 34;
 		$fs->add($f);
 
@@ -108,7 +108,7 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->label = $this->_('Page-size options');
 		$f->description = $this->_('Comma- or space-separated list of integers shown in the per-page picker.');
 		$f->value = (string) ($this->get('pageSizeOptions') ?? '25, 50, 100, 200');
-		$f->notes = $this->_('Default: ') . implode(', ', ProcessMediaLibrary::PAGE_SIZE_OPTIONS);
+		$f->notes = $this->_('Default: ') . implode(', ', ProcessImageLibrary::PAGE_SIZE_OPTIONS);
 		$f->columnWidth = 60;
 		$fs->add($f);
 
@@ -126,10 +126,10 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$savedPs = (int) $this->get('defaultPageSize');
 		$f->value = in_array($savedPs, $psOpts, true)
 			? (string) $savedPs
-			: (in_array(ProcessMediaLibrary::PAGE_SIZE_DEFAULT, $psOpts, true)
-				? (string) ProcessMediaLibrary::PAGE_SIZE_DEFAULT
-				: (string) ($psOpts[0] ?? ProcessMediaLibrary::PAGE_SIZE_DEFAULT));
-		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::PAGE_SIZE_DEFAULT);
+			: (in_array(ProcessImageLibrary::PAGE_SIZE_DEFAULT, $psOpts, true)
+				? (string) ProcessImageLibrary::PAGE_SIZE_DEFAULT
+				: (string) ($psOpts[0] ?? ProcessImageLibrary::PAGE_SIZE_DEFAULT));
+		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::PAGE_SIZE_DEFAULT);
 		$f->required = true;
 		$f->columnWidth = 40;
 		$fs->add($f);
@@ -144,14 +144,14 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f = $modules->get('InputfieldSelect');
 		$f->name = 'defaultSort';
 		$f->label = $this->_('Column');
-		foreach (array_keys(ProcessMediaLibrary::SORTABLE_COLUMNS) as $key) {
+		foreach (array_keys(ProcessImageLibrary::SORTABLE_COLUMNS) as $key) {
 			$f->addOption($key, $key);
 		}
 		$savedSort = (string) $this->get('defaultSort');
-		$f->value = array_key_exists($savedSort, ProcessMediaLibrary::SORTABLE_COLUMNS)
+		$f->value = array_key_exists($savedSort, ProcessImageLibrary::SORTABLE_COLUMNS)
 			? $savedSort
-			: ProcessMediaLibrary::DEFAULT_SORT;
-		$f->notes = sprintf($this->_('Default: %s'), ProcessMediaLibrary::DEFAULT_SORT);
+			: ProcessImageLibrary::DEFAULT_SORT;
+		$f->notes = sprintf($this->_('Default: %s'), ProcessImageLibrary::DEFAULT_SORT);
 		$f->columnWidth = 50;
 		$fs->add($f);
 
@@ -161,7 +161,7 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->addOption('asc',  $this->_('Ascending'));
 		$f->addOption('desc', $this->_('Descending'));
 		$f->value = ((string) $this->get('defaultSortDir') === 'desc') ? 'desc' : 'asc';
-		$f->notes = sprintf($this->_('Default: %s'), ProcessMediaLibrary::DEFAULT_DIR);
+		$f->notes = sprintf($this->_('Default: %s'), ProcessImageLibrary::DEFAULT_DIR);
 		$f->columnWidth = 50;
 		$fs->add($f);
 
@@ -253,13 +253,13 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 	 */
 	protected function parsePageSizeOptions(string $raw): array {
 		$raw = trim($raw);
-		if ($raw === '') return ProcessMediaLibrary::PAGE_SIZE_OPTIONS;
+		if ($raw === '') return ProcessImageLibrary::PAGE_SIZE_OPTIONS;
 		$opts = array_values(array_unique(array_filter(
 			array_map('intval', preg_split('/[\s,]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: []),
 			fn($n) => $n > 0
 		)));
 		sort($opts);
-		return $opts ?: ProcessMediaLibrary::PAGE_SIZE_OPTIONS;
+		return $opts ?: ProcessImageLibrary::PAGE_SIZE_OPTIONS;
 	}
 
 	/**
@@ -282,8 +282,8 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 			'size'        => $this->_('Size'),
 			'variations'  => $this->_('Variations'),
 		];
-		$instance = $this->wire('modules')->get('ProcessMediaLibrary');
-		if ($instance instanceof ProcessMediaLibrary) {
+		$instance = $this->wire('modules')->get('ProcessImageLibrary');
+		if ($instance instanceof ProcessImageLibrary) {
 			foreach ($instance->collectCustomNames() as $name) {
 				$opts['custom:' . $name] = $name . ' ' . $this->_('(custom)');
 			}

@@ -1,26 +1,26 @@
 {
-  "name": "ProcessMediaLibrary",
-  "title": "Media Library",
-  "version": "0.36.1",
+  "name": "ProcessImageLibrary",
+  "title": "Image Library",
+  "version": "0.37.0",
   "summary": "Central table view of all images across all pages and image fields, with inline metadata editing.",
   "author": "frameless Media",
-  "href": "https://github.com/frameless-at/media-library",
+  "href": "https://github.com/frameless-at/image-library",
   "icon": "image",
   "requires": [
     "ProcessWire>=3.0.172",
     "PHP>=8.0"
   ],
-  "permission": "media-library-access",
+  "permission": "image-library-access",
   "permissions": {
-    "media-library-access": "Access the Media Library admin page"
+    "image-library-access": "Access the Image Library admin page"
   },
   "page": {
-    "name": "media-library",
+    "name": "image-library",
     "parent": "setup",
-    "title": "Media Library"
+    "title": "Image Library"
   },
   "useNavJSON": false,
   "autoload": "template=admin",
   "singular": true,
-  "configurable": "ProcessMediaLibraryConfig.php"
+  "configurable": "ProcessImageLibraryConfig.php"
 }

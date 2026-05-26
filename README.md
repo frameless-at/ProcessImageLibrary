@@ -1,8 +1,8 @@
-# Media Library
+# Image Library
 
 A ProcessWire admin module that puts every image across every page and every image field into one filterable, inline-editable table. Built for editorial teams that need to audit and update image metadata in bulk — description, tags, custom subfields, multilang values, filenames — without navigating to each page individually.
 
-![Overview screenshot of the Media Library admin page showing the filter bar collapsed at the top, a table of images with thumbnails / page / filename / description / tags / dimensions columns, pagination + columns icon row at top and bottom](docs/screenshots/01-overview.png)
+![Overview screenshot of the Image Library admin page showing the filter bar collapsed at the top, a table of images with thumbnails / page / filename / description / tags / dimensions columns, pagination + columns icon row at top and bottom](docs/screenshots/01-overview.png)
 
 ## Quick tour
 
@@ -21,27 +21,27 @@ A ProcessWire admin module that puts every image across every page and every ima
 
 ## Install
 
-1. Drop the repository into `site/modules/ProcessMediaLibrary/`.
-2. In the ProcessWire admin: **Modules → Refresh → Install „Media Library"**.
-3. Find the new page under **Setup → Media Library**.
+1. Drop the repository into `site/modules/ProcessImageLibrary/`.
+2. In the ProcessWire admin: **Modules → Refresh → Install „Image Library"**.
+3. Find the new page under **Setup → Image Library**.
 
 The installer adds:
 
-- An admin page `media-library` under `setup/`
-- A `media-library-access` permission (assign to roles that should see the page)
+- An admin page `image-library` under `setup/`
+- A `image-library-access` permission (assign to roles that should see the page)
 
-Uninstall is symmetric — the admin page and cache entries go; user-meta preferences (`mediaLibraryPrefs`) stay so they survive a reinstall.
+Uninstall is symmetric — the admin page and cache entries go; user-meta preferences (`imageLibraryPrefs`) stay so they survive a reinstall.
 
 ## Permissions
 
 Two-tier model:
 
-- **`media-library-access`** — gates the admin page itself. Without it the page is invisible.
+- **`image-library-access`** — gates the admin page itself. Without it the page is invisible.
 - **`page-edit` on the target page** — checked per cell, per AJAX endpoint. Editors only ever modify pages they could already edit through the standard Page-Edit UI. The library doesn't elevate access; it just gives editors a faster surface for the same operations.
 
 ## Module configuration
 
-Under **Modules → Configure → ProcessMediaLibrary** (or via the **Config** link in the page header).
+Under **Modules → Configure → ProcessImageLibrary** (or via the **Config** link in the page header).
 
 ![Module configuration screenshot showing the Thumbnail, Pagination, Default sort, Columns and Scope fieldsets](docs/screenshots/02-config.png)
 
@@ -252,17 +252,17 @@ Upload a previously exported (and externally edited) JSON or CSV. The import:
 ## File layout
 
 ```
-ProcessMediaLibrary/
-├── ProcessMediaLibrary.module.php       # main module + AJAX endpoints + renders + filter/sort/pagination
-├── ProcessMediaLibrary.info.json        # module metadata
-├── ProcessMediaLibraryConfig.php        # module-config UI
-├── ProcessMediaLibrary.js               # admin script: inline edit, bulk, columns dialog, AJAX nav
-├── ProcessMediaLibrary.css              # admin styles
+ProcessImageLibrary/
+├── ProcessImageLibrary.module.php       # main module + AJAX endpoints + renders + filter/sort/pagination
+├── ProcessImageLibrary.info.json        # module metadata
+├── ProcessImageLibraryConfig.php        # module-config UI
+├── ProcessImageLibrary.js               # admin script: inline edit, bulk, columns dialog, AJAX nav
+├── ProcessImageLibrary.css              # admin styles
 ├── src/
-│   ├── MediaLibraryDiscovery.php        # trait: image-field / template / tags-config introspection
-│   ├── MediaLibraryMultilang.php        # trait: per-language read/write, name⇄id mapping
-│   └── MediaLibraryExportImport.php     # trait: JSON + CSV emit, parse, idempotent re-apply
-├── MediaLibrary-Konzept.md              # architecture / design notes (German)
+│   ├── ImageLibraryDiscovery.php        # trait: image-field / template / tags-config introspection
+│   ├── ImageLibraryMultilang.php        # trait: per-language read/write, name⇄id mapping
+│   └── ImageLibraryExportImport.php     # trait: JSON + CSV emit, parse, idempotent re-apply
+├── ImageLibrary-Konzept.md              # architecture / design notes (German)
 ├── README.md                            # this file
 └── LICENSE
 ```

@@ -1,6 +1,6 @@
-# MediaLibrary Module — Konzept
+# ImageLibrary Module — Konzept
 
-**Ziel-Repo:** https://github.com/frameless-at/media-library
+**Ziel-Repo:** https://github.com/frameless-at/image-library
 
 ## Ziel
 
@@ -20,7 +20,7 @@ Ein ProcessWire-Modul, das **alle Bilder einer PW-Installation** in einer einzig
 - **Variations-Spalte**: pro Bild Zähler aus `$img->getVariations()`
 - **Export / Import**: JSON und CSV (mit multilang-aware Spalten-Suffixen `<subfield>_<langName>`)
 - Server-side Filter / Sortierung / Pagination
-- Spalten-Konfiguration per User in `$user->meta('mediaLibraryPrefs')` — **cross-device**, inklusive Page-Size
+- Spalten-Konfiguration per User in `$user->meta('imageLibraryPrefs')` — **cross-device**, inklusive Page-Size
 - Auto-Erkennung von **Custom Fields on Images** (`field-{fieldname}`-Template, PW 3.0.142+)
 
 **Out-of-Scope (auch in der aktuellen Version):**
@@ -32,18 +32,18 @@ Ein ProcessWire-Modul, das **alle Bilder einer PW-Installation** in einer einzig
 
 ## Architektur
 
-**Modul-Typ:** `Process`-Modul, eigene Admin-URL `/processwire/setup/media-library/`.
+**Modul-Typ:** `Process`-Modul, eigene Admin-URL `/processwire/setup/image-library/`.
 
-**Klassen:** `ProcessMediaLibrary`
+**Klassen:** `ProcessImageLibrary`
 
 **Dateistruktur:**
 
 ```
-ProcessMediaLibrary/
-├── ProcessMediaLibrary.module.php
-├── ProcessMediaLibrary.info.json
-├── ProcessMediaLibrary.css
-├── ProcessMediaLibrary.js
+ProcessImageLibrary/
+├── ProcessImageLibrary.module.php
+├── ProcessImageLibrary.info.json
+├── ProcessImageLibrary.css
+├── ProcessImageLibrary.js
 ├── README.md
 └── LICENSE
 ```
@@ -56,8 +56,8 @@ ProcessMediaLibrary/
 - `___executeBulk()` — AJAX-POST: identische Cell-Save auf eine Selektion anwenden (Add- oder Replace-Mode).
 - `___executeExport()` — Direct-Download von JSON oder CSV unter Berücksichtigung der aktiven Filter.
 - `___executeImport()` — AJAX-POST, akzeptiert eine vorher exportierte (und extern bearbeitete) JSON/CSV-Datei und schreibt zurück; idempotent (unverändert gebliebene Items werden geskippt).
-- `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size in `$user->meta('mediaLibraryPrefs')` (debounced).
-- `___install()` / `___uninstall()` — Admin-Page-Lifecycle + Permission `media-library-access`.
+- `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size in `$user->meta('imageLibraryPrefs')` (debounced).
+- `___install()` / `___uninstall()` — Admin-Page-Lifecycle + Permission `image-library-access`.
 
 ## Datenmodell (PW-nativ)
 
@@ -215,7 +215,7 @@ Auto-entdeckt (alle Custom-Field-Subfields des `field-{fieldname}`-Templates):
   - Page-Reference → Select / Multi-Select
   - Datetime → Date-Picker
 
-**Konfig:** Per User in `$user->meta('mediaLibraryPrefs')` — Cross-device-persistiert via `___executeUserPrefs`. Struktur: `{columns: {visible: {col: bool}, order: [col]}, pageSize: int|null}`. Default-Set: Pflicht + Description + Tags + Custom-Fields (Admin kann eine Default-Hidden-Liste in der Module-Config setzen).
+**Konfig:** Per User in `$user->meta('imageLibraryPrefs')` — Cross-device-persistiert via `___executeUserPrefs`. Struktur: `{columns: {visible: {col: bool}, order: [col]}, pageSize: int|null}`. Default-Set: Pflicht + Description + Tags + Custom-Fields (Admin kann eine Default-Hidden-Liste in der Module-Config setzen).
 
 ## Edit-Semantik
 
@@ -254,13 +254,13 @@ Spalten-Klick toggelt ascending/descending. Sortierbare Felder: Page-Title, Fiel
 
 ## Pagination
 
-50 Rows/Seite als built-in-Default (Module-Config überschreibbar). URL-State `?p=3` + `?ps=100`. Total-Count + „Page 3 of 25" in der Pagination-Zeile. Picker im Pagination-Block (Optionen ebenfalls Module-Config) — Auswahl persistiert in `$user->meta('mediaLibraryPrefs').pageSize`, gilt also cross-device. Die Pagination-Zeile wird oben und unten gerendert; rechts daneben ein `fa-columns`-Icon, das den Spalten-Picker-Dialog öffnet.
+50 Rows/Seite als built-in-Default (Module-Config überschreibbar). URL-State `?p=3` + `?ps=100`. Total-Count + „Page 3 of 25" in der Pagination-Zeile. Picker im Pagination-Block (Optionen ebenfalls Module-Config) — Auswahl persistiert in `$user->meta('imageLibraryPrefs').pageSize`, gilt also cross-device. Die Pagination-Zeile wird oben und unten gerendert; rechts daneben ein `fa-columns`-Icon, das den Spalten-Picker-Dialog öffnet.
 
 ## Permissions
 
 - **Anzeige der Admin-Page:** User braucht `page-edit` auf irgendeiner Page mit Image-Feld (Modul-Check beim Boot)
 - **Edit pro Cell:** `$page->editable()` auf der konkreten Ziel-Page (im Save-Endpoint pro Request geprüft)
-- Optional separate Permission `media-library-access` für engere Steuerung — wenn vorhanden, scopt das Admin-Page-Sichtbarkeit zusätzlich
+- Optional separate Permission `image-library-access` für engere Steuerung — wenn vorhanden, scopt das Admin-Page-Sichtbarkeit zusätzlich
 
 ## Technische Constraints
 
@@ -278,15 +278,15 @@ MIT (oder GPL, je nach Repo-Konvention). Modul sollte als Public-Module auf modu
 
 `___install()`:
 
-- Legt Admin-Page „Media Library" unter Setup an, verknüpft mit der `ProcessMediaLibrary`-Process-Klasse
-- Optional Permission `media-library-access` anlegen
+- Legt Admin-Page „Image Library" unter Setup an, verknüpft mit der `ProcessImageLibrary`-Process-Klasse
+- Optional Permission `image-library-access` anlegen
 - Keine Field- oder Template-Änderungen — Modul liest existierende Strukturen
 
 `___uninstall()`:
 
 - Entfernt Admin-Page
-- Löscht `media-library-*` Cache-Einträge
-- Lässt User-Meta (`mediaLibraryColumns`) stehen (User-Setting, nicht Modul-State)
+- Löscht `image-library-*` Cache-Einträge
+- Lässt User-Meta (`imageLibraryPrefs`) stehen (User-Setting, nicht Modul-State; legacy `mediaLibraryPrefs` und das noch frühere `mediaLibraryColumns` werden beim Lesen weiterhin als Fallback honoriert)
 - Optional Permission stehen lassen (User entscheidet manuell)
 
 ## Beantwortete Open Questions
@@ -294,12 +294,12 @@ MIT (oder GPL, je nach Repo-Konvention). Modul sollte als Public-Module auf modu
 - **Template-Whitelist** → Auto-discovery + optionale Blacklist in Module-Config (`blacklistedTemplates`, `blacklistedFields`).
 - **1-Image-Felder** → mit aufgenommen, kein gesonderter Schalter.
 - **Custom-Field-Spalten Default-Sichtbarkeit** → auto-sichtbar; Admin kann pro Spalte über `defaultHiddenColumns` ausblenden, User per Spalten-Picker.
-- **Spaltenkonfig-Scope** → `$user->meta('mediaLibraryPrefs')`, cross-device.
+- **Spaltenkonfig-Scope** → `$user->meta('imageLibraryPrefs')`, cross-device.
 - **Edit-Modus** → Inline-Auto-Save bei Blur/Enter.
 - **Filter-URL-State** → URL-Params, bookmarkbar (Tags als komma-separierter `?tags=…`-Wert).
 - **Bulk-Operations** → Selection-als-Pinsel umgesetzt (Add/Replace-Modes). Bulk-Delete und File-Rename bleiben offen.
 - **Page-Size** → 50 Default, Picker mit konfigurierbarer Options-Liste, Auswahl in `$user->meta`.
-- **Permission-Granularität** → beides: `media-library-access` als Hard-Gate für die Admin-Page, `$page->editable()` pro Cell-Save.
+- **Permission-Granularität** → beides: `image-library-access` als Hard-Gate für die Admin-Page, `$page->editable()` pro Cell-Save.
 - **Variations-Spalte** → umgesetzt (read-only Zähler).
 - **Modul-Info / Versioning** → SemVer, GitHub-Tags. Composer-Support nicht aktiv geplant.
 
