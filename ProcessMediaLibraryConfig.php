@@ -25,22 +25,23 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->value = (int) ($this->get('thumbWidth') ?: ProcessMediaLibrary::THUMB_WIDTH_DEFAULT);
 		$f->min = 16;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_WIDTH_DEFAULT);
-		$f->columnWidth = 33;
+		$f->columnWidth = 50;
 		$fs->add($f);
 
 		// Height only matters when thumbs are center-cropped to an
 		// exact box. When "Keep image ratio" is on, runtime ignores
 		// height entirely (scales by width alone) so the field hides
 		// to avoid suggesting otherwise. showIf uses PW's selector
-		// syntax: shown only while thumbKeepRatio is empty/unchecked.
+		// syntax: shown only when the checkbox is NOT in its checked
+		// state (value !== '1').
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbHeight';
 		$f->label = $this->_('Height (px)');
 		$f->value = (int) ($this->get('thumbHeight') ?: ProcessMediaLibrary::THUMB_HEIGHT_DEFAULT);
 		$f->min = 16;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_HEIGHT_DEFAULT);
-		$f->showIf = 'thumbKeepRatio=';
-		$f->columnWidth = 33;
+		$f->showIf = 'thumbKeepRatio!=1';
+		$f->columnWidth = 50;
 		$fs->add($f);
 
 		$f = $modules->get('InputfieldInteger');
@@ -50,19 +51,20 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->min = 1;
 		$f->max = 100;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
-		$f->columnWidth = 34;
+		$f->columnWidth = 50;
 		$fs->add($f);
 
-		// Keep-aspect toggle. InputfieldCheckbox stores '1' for
-		// checked and '' for unchecked, exactly what the runtime
-		// reads back. Old "thumbCrop" key is migrated on the read
-		// side (see getThumbDims) so installs that saved the
-		// previous semantics keep working until they re-save here.
+		// Keep-aspect toggle — header hidden so only the checkbox +
+		// "Keep image ratio" label remain inline at 50% width.
+		// InputfieldCheckbox stores '1' for checked and '' for
+		// unchecked, exactly what the runtime reads back. Old
+		// "thumbCrop" key is migrated on the read side (see
+		// getThumbDims) so installs that saved the previous
+		// semantics keep working until they re-save here.
 		$f = $modules->get('InputfieldCheckbox');
 		$f->name = 'thumbKeepRatio';
-		$f->label = $this->_('Keep image ratio');
-		$f->label2 = $this->_('Enabled');
-		$f->description = $this->_('When enabled, thumbnails scale to the configured width and keep each image\'s native aspect ratio — row heights vary per image. When disabled, thumbnails are center-cropped to the exact width × height box.');
+		$f->skipLabel = Inputfield::skipLabelHeader;
+		$f->label2 = $this->_('Keep image ratio');
 		$savedKR = $this->get('thumbKeepRatio');
 		if ($savedKR === null) {
 			// First render after upgrade: derive from the legacy
@@ -71,8 +73,7 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 			$savedKR = $oldCrop === null ? false : !$oldCrop;
 		}
 		$f->checked((bool) $savedKR);
-		$f->notes = $this->_('Default: disabled (center-cropped to exact dimensions)');
-		$f->columnWidth = 100;
+		$f->columnWidth = 50;
 		$fs->add($f);
 
 		$inputfields->add($fs);
