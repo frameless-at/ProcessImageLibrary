@@ -888,6 +888,53 @@
 			}
 		}
 
+		// Update the filter fieldset labels with their "(N)" suffix.
+		// PHP renders the initial labels with the applied filter
+		// count; this re-derives the same numbers from the live form
+		// state after Apply / Reset since the filter form isn't part
+		// of the AJAX-replaced region and would otherwise stay
+		// frozen on whatever the page-load count was.
+		function setFieldsetHeaderText(headerEl, baseLabel, count) {
+			if (!headerEl) return;
+			var text = count > 0 ? baseLabel + ' (' + count + ')' : baseLabel;
+			// Replace the first non-empty text node in place so any
+			// theme-injected icon/chevron siblings inside the header
+			// stay intact.
+			for (var i = 0; i < headerEl.childNodes.length; i++) {
+				var node = headerEl.childNodes[i];
+				if (node.nodeType === 3 && node.nodeValue.trim() !== '') {
+					node.nodeValue = text;
+					return;
+				}
+			}
+			headerEl.appendChild(document.createTextNode(text));
+		}
+		function recomputeFilterLabels() {
+			if (!filterForm) return;
+			var outerCount = 0;
+			var tagsCount  = 0;
+			filterForm.querySelectorAll('input[type="search"], input[type="text"]').forEach(function (i) {
+				if (i.value.trim() !== '') outerCount++;
+			});
+			filterForm.querySelectorAll('select:not([multiple])').forEach(function (s) {
+				if (s.value !== '' && s.value != null) outerCount++;
+			});
+			filterForm.querySelectorAll('input[type="checkbox"]:checked').forEach(function (cb) {
+				outerCount++;
+				if (cb.name === 'tags[]') tagsCount++;
+			});
+			setFieldsetHeaderText(
+				filterForm && filterForm.querySelector('.Inputfield_mlFilters > .InputfieldHeader'),
+				(labels && labels.filtersLabel) || 'Filters',
+				outerCount
+			);
+			setFieldsetHeaderText(
+				filterForm && filterForm.querySelector('.Inputfield_tags > .InputfieldHeader'),
+				(labels && labels.tagsLabel) || 'Tags',
+				tagsCount
+			);
+		}
+
 		if (filterForm) {
 			filterForm.addEventListener('input', updateResetVisibility);
 			filterForm.addEventListener('change', updateResetVisibility);
@@ -911,6 +958,7 @@
 				});
 				var qs = params.toString() ? '?' + params.toString() : '';
 				replaceFromQs(qs, true);
+				recomputeFilterLabels();
 				// Collapse the outer "Filters" fieldset after Apply —
 				// the user has committed their choice; keeping the
 				// fieldset open just occludes the results. PW's
@@ -943,6 +991,7 @@
 					}
 				});
 				updateResetVisibility();
+				recomputeFilterLabels();
 				replaceFromQs('', true);
 			});
 		}

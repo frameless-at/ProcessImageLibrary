@@ -2824,6 +2824,12 @@ class ProcessMediaLibrary extends Process {
 				// this so the user isn't told "all" while non-template
 				// fields are greyed out below.
 				'fieldEmptyScoped' => $this->_('All fields of %s'),
+				// Base labels for the two count-decorated filter
+				// fieldsets; JS appends "(N)" client-side after each
+				// Apply / Reset so the labels stay in sync with the
+				// view without re-rendering the whole filter form.
+				'filtersLabel'     => $this->_('Filters'),
+				'tagsLabel'        => $this->_('Tags'),
 			],
 		]);
 	}
@@ -2906,10 +2912,15 @@ class ProcessMediaLibrary extends Process {
 		// user immediately sees what's filtering the view. Column
 		// visibility / order moved into the pagination-row "Columns…"
 		// dialog (renderColumnsDialog), out of the filter form entirely.
+		// Label carries a "(N)" suffix when filters are active so the
+		// count stays visible even while the fieldset is collapsed.
+		$activeCount = $this->countActiveFilters($filters);
 		/** @var \ProcessWire\InputfieldFieldset $outer */
 		$outer = $modules->get('InputfieldFieldset');
 		$outer->name      = 'mlFilters';
-		$outer->label     = $this->_('Filters');
+		$outer->label     = $activeCount > 0
+			? sprintf($this->_('Filters (%d)'), $activeCount)
+			: $this->_('Filters');
 		$outer->collapsed = $active ? Inputfield::collapsedNo : Inputfield::collapsedYes;
 
 		// Row 1: Search + Template + Image field, 33/33/34.
@@ -3019,13 +3030,30 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	protected function hasActiveFilter(array $filters): bool {
-		return $filters['q'] !== ''
-			|| $filters['template'] !== ''
-			|| $filters['field'] !== ''
-			|| $filters['no_desc']
-			|| $filters['no_tags']
-			|| !empty($filters['no_custom'])
-			|| !empty($filters['tags']);
+		return $this->countActiveFilters($filters) > 0;
+	}
+
+	/**
+	 * Total count of active filter items — what the outer fieldset
+	 * label displays as "(N)". Multi-value filters (no_custom, tags)
+	 * contribute one per selection so the number matches the user's
+	 * mental model of "how many things am I narrowing by"; scalar
+	 * filters contribute one when populated.
+	 */
+	protected function countActiveFilters(array $filters): int {
+		$count = 0;
+		if ($filters['q'] !== '')        $count++;
+		if ($filters['template'] !== '') $count++;
+		if ($filters['field'] !== '')    $count++;
+		if (!empty($filters['no_desc'])) $count++;
+		if (!empty($filters['no_tags'])) $count++;
+		if (!empty($filters['no_custom']) && is_array($filters['no_custom'])) {
+			$count += count($filters['no_custom']);
+		}
+		if (!empty($filters['tags']) && is_array($filters['tags'])) {
+			$count += count($filters['tags']);
+		}
+		return $count;
 	}
 
 	/**
