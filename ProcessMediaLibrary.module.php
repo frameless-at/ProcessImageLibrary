@@ -474,9 +474,11 @@ class ProcessMediaLibrary extends Process {
 	protected function renderColumnsDialog(array $customCols): string {
 		$san = $this->wire('sanitizer');
 		$title = $san->entities($this->_('Columns'));
+		$hint  = $san->entities($this->_('Toggle a row to show / hide the column. Drag a row to reorder columns.'));
 		$close = $san->entities($this->_('Close'));
 		$out  = '<dialog class="ml-columns-dialog">';
 		$out .= '<header>' . $title . '</header>';
+		$out .= '<p class="ml-columns-hint">' . $hint . '</p>';
 		$out .= $this->renderColumnsListMarkup($customCols);
 		$out .= '<footer>';
 		$out .= '<button type="button" class="ml-columns-close">' . $close . '</button>';
