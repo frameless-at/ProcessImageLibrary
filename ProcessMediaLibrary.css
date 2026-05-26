@@ -534,10 +534,13 @@ textarea.ml-langtabs-pane {
 	padding: 0;
 	margin: 0;
 	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
 	gap: 0.25rem 0.75rem;
 }
 .ml-columns-list li {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
 	cursor: grab;
 }
 .ml-columns-list li:active {
@@ -547,15 +550,59 @@ textarea.ml-langtabs-pane {
 	opacity: 0.35;
 }
 .ml-columns-list label {
+	flex: 1 1 auto;
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
 	cursor: pointer;
 	padding: 0.2rem 0.3rem;
 	border-radius: 2px;
+	min-width: 0;
 }
 .ml-columns-list label:hover {
 	background: #f5f5f5;
+}
+.ml-col-move {
+	flex: 0 0 auto;
+	background: transparent;
+	border: 0;
+	color: #888;
+	cursor: pointer;
+	padding: 0.2rem 0.35rem;
+	line-height: 1;
+	font-size: 0.85em;
+	border-radius: 2px;
+}
+.ml-col-move:hover {
+	background: #f0f0f0;
+	color: #333;
+}
+.ml-col-move:focus-visible {
+	outline: 2px solid #5b8cd6;
+	outline-offset: -1px;
+}
+
+/* Visually-hidden live region — kept in the DOM and announced by
+   screen readers, invisible to sighted users. Same idiom as
+   Bootstrap's .visually-hidden, but local to the module. */
+.ml-live-region {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* Editable cells advertise themselves as buttons for keyboard
+   users — show a focus ring so the active cell is obvious. */
+.ml-cell-editable:focus-visible,
+.ml-cell-thumb[role="button"]:focus-visible {
+	outline: 2px solid #5b8cd6;
+	outline-offset: -2px;
 }
 
 /* Image-editor modal — wraps PW's ProcessPageEdit in an iframe so

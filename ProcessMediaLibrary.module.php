@@ -222,6 +222,35 @@ class ProcessMediaLibrary extends Process {
 		// instead of the inputfield property. Hooking the parent
 		// catches both File and Image fields in one shot.
 		$this->addHookBefore('InputfieldFile::renderList', $this, 'filterToFocusedImage');
+
+		// Cross-context cache invalidation: every Page save invalidates
+		// our flat-row cache when the saved page carries at least one
+		// managed image field. Without this, editing a description in
+		// the native page-edit UI would leave the media-library table
+		// showing stale values until the cache expired naturally.
+		$this->addHookAfter('Pages::saved', $this, 'invalidateRowCacheOnPageSave');
+	}
+
+	/**
+	 * Pages::saved listener. Drops the module's row-cache entries
+	 * whenever a saved page hosts one of the managed image fields,
+	 * so the table picks up changes made outside the module (e.g.
+	 * in the native ProcessPageEdit UI). Discovery results are
+	 * pulled per-call: cheap enough at save time, and avoids
+	 * caching a stale field list across config edits.
+	 */
+	public function invalidateRowCacheOnPageSave(HookEvent $event): void {
+		$page = $event->arguments(0);
+		if (!$page instanceof Page || !$page->id) return;
+		$imageFields = $this->discoverImageFields();
+		if (!$imageFields) return;
+		$fieldSet = array_flip($imageFields);
+		foreach ($page->template->fieldgroup as $f) {
+			if (isset($fieldSet[$f->name])) {
+				$this->wire('cache')->deleteFor($this);
+				return;
+			}
+		}
 	}
 
 	/**
@@ -314,6 +343,10 @@ class ProcessMediaLibrary extends Process {
 		);
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
+		// Visually-hidden status region for JS to announce inline-edit
+		// save outcomes to assistive tech ("Saved", "Save failed: …").
+		// aria-live=polite ⇒ won't interrupt other speech.
+		$out .= '<div class="ml-live-region" role="status" aria-live="polite" aria-atomic="true"></div>';
 		// Module-settings link. Position-absolute via CSS so it sits
 		// in the heading row instead of taking a row of its own.
 		// collapse_info=1 asks PW to render the edit screen with the
@@ -480,17 +513,28 @@ class ProcessMediaLibrary extends Process {
 			$cols = $ordered;
 		}
 
+		$upLabel   = $san->entities($this->_('Move up'));
+		$downLabel = $san->entities($this->_('Move down'));
 		$items = '';
 		foreach ($cols as $key => $label) {
 			$isVisible = array_key_exists($key, $visible)
 				? $visible[$key]
 				: !isset($defaultHidden[$key]);
 			$checked = $isVisible ? ' checked' : '';
-			$items .= '<li class="ml-col-item" draggable="true"><label>'
-				. '<input type="checkbox" class="ml-col-toggle" data-col="'
-				. $san->entities($key) . '"' . $checked . '>'
-				. ' ' . $san->entities($label)
-				. '</label></li>';
+			$colKey = $san->entities($key);
+			$items .= '<li class="ml-col-item" draggable="true">'
+				. '<label><input type="checkbox" class="ml-col-toggle" data-col="'
+				. $colKey . '"' . $checked . '> '
+				. $san->entities($label) . '</label>'
+				// Up / Down buttons for keyboard users — same effect as
+				// drag-reorder. JS wires them; the icons stay decorative.
+				. '<button type="button" class="ml-col-move ml-col-move-up"'
+				. ' data-dir="up" aria-label="' . $upLabel . '" title="' . $upLabel . '">'
+				. '<i class="fa fa-chevron-up" aria-hidden="true"></i></button>'
+				. '<button type="button" class="ml-col-move ml-col-move-down"'
+				. ' data-dir="down" aria-label="' . $downLabel . '" title="' . $downLabel . '">'
+				. '<i class="fa fa-chevron-down" aria-hidden="true"></i></button>'
+				. '</li>';
 		}
 		return '<ul class="ml-columns-list">' . $items . '</ul>';
 	}
@@ -507,7 +551,7 @@ class ProcessMediaLibrary extends Process {
 	protected function renderColumnsDialog(array $customCols): string {
 		$san = $this->wire('sanitizer');
 		$title = $san->entities($this->_('Columns'));
-		$hint  = $san->entities($this->_('Toggle to show / hide the column. Drag to reorder columns.'));
+		$hint  = $san->entities($this->_('Toggle to show / hide the column. Drag or use the arrow buttons to reorder.'));
 		$close = $san->entities($this->_('Close'));
 		$out  = '<dialog class="ml-columns-dialog">';
 		$out .= '<header>' . $title . '</header>';
@@ -843,16 +887,8 @@ class ProcessMediaLibrary extends Process {
 		if (!$page->id) return $this->jsonError('Page not found', 404);
 		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
 
-		$fieldValue = $page->getUnformatted($fieldName);
-		$img = null;
-		if ($fieldValue instanceof Pageimages) {
-			$img = $fieldValue->getFile($basename);
-		} elseif ($fieldValue instanceof Pageimage) {
-			$img = $fieldValue;
-		}
-		if (!$img instanceof Pageimage) {
-			return $this->jsonError('Image not found in field', 404);
-		}
+		$img = $this->resolvePageimage($page, $fieldName, $basename);
+		if (!$img) return $this->jsonError('Image not found in field', 404);
 
 		// useTags=2 (whitelist): reject any token that isn't in the configured
 		// tagsList. Splits on whitespace + commas to match PW's own parsing.
@@ -1078,14 +1114,8 @@ class ProcessMediaLibrary extends Process {
 					continue;
 				}
 
-				$fieldValue = $page->getUnformatted($fn);
-				$img = null;
-				if ($fieldValue instanceof Pageimages) {
-					$img = $fieldValue->getFile($bn);
-				} elseif ($fieldValue instanceof Pageimage) {
-					$img = $fieldValue;
-				}
-				if (!$img instanceof Pageimage) {
+				$img = $this->resolvePageimage($page, $fn, $bn);
+				if (!$img) {
 					$failed[] = sprintf('Image %s not found in %d.%s', $bn, $pid, $fn);
 					continue;
 				}
@@ -1202,14 +1232,8 @@ class ProcessMediaLibrary extends Process {
 			$page = $pagesById[$row['pageId']] ?? null;
 			if (!$page || !$page->id) continue;
 
-			$fieldValue = $page->getUnformatted($row['fieldName']);
-			$img = null;
-			if ($fieldValue instanceof Pageimages) {
-				$img = $fieldValue->getFile($row['basename']);
-			} elseif ($fieldValue instanceof Pageimage) {
-				$img = $fieldValue;
-			}
-			if (!$img instanceof Pageimage) continue;
+			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
+			if (!$img) continue;
 
 			$customs = [];
 			foreach ($customByField[$row['fieldName']] ?? [] as $name) {
@@ -1657,14 +1681,8 @@ class ProcessMediaLibrary extends Process {
 					continue;
 				}
 
-				$fieldValue = $page->getUnformatted($fn);
-				$img = null;
-				if ($fieldValue instanceof Pageimages) {
-					$img = $fieldValue->getFile($bn);
-				} elseif ($fieldValue instanceof Pageimage) {
-					$img = $fieldValue;
-				}
-				if (!$img instanceof Pageimage) {
+				$img = $this->resolvePageimage($page, $fn, $bn);
+				if (!$img) {
 					$failed[] = "Image $bn not in $pid.$fn";
 					continue;
 				}
@@ -1817,6 +1835,27 @@ class ProcessMediaLibrary extends Process {
 		// normalizeDescription() can pick the editor's language at
 		// display time.
 		return 'rows-v3-' . substr(md5((string) json_encode($keyData)), 0, 16);
+	}
+
+	/**
+	 * Resolve a Page + field-name + basename triple into the underlying
+	 * Pageimage, regardless of whether the field carries a Pageimages
+	 * collection (maxFiles != 1) or a single Pageimage (maxFiles=1).
+	 * Returns null when the field has no value or the basename doesn't
+	 * exist in the collection — callers translate that into the
+	 * appropriate "image not found" outcome (404 in AJAX endpoints,
+	 * skip-row in render / export).
+	 */
+	protected function resolvePageimage(Page $page, string $fieldName, string $basename): ?Pageimage {
+		$value = $page->getUnformatted($fieldName);
+		if ($value instanceof Pageimages) {
+			$img = $value->getFile($basename);
+		} elseif ($value instanceof Pageimage) {
+			$img = $value;
+		} else {
+			return null;
+		}
+		return $img instanceof Pageimage ? $img : null;
 	}
 
 	/**
@@ -2282,14 +2321,8 @@ class ProcessMediaLibrary extends Process {
 			$row['pageUrl']     = $page->url;
 			$row['pageEditUrl'] = $page->editUrl;
 
-			$fieldValue = $page->getUnformatted($row['fieldName']);
-			$img = null;
-			if ($fieldValue instanceof Pageimages) {
-				$img = $fieldValue->getFile($row['basename']);
-			} elseif ($fieldValue instanceof Pageimage) {
-				$img = $fieldValue;
-			}
-			if (!$img instanceof Pageimage) continue;
+			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
+			if (!$img) continue;
 
 			// Source-file decision: try to ride PW's lazily-generated
 			// admin variation (260 px on the shorter axis — same call
@@ -2408,14 +2441,8 @@ class ProcessMediaLibrary extends Process {
 			$page = $pagesById[$row['pageId']] ?? null;
 			if (!$page || !$page->id) continue;
 
-			$fieldValue = $page->getUnformatted($row['fieldName']);
-			$img = null;
-			if ($fieldValue instanceof Pageimages) {
-				$img = $fieldValue->getFile($row['basename']);
-			} elseif ($fieldValue instanceof Pageimage) {
-				$img = $fieldValue;
-			}
-			if (!$img instanceof Pageimage) continue;
+			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
+			if (!$img) continue;
 
 			foreach ($customNames as $name) {
 				$val = $img->get($name);
@@ -3291,6 +3318,12 @@ class ProcessMediaLibrary extends Process {
 				$san->entities((string) $row['basename']),
 				md5((string) $row['basename'])
 			);
+			// A11y: editable cells expose themselves as buttons so
+			// keyboard users can Tab to them and Enter / Space to
+			// open the inline editor (handled in JS). Per-cell labels
+			// are added at the call sites since each subfield needs
+			// its own descriptive name.
+			$editA11y = ' role="button" tabindex="0"';
 
 			$selKey = sprintf('%d:%s:%s',
 				(int) $row['pageId'],
@@ -3314,7 +3347,17 @@ class ProcessMediaLibrary extends Process {
 			// Thumb td only carries the hash + identity attrs when the
 			// host page is editable — that's what gates the click-
 			// through to the per-image editor iframe.
-			$thumbAttrs = !empty($row['pageEditUrl']) ? (' ' . $editAttrs) : '';
+			// Thumb td picks up the edit attrs (and a button role) only
+			// when the host page is editable — the click / keyboard
+			// activator opens the per-image editor modal.
+			if (!empty($row['pageEditUrl'])) {
+				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+					$this->_('Open editor for %s'), (string) $row['basename']
+				)));
+				$thumbAttrs = ' ' . $editAttrs . $editA11y . $thumbAria;
+			} else {
+				$thumbAttrs = '';
+			}
 			$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
 				// Display dimensions are derived from the user's
@@ -3365,7 +3408,10 @@ class ProcessMediaLibrary extends Process {
 
 			$out .= '<td data-col="field"><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
 			$out .= '<td data-col="filename"><code>' . $san->entities((string) $row['basename']) . '</code></td>';
-			$out .= '<td class="ml-cell-desc ml-cell-editable" data-col="description" ' . $editAttrs
+			$descAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Edit description of %s'), (string) $row['basename']
+			)));
+			$out .= '<td class="ml-cell-desc ml-cell-editable" data-col="description" ' . $editAttrs . $editA11y . $descAria
 				. ' data-subfield="description" data-input="textarea"' . $this->buildLangAttrs($row['description']) . '>'
 				. $san->entities($desc) . '</td>';
 			if ($showTagsCol) {
@@ -3390,7 +3436,10 @@ class ProcessMediaLibrary extends Process {
 						$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
 							. $san->entities((string) $row['fieldName']) . '"';
 					}
-					$out .= '<td class="ml-cell-tags ml-cell-editable" data-col="tags" ' . $editAttrs
+					$tagsAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+						$this->_('Edit tags of %s'), (string) $row['basename']
+					)));
+					$out .= '<td class="ml-cell-tags ml-cell-editable" data-col="tags" ' . $editAttrs . $editA11y . $tagsAria
 						. ' data-subfield="tags" data-input="text"' . $tagAttrs . '>'
 						. $san->entities($tags) . '</td>';
 				}
@@ -3420,7 +3469,10 @@ class ProcessMediaLibrary extends Process {
 				$raw = $row['custom'][$name] ?? '';
 				$val = $this->normalizeDescription($raw);
 				$inputType = $customInputTypes[$name] ?? 'text';
-				$out .= '<td class="ml-cell-editable"' . $colAttr . ' ' . $editAttrs
+				$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+					$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+				)));
+				$out .= '<td class="ml-cell-editable"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
 					. ' data-subfield="' . $san->entities($name) . '"'
 					. ' data-input="' . $san->entities($inputType) . '"'
 					. $this->buildLangAttrs($raw) . '>'
@@ -3458,13 +3510,30 @@ class ProcessMediaLibrary extends Process {
 		$arrow    = $isActive ? ($currentDir === 'asc' ? '▲' : '▼') : '';
 		$cls      = 'ml-th-sortable' . ($isActive ? ' ml-th-sort-active' : '');
 
+		// A11y: aria-sort on the <th> tells assistive tech which
+		// column is sorted and in which direction; aria-label on the
+		// <a> announces what clicking will do (toggle to the OTHER
+		// direction). Both update on every render so navigation
+		// stays announced.
+		$ariaSort = $isActive
+			? ' aria-sort="' . ($currentDir === 'asc' ? 'ascending' : 'descending') . '"'
+			: ' aria-sort="none"';
+		$labelText = trim(strip_tags($labelHtml));
+		$linkAria = sprintf(
+			$nextDir === 'asc'
+				? $this->_('Sort by %s, ascending')
+				: $this->_('Sort by %s, descending'),
+			$labelText
+		);
+
 		$inner = $labelHtml;
 		if ($arrow !== '') {
-			$inner .= ' <span class="ml-sort-arrow">' . $arrow . '</span>';
+			$inner .= ' <span class="ml-sort-arrow" aria-hidden="true">' . $arrow . '</span>';
 		}
 
-		return '<th class="' . $cls . '"' . $colAttr . '>'
-			. '<a href="' . $san->entities($href) . '">' . $inner . '</a>'
+		return '<th class="' . $cls . '"' . $colAttr . $ariaSort . '>'
+			. '<a href="' . $san->entities($href) . '" aria-label="'
+			. $san->entities($linkAria) . '">' . $inner . '</a>'
 			. '</th>';
 	}
 
