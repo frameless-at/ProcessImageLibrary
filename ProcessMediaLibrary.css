@@ -389,6 +389,14 @@ textarea.ml-cell-input {
 	font-size: 1.05em;
 	margin-bottom: 0.75rem;
 }
+/* Secondary help text inside a popup (e.g. rename placeholder
+   syntax). Muted so it sits below the title without competing
+   with the input itself. */
+.ml-popup-hint {
+	margin: -0.25rem 0 0.75rem;
+	color: #777;
+	font-size: 0.85em;
+}
 .ml-popup-editor textarea {
 	display: block;
 	width: 100%;
