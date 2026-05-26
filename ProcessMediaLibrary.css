@@ -418,22 +418,27 @@ textarea.ml-cell-input {
 /* Filename cell — split into stem + extension so the inline edit
    only touches the stem. Extension reads muted so the immutable
    part is visually distinguishable at a glance. */
-.ml-cell-filename code {
-	display: inline;
-}
 .ml-cell-filename .ml-fn-ext {
 	color: #999;
 }
-/* Inline rename input replaces the stem span in place. Sized to
-   the cell's natural width via min-width 0 inside the flex/inline
-   flow; monospaced + tight padding match the <code> it replaces
-   so the layout doesn't jump on edit / restore. */
+/* While editing the cell's <code> becomes an inline-flex so the
+   input can stretch to fill the cell width while the locked
+   extension chip keeps its content size on the right. */
+.ml-cell-filename.ml-editing code {
+	display: flex;
+	align-items: center;
+	width: 100%;
+}
+/* Inline rename input replaces the stem span in place. flex:1
+   makes it fill the cell minus the ext chip; monospaced + tight
+   padding match the <code> it replaces so the layout doesn't jump
+   on edit / restore. */
 .ml-cell-filename .ml-fn-input {
+	flex: 1 1 auto;
+	min-width: 0;
 	font: inherit;
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	font-size: 0.85em;
-	min-width: 0;
-	width: auto;
 	padding: 1px 4px;
 	margin: -2px 0;
 	border: 1px solid #5b8cd6;
@@ -443,6 +448,10 @@ textarea.ml-cell-input {
 .ml-cell-filename .ml-fn-input:focus {
 	outline: none;
 	background: #fff;
+}
+.ml-cell-filename.ml-editing .ml-fn-ext {
+	flex: 0 0 auto;
+	margin-left: 2px;
 }
 /* Multilang tabs inside the popup — minimal styling that matches
    the rest of the popup (tab bar above a single visible pane). */
