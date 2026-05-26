@@ -19,22 +19,21 @@
 	overflow-y: auto;
 }
 
-/* The two layout-only sub-fieldsets (missings + actions) carry
-   skipLabelHeader on the PHP side; this hides any residual header
-   chrome the admin theme might still emit so the wrappers act as
-   pure layout grouping with zero visual chrome. */
-.ml-filter-bar .Inputfield_mlMissing > .InputfieldHeader,
+/* The actions sub-fieldset carries skipLabelHeader on the PHP
+   side; this hides any residual header chrome the admin theme
+   might still emit so the wrapper is pure layout grouping with
+   zero visual chrome. */
 .ml-filter-bar .Inputfield_mlActions > .InputfieldHeader {
 	display: none;
 }
 
-/* Action row: Reset + Apply pinned to the right edge, secondary
-   (Reset) on the left, primary (Apply) on the far right. Buttons
-   shrink to their content width inside the flex row so they don't
-   stretch to a column-width allocation. */
+/* Action row: Apply + Reset pinned to the left edge, primary
+   (Apply) first. Buttons shrink to their content width inside
+   the flex row so they don't stretch to a column-width
+   allocation. */
 .ml-filter-bar .Inputfield_mlActions > .InputfieldContent > .Inputfields {
 	display: flex;
-	justify-content: flex-end;
+	justify-content: flex-start;
 	align-items: center;
 	gap: 0.5rem;
 }
