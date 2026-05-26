@@ -19,25 +19,14 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$fs->label = $this->_('Thumbnail');
 		$fs->description = $this->_('Per-row preview image rendered into the table. Up to 260 px on the longer side the runtime reuses PW\'s lazily-generated admin image-field variation — no second resize pass per row. Beyond that, a dedicated variation is produced for the table.');
 
-		// Longer-side cap for the keep-ratio path. Shown only when
-		// the ratio checkbox is on; runtime caps the longer axis of
-		// the rendered thumb to this value (≤ 260 ⇒ reuse PW's
-		// admin variation as source, > 260 ⇒ produce a dedicated
-		// size($longer, 0) / size(0, $longer) variation).
-		$f = $modules->get('InputfieldInteger');
-		$f->name = 'thumbLongerSide';
-		$f->label = $this->_('Longer side (px)');
-		$f->value = (int) ($this->get('thumbLongerSide') ?: ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
-		$f->min = 16;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
-		$f->showIf = 'thumbKeepRatio=1';
-		$f->columnWidth = 50;
-		$fs->add($f);
+		// Row order: Width + Height (crop-mode pair), Longer side
+		// (ratio-mode), Keep-ratio + Quality. Each field stays 50 %
+		// wide; the showIf rules collapse the row whichever mode is
+		// active so the visible layout flows naturally.
 
-		// Width × Height define the exact crop box when keep-ratio is
-		// off. Hidden under keep-ratio (the longer-side field takes
-		// over). showIf uses PW's selector syntax: shown only when
-		// the checkbox is NOT in its checked state.
+		// Width × Height define the exact crop box when keep-ratio
+		// is off; hidden under keep-ratio (the longer-side field
+		// takes over).
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbWidth';
 		$f->label = $this->_('Width (px)');
@@ -58,18 +47,23 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->columnWidth = 50;
 		$fs->add($f);
 
+		// Longer-side cap for the keep-ratio path. Shown only when
+		// the ratio checkbox is on; runtime caps the longer axis of
+		// the rendered thumb to this value (≤ 260 ⇒ reuse PW's
+		// admin variation as source, > 260 ⇒ produce a dedicated
+		// size($longer, 0) / size(0, $longer) variation).
 		$f = $modules->get('InputfieldInteger');
-		$f->name = 'thumbQuality';
-		$f->label = $this->_('JPEG quality (1–100)');
-		$f->value = (int) ($this->get('thumbQuality') ?: ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
-		$f->min = 1;
-		$f->max = 100;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
+		$f->name = 'thumbLongerSide';
+		$f->label = $this->_('Longer side (px)');
+		$f->value = (int) ($this->get('thumbLongerSide') ?: ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
+		$f->min = 16;
+		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
+		$f->showIf = 'thumbKeepRatio=1';
 		$f->columnWidth = 50;
 		$fs->add($f);
 
 		// Keep-aspect toggle — header hidden so only the checkbox +
-		// "Keep image ratio" label remain inline at 50% width.
+		// "Keep image ratio" label remain inline at 50 % width.
 		// InputfieldCheckbox stores '1' for checked and '' for
 		// unchecked, exactly what the runtime reads back. Old
 		// "thumbCrop" key is migrated on the read side (see
@@ -87,6 +81,16 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 			$savedKR = $oldCrop === null ? true : !$oldCrop;
 		}
 		$f->checked((bool) $savedKR);
+		$f->columnWidth = 50;
+		$fs->add($f);
+
+		$f = $modules->get('InputfieldInteger');
+		$f->name = 'thumbQuality';
+		$f->label = $this->_('JPEG quality (1–100)');
+		$f->value = (int) ($this->get('thumbQuality') ?: ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
+		$f->min = 1;
+		$f->max = 100;
+		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
 		$f->columnWidth = 50;
 		$fs->add($f);
 
