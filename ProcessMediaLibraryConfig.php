@@ -19,14 +19,15 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$fs->label = $this->_('Thumbnail');
 		$fs->description = $this->_('Per-row preview image rendered into the table. Up to 260 px on the longer side the runtime reuses PW\'s lazily-generated admin image-field variation — no second resize pass per row. Beyond that, a dedicated variation is produced for the table.');
 
-		// Row order: Width + Height (crop-mode pair), Longer side
-		// (ratio-mode), Keep-ratio + Quality. Each field stays 50 %
-		// wide; the showIf rules collapse the row whichever mode is
-		// active so the visible layout flows naturally.
+		// Field order is fixed; columnWidth + showIf together produce
+		// the two visible layouts:
+		//   ratio off → Width (33) + Height (33) + Quality (34)
+		//               Keep-ratio (100)
+		//   ratio on  → Longer side (66) + Quality (34)
+		//               Keep-ratio (100)
 
 		// Width × Height define the exact crop box when keep-ratio
-		// is off; hidden under keep-ratio (the longer-side field
-		// takes over).
+		// is off; hidden under keep-ratio.
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbWidth';
 		$f->label = $this->_('Width (px)');
@@ -34,7 +35,7 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->min = 16;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_WIDTH_DEFAULT);
 		$f->showIf = 'thumbKeepRatio!=1';
-		$f->columnWidth = 50;
+		$f->columnWidth = 33;
 		$fs->add($f);
 
 		$f = $modules->get('InputfieldInteger');
@@ -44,7 +45,7 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->min = 16;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_HEIGHT_DEFAULT);
 		$f->showIf = 'thumbKeepRatio!=1';
-		$f->columnWidth = 50;
+		$f->columnWidth = 33;
 		$fs->add($f);
 
 		// Longer-side cap for the keep-ratio path. Shown only when
@@ -59,17 +60,29 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->min = 16;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
 		$f->showIf = 'thumbKeepRatio=1';
-		$f->columnWidth = 50;
+		$f->columnWidth = 66;
 		$fs->add($f);
 
-		// Keep-aspect toggle — header hidden so only the checkbox +
-		// "Keep image ratio" label remain inline at 50 % width.
-		// InputfieldCheckbox stores '1' for checked and '' for
-		// unchecked, exactly what the runtime reads back. Old
-		// "thumbCrop" key is migrated on the read side (see
-		// getThumbDims) so installs that saved the previous
-		// semantics keep working until they re-save here; fresh
-		// installs default this ON so they get the admin-cache
+		// Quality is mode-agnostic. columnWidth=34 fills the final
+		// slot in either layout: crop-mode row (33+33+34) and
+		// ratio-mode row (66+34).
+		$f = $modules->get('InputfieldInteger');
+		$f->name = 'thumbQuality';
+		$f->label = $this->_('JPEG quality (1–100)');
+		$f->value = (int) ($this->get('thumbQuality') ?: ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
+		$f->min = 1;
+		$f->max = 100;
+		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
+		$f->columnWidth = 34;
+		$fs->add($f);
+
+		// Keep-aspect toggle on its own full-width row. Header
+		// hidden so only the checkbox + "Keep image ratio" label
+		// remain. InputfieldCheckbox stores '1' for checked and ''
+		// for unchecked. Old "thumbCrop" key is migrated on the
+		// read side (see getThumbDims) so installs that saved the
+		// previous semantics keep working until they re-save here;
+		// fresh installs default this ON so they get the admin-cache
 		// reuse out of the box.
 		$f = $modules->get('InputfieldCheckbox');
 		$f->name = 'thumbKeepRatio';
@@ -81,17 +94,7 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 			$savedKR = $oldCrop === null ? true : !$oldCrop;
 		}
 		$f->checked((bool) $savedKR);
-		$f->columnWidth = 50;
-		$fs->add($f);
-
-		$f = $modules->get('InputfieldInteger');
-		$f->name = 'thumbQuality';
-		$f->label = $this->_('JPEG quality (1–100)');
-		$f->value = (int) ($this->get('thumbQuality') ?: ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
-		$f->min = 1;
-		$f->max = 100;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_QUALITY_DEFAULT);
-		$f->columnWidth = 50;
+		$f->columnWidth = 100;
 		$fs->add($f);
 
 		$inputfields->add($fs);
