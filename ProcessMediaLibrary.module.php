@@ -314,11 +314,11 @@ class ProcessMediaLibrary extends Process {
 		);
 
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
-		// Cog → module settings. Position-absolute via CSS so it sits
-		// in the heading row instead of taking a row of its own; the
-		// link target is PW's standard module-edit URL. collapse_info=1
-		// asks PW to render the edit screen with the upper info panel
-		// pre-collapsed so the actual config inputs are above the fold.
+		// Module-settings link. Position-absolute via CSS so it sits
+		// in the heading row instead of taking a row of its own.
+		// collapse_info=1 asks PW to render the edit screen with the
+		// upper info panel pre-collapsed so the actual config inputs
+		// are above the fold.
 		$cfgUrl = $this->wire('config')->urls->admin . 'module/edit/?name='
 			. urlencode($this->className()) . '&collapse_info=1';
 		$cfgTitle = $this->_('Module settings');
@@ -326,8 +326,7 @@ class ProcessMediaLibrary extends Process {
 		$out .= '<a class="ml-config-link" href="' . $sanitizer->entities($cfgUrl) . '"'
 			. ' title="' . $sanitizer->entities($cfgTitle) . '"'
 			. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
-			. '<i class="fa fa-cog" aria-hidden="true"></i>'
-			. '<span class="ml-config-label">' . $sanitizer->entities($cfgLabel) . '</span>'
+			. $sanitizer->entities($cfgLabel)
 			. '</a>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
@@ -3039,6 +3038,7 @@ class ProcessMediaLibrary extends Process {
 		/** @var \ProcessWire\InputfieldFieldset $outer */
 		$outer = $modules->get('InputfieldFieldset');
 		$outer->name      = 'mlFilters';
+		$outer->icon      = 'filter';
 		$outer->label     = $activeCount > 0
 			? sprintf($this->_('Filters (%d)'), $activeCount)
 			: $this->_('Filters');
