@@ -432,13 +432,14 @@ textarea.ml-cell-input {
 /* Inline rename input replaces the stem span in place. flex:1
    makes it fill the cell minus the ext chip; monospaced + tight
    padding match the <code> it replaces so the layout doesn't jump
-   on edit / restore. */
+   on edit / restore. font:inherit picks up the parent <code>'s
+   already-small font-size (0.85em from .ml-table code) without
+   compounding. */
 .ml-cell-filename .ml-fn-input {
 	flex: 1 1 auto;
 	min-width: 0;
 	font: inherit;
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-	font-size: 0.85em;
 	padding: 1px 4px;
 	margin: -2px 0;
 	border: 1px solid #5b8cd6;
@@ -452,6 +453,15 @@ textarea.ml-cell-input {
 .ml-cell-filename.ml-editing .ml-fn-ext {
 	flex: 0 0 auto;
 	margin-left: 2px;
+}
+/* While editing the input child carries the real focus; the
+   parent td's own focus-ring (from the A11y role="button"
+   tabindex="0") would visually compete. Drop it for the duration
+   of the edit. */
+.ml-cell-editable.ml-editing,
+.ml-cell-editable.ml-editing:focus,
+.ml-cell-editable.ml-editing:focus-visible {
+	outline: none;
 }
 /* Multilang tabs inside the popup — minimal styling that matches
    the rest of the popup (tab bar above a single visible pane). */
