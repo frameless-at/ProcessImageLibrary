@@ -33,12 +33,23 @@ class ProcessMediaLibrary extends Process {
 	 * @return array{width:int,height:int,quality:int,crop:bool}
 	 */
 	protected function getThumbDims(): array {
-		$crop = $this->get('thumbCrop');
+		// Storage migrated from "thumbCrop" (true = crop) to
+		// "thumbKeepRatio" (true = keep aspect, no crop). Both keys
+		// are still read so installs that saved the old name keep
+		// working until the admin re-saves the config; the new key
+		// takes precedence when present.
+		$keepRatio = $this->get('thumbKeepRatio');
+		if ($keepRatio === null) {
+			$oldCrop = $this->get('thumbCrop');
+			$keepRatio = $oldCrop === null ? false : !$oldCrop;
+		} else {
+			$keepRatio = (bool) $keepRatio;
+		}
 		return [
-			'width'   => max(1, (int) ($this->get('thumbWidth')   ?: self::THUMB_WIDTH_DEFAULT)),
-			'height'  => max(1, (int) ($this->get('thumbHeight')  ?: self::THUMB_HEIGHT_DEFAULT)),
-			'quality' => max(1, min(100, (int) ($this->get('thumbQuality') ?: self::THUMB_QUALITY_DEFAULT))),
-			'crop'    => $crop === null ? true : (bool) $crop,
+			'width'     => max(1, (int) ($this->get('thumbWidth')   ?: self::THUMB_WIDTH_DEFAULT)),
+			'height'    => max(1, (int) ($this->get('thumbHeight')  ?: self::THUMB_HEIGHT_DEFAULT)),
+			'quality'   => max(1, min(100, (int) ($this->get('thumbQuality') ?: self::THUMB_QUALITY_DEFAULT))),
+			'keepRatio' => $keepRatio,
 		];
 	}
 
@@ -2242,10 +2253,15 @@ class ProcessMediaLibrary extends Process {
 			}
 			if (!$img instanceof Pageimage) continue;
 
-			$thumbImg = $img->size($thumb['width'], $thumb['height'], [
+			// Keep-ratio mode: pass height=0 so PW scales by width
+			// alone and the configured height is ignored entirely
+			// (row heights then vary per image's native aspect).
+			// Otherwise: exact width × height with center crop.
+			$thumbH = $thumb['keepRatio'] ? 0 : $thumb['height'];
+			$thumbImg = $img->size($thumb['width'], $thumbH, [
 				'upscaling' => false,
 				'quality'   => $thumb['quality'],
-				'cropping'  => $thumb['crop'],
+				'cropping'  => !$thumb['keepRatio'],
 			]);
 			$row['thumbUrl']    = $thumbImg->url;
 			$row['thumbWidth']  = (int) $thumbImg->width;

@@ -28,12 +28,18 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->columnWidth = 33;
 		$fs->add($f);
 
+		// Height only matters when thumbs are center-cropped to an
+		// exact box. When "Keep image ratio" is on, runtime ignores
+		// height entirely (scales by width alone) so the field hides
+		// to avoid suggesting otherwise. showIf uses PW's selector
+		// syntax: shown only while thumbKeepRatio is empty/unchecked.
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbHeight';
 		$f->label = $this->_('Height (px)');
 		$f->value = (int) ($this->get('thumbHeight') ?: ProcessMediaLibrary::THUMB_HEIGHT_DEFAULT);
 		$f->min = 16;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_HEIGHT_DEFAULT);
+		$f->showIf = 'thumbKeepRatio=';
 		$f->columnWidth = 33;
 		$fs->add($f);
 
@@ -47,20 +53,25 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		$f->columnWidth = 34;
 		$fs->add($f);
 
-		// Crop toggle. InputfieldCheckbox comes with checkedValue='1'
-		// and uncheckedValue='' out of the box, so submission of an
-		// unchecked box persists as '' (false-y) and a checked one as
-		// '1' (truthy) — exactly what the runtime helper expects.
+		// Keep-aspect toggle. InputfieldCheckbox stores '1' for
+		// checked and '' for unchecked, exactly what the runtime
+		// reads back. Old "thumbCrop" key is migrated on the read
+		// side (see getThumbDims) so installs that saved the
+		// previous semantics keep working until they re-save here.
 		$f = $modules->get('InputfieldCheckbox');
-		$f->name = 'thumbCrop';
-		$f->label = $this->_('Crop thumbnail to exact dimensions');
+		$f->name = 'thumbKeepRatio';
+		$f->label = $this->_('Keep image ratio');
 		$f->label2 = $this->_('Enabled');
-		$f->description = $this->_('When enabled, the thumb fills the full width × height box (center-crop). When disabled, the thumb fits within the box keeping the original aspect ratio — heights may vary per row.');
-		$saved = $this->get('thumbCrop');
-		// null = never saved → default ON to match PW's $img->size()
-		// default + the pre-config behaviour.
-		$f->checked(($saved === null) ? true : (bool) $saved);
-		$f->notes = $this->_('Default: enabled');
+		$f->description = $this->_('When enabled, thumbnails scale to the configured width and keep each image\'s native aspect ratio — row heights vary per image. When disabled, thumbnails are center-cropped to the exact width × height box.');
+		$savedKR = $this->get('thumbKeepRatio');
+		if ($savedKR === null) {
+			// First render after upgrade: derive from the legacy
+			// thumbCrop key (true = crop ⇒ keepRatio off).
+			$oldCrop = $this->get('thumbCrop');
+			$savedKR = $oldCrop === null ? false : !$oldCrop;
+		}
+		$f->checked((bool) $savedKR);
+		$f->notes = $this->_('Default: disabled (center-cropped to exact dimensions)');
 		$f->columnWidth = 100;
 		$fs->add($f);
 
