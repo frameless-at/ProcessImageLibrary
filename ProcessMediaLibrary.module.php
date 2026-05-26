@@ -2912,22 +2912,26 @@ class ProcessMediaLibrary extends Process {
 		$outer->label     = $this->_('Filters');
 		$outer->collapsed = $active ? Inputfield::collapsedNo : Inputfield::collapsedYes;
 
-		// Row 1: q + template + field, 33% each.
+		// Row 1: Search alone on a full-width row. Primary entry
+		// point for the filter UI — wide so typing has space and so
+		// the placeholder hint stays fully visible.
 		$q = $modules->get('InputfieldText');
 		$q->name        = 'q';
 		$q->label       = $this->_('Search');
 		$q->placeholder = $this->_('Page title, description, tags, filename, customs');
 		$q->value       = $filters['q'];
-		$q->columnWidth = 33;
+		$q->columnWidth = 100;
 		$outer->add($q);
 
+		// Row 2: Template + Image field — both narrow the scope, so
+		// they belong paired. 50/50 instead of the old 33/33/34.
 		$tpl = $modules->get('InputfieldSelect');
 		$tpl->name        = 'template';
 		$tpl->label       = $this->_('Template');
 		$tpl->addOption('', $this->_('All templates'));
 		foreach ($eligibleTemplates as $t) $tpl->addOption($t, $t);
 		$tpl->value       = $filters['template'];
-		$tpl->columnWidth = 33;
+		$tpl->columnWidth = 50;
 		$outer->add($tpl);
 
 		$fld = $modules->get('InputfieldSelect');
@@ -2936,7 +2940,7 @@ class ProcessMediaLibrary extends Process {
 		$fld->addOption('', $this->_('All image fields'));
 		foreach ($imageFields as $f) $fld->addOption($f, $f);
 		$fld->value       = $filters['field'];
-		$fld->columnWidth = 34; // 33+33+34=100
+		$fld->columnWidth = 50;
 		$outer->add($fld);
 
 		// Tags fieldset (full width, always open when present so the
@@ -2964,7 +2968,17 @@ class ProcessMediaLibrary extends Process {
 			$outer->add($tagsFs);
 		}
 
-		// Missing-X — each as InputfieldCheckbox, 25% wide.
+		// Missing-X grouped in a sub-fieldset with a hidden header.
+		// The wrap pins the checkbox group to its own block (any
+		// custom-field count fans out below predictably) and forces
+		// the action row that follows onto a fresh row regardless of
+		// how the 25%-wide checkboxes happen to land.
+		/** @var \ProcessWire\InputfieldFieldset $missingFs */
+		$missingFs = $modules->get('InputfieldFieldset');
+		$missingFs->name        = 'mlMissing';
+		$missingFs->skipLabel   = Inputfield::skipLabelHeader;
+		$missingFs->columnWidth = 100;
+
 		$missingDef = [
 			'no_desc' => $this->_('Missing description'),
 			'no_tags' => $this->_('Missing tags'),
@@ -2984,26 +2998,36 @@ class ProcessMediaLibrary extends Process {
 				$key = substr($name, strlen('no_custom_'));
 				if (!empty($filters['no_custom'][$key])) $cb->attr('checked', 'checked');
 			}
-			$outer->add($cb);
+			$missingFs->add($cb);
 		}
+		$outer->add($missingFs);
 
-		// Apply + Reset, side by side. Reset is a real <a> via
-		// InputfieldButton(href=…) so graceful degradation works; JS
-		// intercepts the click for AJAX reset. .ml-reset stays a hook for
-		// the JS visibility toggle and click handler.
-		$apply = $modules->get('InputfieldSubmit');
-		$apply->name        = 'apply';
-		$apply->value       = $this->_('Apply');
-		$apply->columnWidth = 50;
-		$outer->add($apply);
+		// Apply + Reset wrapped in their own sub-fieldset so they
+		// always sit on a dedicated row (independent of how the
+		// missing-X grid wrapped above). Flex-right via .ml-filter-bar
+		// CSS pulls them to the row's right edge, with Reset to the
+		// left of Apply — the conventional "secondary then primary"
+		// order for action button pairs. Reset stays a real <a>; JS
+		// intercepts it for AJAX reset.
+		/** @var \ProcessWire\InputfieldFieldset $actionsFs */
+		$actionsFs = $modules->get('InputfieldFieldset');
+		$actionsFs->name        = 'mlActions';
+		$actionsFs->skipLabel   = Inputfield::skipLabelHeader;
+		$actionsFs->columnWidth = 100;
 
 		$reset = $modules->get('InputfieldButton');
-		$reset->name        = 'reset';
-		$reset->value       = $this->_('Reset');
+		$reset->name = 'reset';
+		$reset->value = $this->_('Reset');
 		$reset->attr('href', './');
 		$reset->addClass('ml-reset');
-		$reset->columnWidth = 50;
-		$outer->add($reset);
+		$actionsFs->add($reset);
+
+		$apply = $modules->get('InputfieldSubmit');
+		$apply->name  = 'apply';
+		$apply->value = $this->_('Apply');
+		$actionsFs->add($apply);
+
+		$outer->add($actionsFs);
 
 		$form->add($outer);
 
