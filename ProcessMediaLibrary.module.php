@@ -1774,14 +1774,16 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * @return array<int,string> names of every FieldtypeImage field in the system
+	 * @return array<int,string> names of every FieldtypeImage field in the system,
+	 *                           minus those listed in the module's field blacklist
 	 */
 	protected function discoverImageFields(): array {
+		$blacklist = array_flip($this->getBlacklistedFields());
 		$names = [];
 		foreach ($this->wire('fields') as $field) {
-			if ($field->type instanceof FieldtypeImage) {
-				$names[] = $field->name;
-			}
+			if (!($field->type instanceof FieldtypeImage)) continue;
+			if (isset($blacklist[$field->name])) continue;
+			$names[] = $field->name;
 		}
 		return $names;
 	}
@@ -2029,7 +2031,8 @@ class ProcessMediaLibrary extends Process {
 
 	/**
 	 * Read and validate the sort/dir GET params. Invalid sort keys fall back
-	 * to the default; this prevents users from injecting arbitrary keys into
+	 * to the admin-configured default (or the class constant if nothing's
+	 * been saved); this prevents users from injecting arbitrary keys into
 	 * the row arrays via the URL.
 	 *
 	 * @return array{sort:string,dir:string}
@@ -2043,12 +2046,30 @@ class ProcessMediaLibrary extends Process {
 		foreach ($customCols as $name) $whitelist[] = 'custom:' . $name;
 
 		if (!in_array($sort, $whitelist, true)) {
-			$sort = self::DEFAULT_SORT;
-			$dir  = self::DEFAULT_DIR;
+			$sort = $this->getDefaultSort();
+			$dir  = $this->getDefaultSortDir();
 		}
 		if ($dir !== 'desc') $dir = 'asc';
 
 		return ['sort' => $sort, 'dir' => $dir];
+	}
+
+	/**
+	 * Admin-configured default sort column, validated against the
+	 * SORTABLE_COLUMNS whitelist so a stale config entry can't smuggle
+	 * an arbitrary key into the row-lookup later.
+	 */
+	protected function getDefaultSort(): string {
+		$val = (string) $this->get('defaultSort');
+		return array_key_exists($val, self::SORTABLE_COLUMNS) ? $val : self::DEFAULT_SORT;
+	}
+
+	/**
+	 * Admin-configured default sort direction — only 'asc' / 'desc'
+	 * are accepted; anything else maps to 'asc'.
+	 */
+	protected function getDefaultSortDir(): string {
+		return ((string) $this->get('defaultSortDir') === 'desc') ? 'desc' : 'asc';
 	}
 
 	/**
@@ -2893,17 +2914,21 @@ class ProcessMediaLibrary extends Process {
 		$form->attr('class', trim($form->attr('class') . ' ml-filter-bar'));
 
 		// Hidden sort/dir — at form level so they're never inside the
-		// (collapsible) outer fieldset and always submit cleanly.
-		if ($sort !== '' && $sort !== self::DEFAULT_SORT) {
+		// (collapsible) outer fieldset and always submit cleanly. Only
+		// emitted when the current state differs from the configured
+		// default so clean URLs stay clean for the no-override case.
+		$defSort = $this->getDefaultSort();
+		$defDir  = $this->getDefaultSortDir();
+		if ($sort !== '' && $sort !== $defSort) {
 			$h = $modules->get('InputfieldHidden');
 			$h->name  = 'sort';
 			$h->value = $sort;
 			$form->add($h);
 		}
-		if ($dir === 'desc') {
+		if ($dir !== '' && $dir !== $defDir) {
 			$h = $modules->get('InputfieldHidden');
 			$h->name  = 'dir';
-			$h->value = 'desc';
+			$h->value = $dir;
 			$form->add($h);
 		}
 
@@ -3380,6 +3405,12 @@ class ProcessMediaLibrary extends Process {
 
 	protected function buildUrl(array $filters, int $page, string $sort = '', string $dir = '', ?int $pageSize = null): string {
 		$pageSize = $pageSize ?? $this->getDefaultPageSize();
+		// Omit sort / dir when they match the admin-configured defaults
+		// so the URL stays clean for the no-override case. If the
+		// configured default is "basename desc", that URL has no
+		// ?sort= or ?dir= at all; explicit overrides remain visible.
+		$defSort = $this->getDefaultSort();
+		$defDir  = $this->getDefaultSortDir();
 		$params = [
 			'q'              => $filters['q'],
 			'template'       => $filters['template'],
@@ -3387,8 +3418,8 @@ class ProcessMediaLibrary extends Process {
 			'no_desc'        => $filters['no_desc'] ? '1' : '',
 			'no_tags'        => $filters['no_tags'] ? '1' : '',
 			'p'              => $page > 1 ? (string) $page : '',
-			'sort'           => ($sort !== '' && $sort !== self::DEFAULT_SORT) ? $sort : '',
-			'dir'            => $dir === 'desc' ? 'desc' : '',
+			'sort'           => ($sort !== '' && $sort !== $defSort) ? $sort : '',
+			'dir'            => ($dir !== '' && $dir !== $defDir) ? $dir : '',
 			'ps'             => $pageSize !== $this->getDefaultPageSize() ? (string) $pageSize : '',
 		];
 		foreach ($filters['no_custom'] ?? [] as $name => $on) {
@@ -3411,7 +3442,28 @@ class ProcessMediaLibrary extends Process {
 	 * @return array<int,string>
 	 */
 	protected function getBlacklistedTemplates(): array {
-		$raw = $this->get('blacklistedTemplates');
+		return $this->normalizeBlacklist($this->get('blacklistedTemplates'));
+	}
+
+	/**
+	 * Returns the image-field-name blacklist from module settings —
+	 * lets the admin exclude a specific FieldtypeImage field regardless
+	 * of which template hosts it.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function getBlacklistedFields(): array {
+		return $this->normalizeBlacklist($this->get('blacklistedFields'));
+	}
+
+	/**
+	 * Shared parser for the two AsmSelect-backed blacklists. Accepts
+	 * the modern array shape and the legacy comma/space string so a
+	 * pre-AsmSelect upgrade path still resolves correctly.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function normalizeBlacklist($raw): array {
 		if (!$raw) return [];
 		if (is_array($raw)) return array_values(array_filter(array_map('trim', $raw)));
 		return preg_split('/[\s,]+/', (string) $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
