@@ -727,10 +727,54 @@
 			});
 		}
 
+		// Lazy-built <dialog> for the bulk-result report. Replaces the
+		// previous alert() which blocked the page and turned unreadable
+		// once more than a handful of failures were involved. Both the
+		// header (counts / top-level error) and the scrollable list
+		// (per-row failures) update on each open; on close the dialog
+		// stays in the DOM so reopening is instant. Backdrop click and
+		// the close button both dismiss.
+		var bulkDialog = null;
+		function getBulkDialog() {
+			if (bulkDialog) return bulkDialog;
+			bulkDialog = document.createElement('dialog');
+			bulkDialog.className = 'ml-bulk-result-dialog';
+			bulkDialog.innerHTML =
+				'<header class="ml-bulk-result-header"></header>'
+				+ '<ul class="ml-bulk-result-list"></ul>'
+				+ '<footer><button type="button" class="ml-bulk-result-close">'
+				+ ((labels && labels.close) ? labels.close : 'Close')
+				+ '</button></footer>';
+			root.appendChild(bulkDialog);
+			bulkDialog.addEventListener('click', function (e) {
+				if (e.target === bulkDialog
+					|| (e.target.classList && e.target.classList.contains('ml-bulk-result-close'))
+				) {
+					bulkDialog.close();
+				}
+			});
+			return bulkDialog;
+		}
+		function showBulkResult(headerText, failedLines) {
+			var dlg  = getBulkDialog();
+			var hdr  = dlg.querySelector('.ml-bulk-result-header');
+			var list = dlg.querySelector('.ml-bulk-result-list');
+			hdr.textContent = headerText;
+			list.innerHTML = '';
+			(failedLines || []).forEach(function (line) {
+				var li = document.createElement('li');
+				li.textContent = line;
+				list.appendChild(li);
+			});
+			list.hidden = !(failedLines && failedLines.length);
+			if (typeof dlg.showModal === 'function') dlg.showModal();
+			else dlg.setAttribute('open', '');
+		}
+
 		function reportBulk(result) {
 			var d = (result && result.data) || {};
 			if (!d.ok) {
-				alert(d.error || labels.error || 'Bulk action failed');
+				showBulkResult(d.error || labels.error || 'Bulk action failed', []);
 				return false;
 			}
 			var failedCount = (d.failed || []).length;
@@ -738,7 +782,7 @@
 				var msg = (labels.bulkResult || 'Succeeded: %1$d  ·  Failed: %2$d')
 					.replace('%1$d', d.succeeded)
 					.replace('%2$d', failedCount);
-				alert(msg + '\n\n' + d.failed.join('\n'));
+				showBulkResult(msg, d.failed);
 			}
 			return true;
 		}
