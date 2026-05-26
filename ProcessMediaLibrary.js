@@ -74,6 +74,24 @@
 			var cls = ok ? 'ml-cell-saved' : 'ml-cell-error';
 			td.classList.add(cls);
 			setTimeout(function () { td.classList.remove(cls); }, 1200);
+			announce((ok ? (labels.saved || 'Saved') : (labels.error || 'Save failed')));
+		}
+
+		// Push a short message into the visually-hidden live region so
+		// screen readers pick up state changes (saves, errors) that the
+		// sighted UI signals only with a colour flash.
+		var liveRegion = root.querySelector('.ml-live-region');
+		var announceTimer = null;
+		function announce(msg) {
+			if (!liveRegion || !msg) return;
+			// Clearing first forces re-announcement even when the same
+			// message fires twice in a row (e.g. two saves landed at the
+			// same instant).
+			liveRegion.textContent = '';
+			clearTimeout(announceTimer);
+			announceTimer = setTimeout(function () {
+				liveRegion.textContent = msg;
+			}, 30);
 		}
 
 		// Column header text for the cell, used as the popup dialog's
@@ -776,6 +794,24 @@
 				activateEditor(td);
 			});
 
+			// Keyboard activation: editable cells + thumb cells carry
+			// role="button" tabindex="0" server-side, so Tab focuses
+			// them; Enter / Space here mirrors a mouse click.
+			results.addEventListener('keydown', function (e) {
+				if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+				var thumbTd = e.target.closest && e.target.closest('.ml-cell-thumb[data-file-hash]');
+				if (thumbTd && e.target === thumbTd) {
+					e.preventDefault();
+					openImageEditor(thumbTd);
+					return;
+				}
+				var editTd = e.target.closest && e.target.closest('.ml-cell-editable');
+				if (editTd && e.target === editTd && !editTd.classList.contains('ml-editing')) {
+					e.preventDefault();
+					activateEditor(editTd);
+				}
+			});
+
 			// Checkbox state changes.
 			results.addEventListener('change', function (e) {
 				var t = e.target;
@@ -1176,6 +1212,38 @@
 			});
 		});
 		wireColumnDragDrop();
+
+		// Keyboard-friendly reorder: each row in the columns dialog
+		// carries ▲ / ▼ buttons that swap the row with its
+		// predecessor / successor and persist + re-sort the table
+		// just like the drag path. Focus stays on the moved button so
+		// repeated presses keep working without re-tabbing.
+		(function wireColumnReorderButtons() {
+			var list = document.querySelector('.ml-columns-list');
+			if (!list) return;
+			list.addEventListener('click', function (e) {
+				var btn = e.target.closest && e.target.closest('.ml-col-move');
+				if (!btn) return;
+				e.preventDefault();
+				var li = btn.closest('li');
+				if (!li) return;
+				var dir = btn.dataset.dir;
+				if (dir === 'up' && li.previousElementSibling) {
+					list.insertBefore(li, li.previousElementSibling);
+				} else if (dir === 'down' && li.nextElementSibling) {
+					list.insertBefore(li.nextElementSibling, li);
+				} else {
+					return;
+				}
+				columnsOrder = Array.prototype.map.call(
+					list.querySelectorAll('li input[type="checkbox"]'),
+					function (cb) { return cb.dataset.col; }
+				);
+				saveUserPrefs();
+				applyColumnOrder();
+				btn.focus();
+			});
+		})();
 		applyColumnVisibility();
 		applyColumnOrder();
 

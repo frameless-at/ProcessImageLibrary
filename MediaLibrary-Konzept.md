@@ -10,22 +10,25 @@ Ein ProcessWire-Modul, das **alle Bilder einer PW-Installation** in einer einzig
 
 ## Scope
 
-**In-Scope:**
+**In-Scope (umgesetzt):**
 
-- Aggregiert Bilder aus **allen** `FieldtypeImage`-Feldern auf **allen** Templates der Installation
+- Aggregiert Bilder aus **allen** `FieldtypeImage`-Feldern auf **allen** Templates der Installation (mit konfigurierbaren Template- und Field-Blacklists)
 - Jede Tabellen-Zeile = Tupel `(page, fieldName, basename)`
-- Inline-Edit der editable Subfields (Description, Tags, Custom-Felder)
+- Inline-Edit der editable Subfields (Description, Tags, Custom-Felder); Textarea-Customs öffnen einen Popup
+- **Mehrsprachige Subfields**: per-Sprache-Tabs im Popup, Roundtrip in JSON/CSV-Export-Import
+- **Bulk-Edit** via „Selection als Pinsel": markierte Rows werden gemeinsam mit der nächsten Cell-Save in Add- oder Replace-Mode aktualisiert
+- **Variations-Spalte**: pro Bild Zähler aus `$img->getVariations()`
+- **Export / Import**: JSON und CSV (mit multilang-aware Spalten-Suffixen `<subfield>_<langName>`)
 - Server-side Filter / Sortierung / Pagination
-- Spalten-Konfiguration per User
+- Spalten-Konfiguration per User in `$user->meta('mediaLibraryPrefs')` — **cross-device**, inklusive Page-Size
 - Auto-Erkennung von **Custom Fields on Images** (`field-{fieldname}`-Template, PW 3.0.142+)
 
-**Out-of-Scope (Phase 1):**
+**Out-of-Scope (auch in der aktuellen Version):**
 
 - Bilder hochladen / löschen / verschieben zwischen Pages
-- Bulk-Edit per Multi-Select
-- Variations-Management (Crop / Focus / Re-Generate)
-- Mehrsprachige Subfields
+- Variations-Management (Crop / Focus / Re-Generate) — Modul zeigt den Variations-Zähler, regeneriert aber nicht
 - Re-Sort innerhalb eines Image-Felds (`$img->sort`)
+- Bulk-Delete / File-Rename / Replace-Image (mögliche Phase-2-Themen)
 
 ## Architektur
 
@@ -47,10 +50,14 @@ ProcessMediaLibrary/
 
 **Methods:**
 
-- `___execute()` — Tabelle + Filter-UI rendern (Server-rendered HTML; JS hydratisiert für Interaktion)
-- `___executeData()` — AJAX-GET, returnt JSON: paginated rows + total-count + filter-summaries
-- `___executeSave()` — AJAX-POST, validiert + speichert eine Cell-Änderung, returnt JSON
-- `___install()` / `___uninstall()` — Admin-Page-Lifecycle
+- `___execute()` — Tabelle + Filter-UI rendern (Server-rendered HTML; JS hydratisiert für Interaktion). Spalten-Picker liegt als sibling-`<dialog>` neben `.ml-results` damit AJAX-Swaps Drag/Toggle-Handler intakt lassen.
+- `___executeData()` — AJAX-GET, returnt nur den `.ml-results`-Block (Tabelle + Pagination) für Filter/Sort/Page-Swaps.
+- `___executeSave()` — AJAX-POST, validiert + speichert eine Cell-Änderung, gibt JSON zurück. Multilang-aware: payload kann `langId` tragen, dann wird nur dieser Sprach-Slot geschrieben.
+- `___executeBulk()` — AJAX-POST: identische Cell-Save auf eine Selektion anwenden (Add- oder Replace-Mode).
+- `___executeExport()` — Direct-Download von JSON oder CSV unter Berücksichtigung der aktiven Filter.
+- `___executeImport()` — AJAX-POST, akzeptiert eine vorher exportierte (und extern bearbeitete) JSON/CSV-Datei und schreibt zurück; idempotent (unverändert gebliebene Items werden geskippt).
+- `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size in `$user->meta('mediaLibraryPrefs')` (debounced).
+- `___install()` / `___uninstall()` — Admin-Page-Lifecycle + Permission `media-library-access`.
 
 ## Datenmodell (PW-nativ)
 
@@ -138,18 +145,11 @@ Jede Tabellen-Zeile ist identifiziert durch das Tupel `(pageId, fieldName, basen
 
 **Caching:**
 
-`findRaw`-Resultat wird gecacht mit **selektiver Template-Invalidation**:
+`findRaw`-Resultat wird via `WireCache::saveFor($this, ...)` gecacht. Invalidiert wird **dreifach abgesichert**:
 
-```php
-$key    = "media-library-raw";
-$cached = wire('cache')->get($key);
-if (!is_array($cached)) {
-    $cached = $pages->findRaw($selector, $fields);
-    wire('cache')->save($key, $cached, "template=" . implode('|', $eligibleTemplates));
-}
-```
-
-PW invalidiert den Cache automatisch wenn eine Page mit einem dieser Templates gespeichert wird — also auch die eigenen Cell-Saves via Save-Endpoint. Cache ist immer konsistent ohne manuellen Invalidations-Code.
+1. **Explicit** nach jedem eigenen Save/Bulk/Import (`$cache->deleteFor($this)` direkt nach `$page->save()`).
+2. **Hook auf `Pages::saved`** in `init()` — wenn eine Page mit einem managed Image-Field außerhalb des Moduls gespeichert wird (z. B. im nativen ProcessPageEdit), wird der Row-Cache gedroppt damit das nächste Listing die frischen Werte zeigt.
+3. **Cache-Key-Hash** über `imageFields + eligibleTemplates`-Liste, damit Schema-Änderungen (neue Image-Felder, geänderte Template-Auswahl) automatisch zu neuen Keys führen.
 
 **Save-Pfad (pure PW-API):**
 
@@ -215,52 +215,46 @@ Auto-entdeckt (alle Custom-Field-Subfields des `field-{fieldname}`-Templates):
   - Page-Reference → Select / Multi-Select
   - Datetime → Date-Picker
 
-**Konfig:** Per User in `$user->meta('mediaLibraryColumns')`. Default-Set: Pflicht + Description + Tags + Custom-Fields.
+**Konfig:** Per User in `$user->meta('mediaLibraryPrefs')` — Cross-device-persistiert via `___executeUserPrefs`. Struktur: `{columns: {visible: {col: bool}, order: [col]}, pageSize: int|null}`. Default-Set: Pflicht + Description + Tags + Custom-Fields (Admin kann eine Default-Hidden-Liste in der Module-Config setzen).
 
 ## Edit-Semantik
 
 **Inline-Edit pro Zelle:**
 
-1. Klick auf Zelle → Input/Textarea ersetzt Display-Wert
-2. Blur ODER Enter → AJAX-POST mit `{ pageId, fieldName, basename, subfield, value }`
-3. Server: validiert (Tag-Whitelist wenn `useTags=2`, etc.), führt `$page->save()` aus, returnt `{ ok, value }`
-4. UI: optimistic update, grüner Check / rotes X mit Error-Tooltip bei Fehler
-5. Cache wird durch das `$page->save()` automatisch invalidiert
+1. Klick (oder Tastatur-Enter/Space — die Zellen sind `role="button" tabindex="0"`) auf Zelle → Input/Textarea ersetzt Display-Wert. Textarea-Customs öffnen einen modalen Popup mit Multilang-Tabs wenn die Installation Languages aktiviert hat.
+2. Blur ODER Enter → AJAX-POST mit `{ pageId, fieldName, basename, subfield, value, langId? }`
+3. Server: validiert (Tag-Whitelist wenn `useTags=2`, etc.), führt `$page->save()` aus, returnt `{ ok, value }` oder `{ ok: false, error }`.
+4. UI: optimistic update, grüner Check / rotes X. Beide Status-Wechsel werden zusätzlich in eine visually-hidden `aria-live`-Region geschrieben, damit Screen Reader sie picken.
+5. Cache wird sowohl explicit als auch durch den `Pages::saved`-Hook invalidiert.
 
-**Save-Queue:** Mehrere Edits werden seriell geschickt — keine parallelen `$page->save()`-Aufrufe auf derselben Page (vermeidet ChangeTracker-Races).
+**Bulk-Edit (Selection als Pinsel):** Wenn die editierte Zelle zu einer aktiven Selektion gehört, blendet sich beim Save ein „Add / Replace"-Picker ein. Auswahl + Commit verteilt die neue Value auf alle selektierten Rows mit derselben Subfield-Adressierung.
+
+**Save-Queue:** Mehrere Edits werden pro PageId seriell geschickt — keine parallelen `$page->save()`-Aufrufe auf derselben Page (vermeidet ChangeTracker-Races).
 
 ## Filter
 
-UI-Bar oberhalb der Tabelle:
+Klappbares „Filters"-Fieldset (Icon `fa-filter`) oberhalb der Tabelle. Das Label trägt einen `(N)`-Suffix mit der Zahl der aktiven Filter, damit der Zustand auch bei zugeklapptem Fieldset sichtbar bleibt.
 
 | Filter | Wo gefiltert | Notiz |
 |---|---|---|
-| Volltextsuche in description+tags | PW-Selector wo möglich, sonst PHP | Word-Match |
-| Template-Filter | PW-Selector | `template=foo\|bar` |
-| Image-Feld-Filter | PHP nach `findRaw` | mehrere Felder vom Modul aggregiert |
-| „Nur ohne Description" | PW-Selector + PHP-Verifikation | Selector filtert Pages mit ≥1 Match, PHP verifiziert pro Bild |
-| „Nur ohne Tags" | dito | dito |
-| Tag-Filter | PHP nach `findRaw` | Multi-Select aus tatsächlich vergebenen Tags |
+| Volltextsuche (Page-Title, description, tags, filename, customs) | PHP | Word-Match, multilang-aware |
+| Template-Filter | PHP | aus `eligibleTemplates` |
+| Image-Feld-Filter | PHP | aus `imageFields`, narrowt das Custom-Field-Dropdown |
+| „Missing description" / „Missing tags" | PHP | pro Bild verifiziert |
+| „Missing &lt;custom&gt;" | PHP | je Custom-Subfield ein eigener Checkbox-Filter, dynamisch |
+| Tags | PHP | Multi-Select aus tatsächlich vergebenen Tags, AND-Semantik |
 
-Filter werden URL-state-persisted (`?missing=desc&tpl=foo`), bookmarkbar.
+Filter werden URL-state-persisted und sind bookmarkbar. Tags werden als komma-separierter Wert (`?tags=foo,bar`) emittiert; die alte Bracket-Form (`?tags[]=…`) bleibt akzeptiert. Nach „Apply" klappt das Fieldset automatisch ein damit die Resultate-Tabelle freie Sicht hat.
 
 ## Sortierung
 
-Spalten-Klick toggelt ascending/descending. Sortierbar:
+Spalten-Klick toggelt ascending/descending. Sortierbare Felder: Page-Title, Field, Filename, Description, Tags, Width, Filesize sowie alle Custom-Subfields via `custom:<name>`.
 
-- Page (alphabetisch)
-- Field
-- Filename
-- Description (leere zuerst / zuletzt toggleable)
-- Tags
-- Filesize
-- Dimensions (Pixel-Fläche)
-
-Default: Page-Title aufsteigend, innerhalb einer Page die native Sort-Position des Felds.
+**Default**: in der Module-Config (Fieldset „Default sort") wählbar — Column + Direction. Built-in-Default ist `pageTitle asc`. URL-Override (`?sort=basename&dir=desc`) gewinnt; URLs lassen sort/dir weg wenn sie dem konfigurierten Default entsprechen, damit geteilte Links übersichtlich bleiben.
 
 ## Pagination
 
-50 Rows/Seite als Default. URL-State `?p=3`. Total-Count + „Seite 3 von 25". Optional Picker (25/50/100/200).
+50 Rows/Seite als built-in-Default (Module-Config überschreibbar). URL-State `?p=3` + `?ps=100`. Total-Count + „Page 3 of 25" in der Pagination-Zeile. Picker im Pagination-Block (Optionen ebenfalls Module-Config) — Auswahl persistiert in `$user->meta('mediaLibraryPrefs').pageSize`, gilt also cross-device. Die Pagination-Zeile wird oben und unten gerendert; rechts daneben ein `fa-columns`-Icon, das den Spalten-Picker-Dialog öffnet.
 
 ## Permissions
 
@@ -295,35 +289,28 @@ MIT (oder GPL, je nach Repo-Konvention). Modul sollte als Public-Module auf modu
 - Lässt User-Meta (`mediaLibraryColumns`) stehen (User-Setting, nicht Modul-State)
 - Optional Permission stehen lassen (User entscheidet manuell)
 
-## Open Questions
+## Beantwortete Open Questions
 
-1. **Template-Whitelist**: Auto-discovery aller Templates mit Image-Feldern (Default), oder konfigurierbar via Module-Settings (Whitelist/Blacklist)? Vorschlag: Auto-discovery + optionale Blacklist in Module-Settings.
+- **Template-Whitelist** → Auto-discovery + optionale Blacklist in Module-Config (`blacklistedTemplates`, `blacklistedFields`).
+- **1-Image-Felder** → mit aufgenommen, kein gesonderter Schalter.
+- **Custom-Field-Spalten Default-Sichtbarkeit** → auto-sichtbar; Admin kann pro Spalte über `defaultHiddenColumns` ausblenden, User per Spalten-Picker.
+- **Spaltenkonfig-Scope** → `$user->meta('mediaLibraryPrefs')`, cross-device.
+- **Edit-Modus** → Inline-Auto-Save bei Blur/Enter.
+- **Filter-URL-State** → URL-Params, bookmarkbar (Tags als komma-separierter `?tags=…`-Wert).
+- **Bulk-Operations** → Selection-als-Pinsel umgesetzt (Add/Replace-Modes). Bulk-Delete und File-Rename bleiben offen.
+- **Page-Size** → 50 Default, Picker mit konfigurierbarer Options-Liste, Auswahl in `$user->meta`.
+- **Permission-Granularität** → beides: `media-library-access` als Hard-Gate für die Admin-Page, `$page->editable()` pro Cell-Save.
+- **Variations-Spalte** → umgesetzt (read-only Zähler).
+- **Modul-Info / Versioning** → SemVer, GitHub-Tags. Composer-Support nicht aktiv geplant.
 
-2. **1-Image-Felder** (`maxFiles=1`): Mit aufnehmen oder per Default ausblenden mit Schalter? Bei 1-Image-Felds (z.B. typische `lead_image`-Felder) ist die Tabelle weniger nützlich als bei Mehrfach-Galerien. Vorschlag: mit-aufnehmen, aber separate Spalten-Gruppierung oder Filter-Default-Aus.
+## Verbleibende Open Questions
 
-3. **Custom-Field-Spalten Default-Sichtbarkeit**: Auto-sichtbar wenn vorhanden, oder default versteckt und Editor schaltet selbst zu?
+1. **Mobile**: aktuell flex-wrap + horizontal-scrollende Tabelle. Reicht das oder lohnt ein dedizierter Card-View < 640 px?
 
-4. **Spaltenkonfig-Scope**: Per User in `$user->meta` (Vorschlag) oder global pro Modul-Instanz (Module-Settings)?
+2. **Skalierung jenseits ~10k Bilder**: Aktueller Pfad `findRaw + WireCache::saveFor` ist linear in der Anzahl Image-Rows. Ab 30k+ wird der Cache-Re-build spürbar. Pfad zu `findMany` + per-Image-Index ist im Konzept dokumentiert, aber noch nicht beziffert.
 
-5. **Edit-Modus**:
+3. **Bulk-Delete / File-Rename / Replace-Image** als Phase-2-Feature-Set: Bedarfsabhängig vom Editor-Workflow.
 
-   - (a) Inline-Auto-Save bei Blur (Vorschlag — flüssiges Abarbeiten)
-   - (b) „Edit-Modus"-Toggle mit „Save all"-Batch-Button
+4. **WebP / AVIF / SVG / animated GIF** als Original-Format: aktuell wird `$img->size()` blind aufgerufen. Funktioniert, aber SVG → PNG (Rasterisierung), animierte GIFs werden statisch. Hinweis im UI sinnvoll?
 
-6. **Filter-URL-State**: Bookmarkbar via URL-Params (Vorschlag) oder Session-only?
-
-7. **Bulk-Operations**: Phase 1 oder Phase 2? Mögliche Operationen: gleichen Tag auf eine Auswahl, Description-Template, Bulk-Delete-Confirm.
-
-8. **Page-Size**: 50 Default OK? Picker?
-
-9. **Vorhandene Module recherchieren**: Vor Build-Start auf modules.processwire.com nach „media library", „file manager", „image manager", „media manager" suchen. Bekannt: Kongondo's „Media Manager" (kommerziell, anderes Datenmodell — Bilder als Pages). Falls etwas Brauchbares existiert: forken oder gemeinsam entscheiden.
-
-10. **Permission-Granularität**: Reicht implizite Vererbung via `$page->editable()` pro Cell (Vorschlag), oder zusätzliche `media-library-access`-Permission als Hard-Gate?
-
-11. **Mobile**: Responsive nötig oder Desktop-only?
-
-12. **Variations-Spalte (Phase 2)**: Pro Bild zeigen welche Varianten existieren (`$img->getVariations()`)? Nützlich für Pre-Warm-Diagnose und Cleanup, aber Phase 2.
-
-13. **Performance-Skalierungs-Ansatz**: Phase 1 mit `findRaw` + WireCache reicht bis ~10k Bilder. Bei Wachstum auf 100k müsste auf `findMany` + per-Image-Index-Cache umgestellt werden. Soll die Architektur Phase 1 bereits diesem Pfad gegenüber offen halten (Cache-Layer abstrahieren?) oder Phase 1 pragmatisch + Phase 2 wenn der Bedarf da ist?
-
-14. **Modul-Info / Versioning**: Welche Versionsstrategie (SemVer)? Wie werden Updates released — via GitHub-Tags + modules.processwire.com? Composer-Support sinnvoll oder PW-typisches manuelles Drop-in?
+5. **Alt-Text als separates Subfield**: PW behandelt `description` als impliziten Alt-Text. Für strenge a11y/SEO-Workflows ggf. ein separates `alt`-Custom-Field empfohlen — aber das wäre eine Editorial-Konvention, kein Modul-Feature.
