@@ -498,7 +498,12 @@ textarea.ml-langtabs-pane {
 .ml-columns-dialog header {
 	font-weight: 600;
 	font-size: 1.05em;
-	margin-bottom: 0.75rem;
+	margin-bottom: 0.5rem;
+}
+.ml-columns-hint {
+	margin: 0 0 0.75rem;
+	color: #777;
+	font-size: 0.9em;
 }
 .ml-columns-dialog footer {
 	display: flex;
