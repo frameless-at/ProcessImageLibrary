@@ -3311,10 +3311,10 @@ class ProcessMediaLibrary extends Process {
 			$page, $totalPages, $total, $total === 1 ? '' : 's'
 		);
 
-		// Three-zone layout: left = summary + prev/next, center =
-		// columns dialog opener, right = per-page picker. Grid in
-		// the stylesheet keeps the center node truly centered
-		// regardless of how wide the side groups grow.
+		// Two-zone flex layout: left = summary + prev/next, right =
+		// per-page picker followed by the columns-dialog icon (with
+		// a touch of breathing room between them). margin-left:auto
+		// on the right group keeps it pinned to the far right.
 		$out  = '<div class="ml-pagination">';
 
 		$out .= '<div class="ml-pagination-left">';
@@ -3331,14 +3331,6 @@ class ProcessMediaLibrary extends Process {
 		}
 		$out .= '</div>';
 
-		// Opens the column-visibility dialog rendered as a sibling of
-		// .ml-results. <button> (not <a>) since there's no fallback
-		// URL — without JS the picker is unavailable, which matches
-		// every other JS-only feature on the page.
-		$out .= '<button type="button" class="ml-columns-toggle">'
-			. $san->entities($this->_('Columns…'))
-			. '</button>';
-
 		$out .= '<div class="ml-pagination-right">';
 		// Per-page picker. Client-side JS intercepts the change event,
 		// rewrites the URL and triggers the AJAX refresh; non-JS users
@@ -3351,6 +3343,18 @@ class ProcessMediaLibrary extends Process {
 			$out .= '<option value="' . $opt . '"' . $sel . '>' . $opt . '</option>';
 		}
 		$out .= '</select></label>';
+
+		// Icon-only opener for the column-visibility dialog (rendered
+		// as a sibling of .ml-results). <button> since there's no
+		// fallback URL — without JS the picker is unavailable. The
+		// visible <i> stays decorative; the button itself carries
+		// the accessible name via aria-label / title.
+		$colsLabel = $san->entities($this->_('Columns'));
+		$out .= '<button type="button" class="ml-columns-toggle"'
+			. ' title="' . $colsLabel . '"'
+			. ' aria-label="' . $colsLabel . '">'
+			. '<i class="fa fa-columns" aria-hidden="true"></i>'
+			. '</button>';
 		$out .= '</div>';
 
 		$out .= '</div>';
