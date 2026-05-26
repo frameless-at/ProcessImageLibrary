@@ -415,53 +415,42 @@ textarea.ml-cell-input {
 	border-radius: 3px;
 }
 
+/* Rename popup: stem input + locked extension chip side by side.
+   The extension stays inert (no focus, no editing) and visually
+   tags itself as immutable so the user doesn't try to type into it. */
+.ml-popup-filename {
+	display: flex;
+	align-items: stretch;
+	gap: 0;
+}
+.ml-popup-filename .ml-popup-input {
+	flex: 1 1 auto;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+	border-right: 0;
+}
+.ml-popup-filename-ext {
+	display: inline-flex;
+	align-items: center;
+	padding: 0 0.5rem;
+	font: inherit;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	color: #777;
+	background: #f5f5f5;
+	border: 1px solid #c0c0c0;
+	border-top-right-radius: 3px;
+	border-bottom-right-radius: 3px;
+	user-select: none;
+}
+
 /* Filename cell — split into stem + extension so the inline edit
    only touches the stem. Extension reads muted so the immutable
    part is visually distinguishable at a glance. */
+.ml-cell-filename code {
+	display: inline;
+}
 .ml-cell-filename .ml-fn-ext {
 	color: #999;
-}
-/* While editing the cell's <code> becomes an inline-flex so the
-   input can stretch to fill the cell width while the locked
-   extension chip keeps its content size on the right. */
-.ml-cell-filename.ml-editing code {
-	display: flex;
-	align-items: center;
-	width: 100%;
-}
-/* Inline rename input replaces the stem span in place. flex:1
-   makes it fill the cell minus the ext chip; monospaced + tight
-   padding match the <code> it replaces so the layout doesn't jump
-   on edit / restore. font:inherit picks up the parent <code>'s
-   already-small font-size (0.85em from .ml-table code) without
-   compounding. */
-.ml-cell-filename .ml-fn-input {
-	flex: 1 1 auto;
-	min-width: 0;
-	font: inherit;
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-	padding: 1px 4px;
-	margin: -2px 0;
-	border: 1px solid #5b8cd6;
-	border-radius: 2px;
-	background: #fffce8;
-}
-.ml-cell-filename .ml-fn-input:focus {
-	outline: none;
-	background: #fff;
-}
-.ml-cell-filename.ml-editing .ml-fn-ext {
-	flex: 0 0 auto;
-	margin-left: 2px;
-}
-/* While editing the input child carries the real focus; the
-   parent td's own focus-ring (from the A11y role="button"
-   tabindex="0") would visually compete. Drop it for the duration
-   of the edit. */
-.ml-cell-editable.ml-editing,
-.ml-cell-editable.ml-editing:focus,
-.ml-cell-editable.ml-editing:focus-visible {
-	outline: none;
 }
 /* Multilang tabs inside the popup — minimal styling that matches
    the rest of the popup (tab bar above a single visible pane). */
