@@ -500,7 +500,7 @@ textarea.ml-langtabs-pane {
 	border: 1px solid #ccc;
 	border-radius: 4px;
 	padding: 1.25rem;
-	width: min(640px, 92vw);
+	width: min(420px, 92vw);
 	max-height: 85vh;
 	overflow: auto;
 	background: #fff;
@@ -529,13 +529,18 @@ textarea.ml-langtabs-pane {
 	padding: 0.3rem 0.9rem;
 	cursor: pointer;
 }
+/* Single-column stack so the dialog's top-to-bottom reading order
+   matches the table's left-to-right column order. Each <li> is a
+   full-width row carrying checkbox + label + up/down reorder
+   buttons; the dialog itself caps height at 85vh and scrolls
+   internally when the list grows past the viewport. */
 .ml-columns-list {
 	list-style: none;
 	padding: 0;
 	margin: 0;
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-	gap: 0.25rem 0.75rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
 }
 .ml-columns-list li {
 	display: flex;
