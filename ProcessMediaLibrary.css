@@ -5,9 +5,42 @@
 }
 
 /* Filter bar — InputfieldForm-rendered. The admin theme handles
-   layout, spacing and labels; we just trim the default top margin
-   so it sits flush with the rest of the page. */
+   most layout, spacing and labels; module-specific overrides
+   below tighten the rest. */
 .ml-filter-bar {
+	margin: 0;
+}
+
+/* Cap the tag-filter checkbox grid so a large tag pool stays
+   usable instead of pushing the rest of the filter UI off-screen.
+   Scrolls inside the fieldset when it overflows. */
+.ml-filter-bar .Inputfield_tags .InputfieldContent {
+	max-height: 14rem;
+	overflow-y: auto;
+}
+
+/* The two layout-only sub-fieldsets (missings + actions) carry
+   skipLabelHeader on the PHP side; this hides any residual header
+   chrome the admin theme might still emit so the wrappers act as
+   pure layout grouping with zero visual chrome. */
+.ml-filter-bar .Inputfield_mlMissing > .InputfieldHeader,
+.ml-filter-bar .Inputfield_mlActions > .InputfieldHeader {
+	display: none;
+}
+
+/* Action row: Reset + Apply pinned to the right edge, secondary
+   (Reset) on the left, primary (Apply) on the far right. Buttons
+   shrink to their content width inside the flex row so they don't
+   stretch to a column-width allocation. */
+.ml-filter-bar .Inputfield_mlActions > .InputfieldContent > .Inputfields {
+	display: flex;
+	justify-content: flex-end;
+	align-items: center;
+	gap: 0.5rem;
+}
+.ml-filter-bar .Inputfield_mlActions .Inputfield {
+	width: auto;
+	flex: 0 0 auto;
 	margin: 0;
 }
 
