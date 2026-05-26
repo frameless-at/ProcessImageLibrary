@@ -2957,7 +2957,9 @@ class ProcessMediaLibrary extends Process {
 		$fld->columnWidth = 34; // 33+33+34=100
 		$outer->add($fld);
 
-		// Tags fieldset (full width, collapsed unless something is active).
+		// Tags fieldset (full width, always open when present so the
+		// available tag set is visible alongside the rest of the
+		// filter UI).
 		if ($tagFilterPool) {
 			$selectedTags = $filters['tags'] ?? [];
 			/** @var \ProcessWire\InputfieldFieldset $tagsFs */
@@ -2965,7 +2967,7 @@ class ProcessMediaLibrary extends Process {
 			$tagsFs->label = $selectedTags
 				? sprintf($this->_('Tags (%d)'), count($selectedTags))
 				: $this->_('Tags');
-			$tagsFs->collapsed   = !empty($selectedTags) ? Inputfield::collapsedNo : Inputfield::collapsedYes;
+			$tagsFs->collapsed   = Inputfield::collapsedNo;
 			$tagsFs->columnWidth = 100;
 
 			$cbs = $modules->get('InputfieldCheckboxes');

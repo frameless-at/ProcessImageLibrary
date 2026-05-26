@@ -911,6 +911,14 @@
 				});
 				var qs = params.toString() ? '?' + params.toString() : '';
 				replaceFromQs(qs, true);
+				// Collapse the outer "Filters" fieldset after Apply —
+				// the user has committed their choice; keeping the
+				// fieldset open just occludes the results. PW's
+				// InputfieldStateCollapsed class is the same hook the
+				// admin theme uses for its own collapse state, so the
+				// chevron + content-hide work without extra wiring.
+				var outerFs = filterForm.querySelector('.Inputfield_mlFilters');
+				if (outerFs) outerFs.classList.add('InputfieldStateCollapsed');
 			});
 
 			// "Reset" is an <a href="./">; intercept so it clears via AJAX too.
