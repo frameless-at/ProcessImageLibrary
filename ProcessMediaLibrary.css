@@ -115,16 +115,20 @@
 .ml-table tbody tr:hover {
 	background: #fafafa;
 }
-/* Thumb cell — dimensions driven by --ml-thumb-w / --ml-thumb-h
-   custom props set on .ml-root from the module's thumb config.
-   Default (keep-ratio mode) renders the source proportionally,
-   capped to the configured width. Crop variant fixes the visible
-   box to the exact configured W × H and lets the browser handle
-   the center crop via object-fit so we can keep using the
-   admin's lazily-generated 260px variation as source. */
+/* Thumb cell — dimensions driven by --ml-thumb-longer (keep-ratio
+   path) and --ml-thumb-w / --ml-thumb-h (crop path), set on
+   .ml-root from the module config. Keep-ratio variant caps BOTH
+   axes to the same longer-side value so portraits cap on height
+   and landscapes cap on width — aspect always preserved. Crop
+   variant fixes the visible box to the exact configured W × H
+   and lets the browser handle the center crop via object-fit, so
+   the source can stay PW's lazily-generated 260 px admin
+   variation. */
 .ml-cell-thumb img {
 	display: block;
-	max-width: var(--ml-thumb-w, 120px);
+	max-width: var(--ml-thumb-longer, 100px);
+	max-height: var(--ml-thumb-longer, 100px);
+	width: auto;
 	height: auto;
 	border: 1px solid #e5e5e5;
 	background: #fafafa;
@@ -133,6 +137,7 @@
 	width: var(--ml-thumb-w, 120px);
 	height: var(--ml-thumb-h, 80px);
 	max-width: none;
+	max-height: none;
 	object-fit: cover;
 }
 /* Clickable when host page is editable — JS opens the PW image

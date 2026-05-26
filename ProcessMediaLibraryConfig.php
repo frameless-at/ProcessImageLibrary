@@ -17,23 +17,37 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		// --- Thumbnail rendering ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Thumbnail');
-		$fs->description = $this->_('Per-row preview image rendered into the table. The defaults match PW\'s admin image-field thumbnail (260 px on the shorter axis, quality 90, ratio preserved) so a variation already generated when the image was last viewed in the image-field UI is reused — no second resize pass per row.');
+		$fs->description = $this->_('Per-row preview image rendered into the table. Up to 260 px on the longer side the runtime reuses PW\'s lazily-generated admin image-field variation — no second resize pass per row. Beyond that, a dedicated variation is produced for the table.');
 
+		// Longer-side cap for the keep-ratio path. Shown only when
+		// the ratio checkbox is on; runtime caps the longer axis of
+		// the rendered thumb to this value (≤ 260 ⇒ reuse PW's
+		// admin variation as source, > 260 ⇒ produce a dedicated
+		// size($longer, 0) / size(0, $longer) variation).
+		$f = $modules->get('InputfieldInteger');
+		$f->name = 'thumbLongerSide';
+		$f->label = $this->_('Longer side (px)');
+		$f->value = (int) ($this->get('thumbLongerSide') ?: ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
+		$f->min = 16;
+		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_LONGER_SIDE_DEFAULT);
+		$f->showIf = 'thumbKeepRatio=1';
+		$f->columnWidth = 50;
+		$fs->add($f);
+
+		// Width × Height define the exact crop box when keep-ratio is
+		// off. Hidden under keep-ratio (the longer-side field takes
+		// over). showIf uses PW's selector syntax: shown only when
+		// the checkbox is NOT in its checked state.
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbWidth';
 		$f->label = $this->_('Width (px)');
 		$f->value = (int) ($this->get('thumbWidth') ?: ProcessMediaLibrary::THUMB_WIDTH_DEFAULT);
 		$f->min = 16;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessMediaLibrary::THUMB_WIDTH_DEFAULT);
+		$f->showIf = 'thumbKeepRatio!=1';
 		$f->columnWidth = 50;
 		$fs->add($f);
 
-		// Height only matters when thumbs are center-cropped to an
-		// exact box. When "Keep image ratio" is on, runtime ignores
-		// height entirely (scales by width alone) so the field hides
-		// to avoid suggesting otherwise. showIf uses PW's selector
-		// syntax: shown only when the checkbox is NOT in its checked
-		// state (value !== '1').
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbHeight';
 		$f->label = $this->_('Height (px)');

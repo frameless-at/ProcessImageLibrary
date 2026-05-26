@@ -19,18 +19,21 @@ class ProcessMediaLibrary extends Process {
 	const CACHE_PREFIX = 'media-library-';
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
-	// Match PW's admin image-field UI defaults: gridSize*2 = 130*2 = 260
-	// on the SHORTER axis (the admin grid uses square cells, so the
-	// shorter side is the one scaled to fill the cell while the longer
-	// side overflows). Quality 90 matches $config->imageSizerOptions.
-	// In keep-ratio mode the runtime mirrors the admin's exact call
-	// signature so the variation PW lazily creates on first
-	// image-field view ("image.0x260.jpg" for landscapes,
-	// "image.260x0.jpg" for portraits) is reused without a second
-	// resize pass per row.
-	const THUMB_WIDTH_DEFAULT   = 260;
-	const THUMB_HEIGHT_DEFAULT  = 260;
-	const THUMB_QUALITY_DEFAULT = 90;
+	// THUMB_LONGER_SIDE_DEFAULT is the keep-ratio display target —
+	// the longer-axis cap for the proportionally-rendered thumb. At
+	// 100 it sits well below PW's admin-variation size (260 on the
+	// shorter axis, ≥260 on the longer), so the admin variation is
+	// reused as the source byte-for-byte. Bump above 260 and the
+	// module starts producing its own size($longer, 0) /
+	// size(0, $longer) variations.
+	// THUMB_WIDTH_DEFAULT / THUMB_HEIGHT_DEFAULT only kick in when
+	// keep-ratio is off (crop mode); 120 × 80 mirrors the historic
+	// table layout. Quality 90 matches $config->imageSizerOptions so
+	// the admin's variation filenames hash identically.
+	const THUMB_WIDTH_DEFAULT       = 120;
+	const THUMB_HEIGHT_DEFAULT      = 80;
+	const THUMB_LONGER_SIDE_DEFAULT = 100;
+	const THUMB_QUALITY_DEFAULT     = 90;
 
 	/**
 	 * Admin-configurable thumbnail dimensions, JPEG quality and
@@ -57,10 +60,11 @@ class ProcessMediaLibrary extends Process {
 			$keepRatio = (bool) $keepRatio;
 		}
 		return [
-			'width'     => max(1, (int) ($this->get('thumbWidth')   ?: self::THUMB_WIDTH_DEFAULT)),
-			'height'    => max(1, (int) ($this->get('thumbHeight')  ?: self::THUMB_HEIGHT_DEFAULT)),
-			'quality'   => max(1, min(100, (int) ($this->get('thumbQuality') ?: self::THUMB_QUALITY_DEFAULT))),
-			'keepRatio' => $keepRatio,
+			'width'      => max(1, (int) ($this->get('thumbWidth')      ?: self::THUMB_WIDTH_DEFAULT)),
+			'height'     => max(1, (int) ($this->get('thumbHeight')     ?: self::THUMB_HEIGHT_DEFAULT)),
+			'longerSide' => max(1, (int) ($this->get('thumbLongerSide') ?: self::THUMB_LONGER_SIDE_DEFAULT)),
+			'quality'    => max(1, min(100, (int) ($this->get('thumbQuality') ?: self::THUMB_QUALITY_DEFAULT))),
+			'keepRatio'  => $keepRatio,
 		];
 	}
 
@@ -289,11 +293,15 @@ class ProcessMediaLibrary extends Process {
 		$sanitizer = $this->wire('sanitizer');
 		$thumbDims = $this->getThumbDims();
 		// CSS custom properties carry the configured thumb dims so the
-		// stylesheet's --ml-thumb-w / --ml-thumb-h references reflect
-		// the user's settings without inline width / height per image.
+		// stylesheet's --ml-thumb-w / --ml-thumb-h / --ml-thumb-longer
+		// references reflect the user's settings without inline width
+		// / height per image. The "longer" variable drives keep-ratio
+		// display (proportional, capped to that side), the W / H pair
+		// drives the crop variant (exact box with object-fit: cover).
 		$rootStyle = sprintf(
-			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;',
-			(int) $thumbDims['width'], (int) $thumbDims['height']
+			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;',
+			(int) $thumbDims['width'], (int) $thumbDims['height'],
+			(int) $thumbDims['longerSide']
 		);
 		$rootAttrs = sprintf(
 			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-csrf-name="%s" data-csrf-value="%s" style="%s"',
@@ -2284,36 +2292,52 @@ class ProcessMediaLibrary extends Process {
 			}
 			if (!$img instanceof Pageimage) continue;
 
-			// Thumb source: try to reuse PW's admin image-field
-			// variation (260 px on the shorter axis, generated lazily
-			// by InputfieldImage::getAdminThumb on first view of the
-			// image in its host field UI). When the user-configured
-			// display target fits within that variation, we use it
-			// directly — no module-specific resize, no extra cache
-			// file on disk. CSS handles the visible sizing /
-			// cropping. Only when the target is bigger than the
-			// admin variation can carry (e.g. 500×500 for editorial
-			// big-thumb modes) do we fall back to a custom
-			// $img->size($w, $h, cropping=true) call.
+			// Source-file decision: try to ride PW's lazily-generated
+			// admin variation (260 px on the shorter axis — same call
+			// signature InputfieldImage::getAdminThumb uses) whenever
+			// the configured display target fits inside it. The admin
+			// variation has shorter axis = 260 and longer axis ≥ 260,
+			// so display targets ≤ 260 on every relevant axis are
+			// safely covered. Above the threshold we generate a
+			// dedicated variation so the requested pixels actually
+			// exist on disk.
 			$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
-			if ($img->width >= $img->height) {
-				$adminVar = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
-			} else {
-				$adminVar = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
-			}
 
 			if ($thumb['keepRatio']) {
-				// Proportional display — admin variation is always
-				// the source; CSS caps the rendered width.
-				$thumbImg = $adminVar;
+				// Keep-ratio mode — single "longer-side" cap from
+				// the user's config drives display. ≤ 260 ⇒ admin
+				// variation (the longer axis is always ≥ 260, so
+				// it's never the binding constraint at this point).
+				// > 260 ⇒ produce a matching size($longer, 0) /
+				// size(0, $longer) variation so the longer-axis
+				// display target is met without browser upscaling.
+				$longer = (int) $thumb['longerSide'];
+				if ($longer <= 260) {
+					if ($img->width >= $img->height) {
+						$thumbImg = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
+					} else {
+						$thumbImg = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
+					}
+				} else {
+					if ($img->width >= $img->height) {
+						$thumbImg = ($img->width > $longer) ? $img->size($longer, 0, $opts) : $img;
+					} else {
+						$thumbImg = ($img->height > $longer) ? $img->size(0, $longer, $opts) : $img;
+					}
+				}
 			} else {
-				// Crop mode — use admin variation when both
-				// configured display dimensions fit inside it
-				// (longer-side crop is handled by object-fit: cover
-				// in CSS). Otherwise generate an exact-size variation
-				// so the requested W × H actually exists in pixels.
+				// Crop mode — compare W × H against what the admin
+				// variation can carry. Fits ⇒ reuse it and let CSS
+				// object-fit: cover handle the visible crop. Doesn't
+				// fit (e.g. 500 × 500 super-thumb) ⇒ produce a
+				// dedicated cropping=true variation.
 				$tW = (int) $thumb['width'];
 				$tH = (int) $thumb['height'];
+				if ($img->width >= $img->height) {
+					$adminVar = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
+				} else {
+					$adminVar = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
+				}
 				if ($tW <= (int) $adminVar->width && $tH <= (int) $adminVar->height) {
 					$thumbImg = $adminVar;
 				} else {
@@ -3295,22 +3319,29 @@ class ProcessMediaLibrary extends Process {
 			if (!empty($row['thumbUrl'])) {
 				// Display dimensions are derived from the user's
 				// configured target, NOT the source file. In keep-
-				// ratio mode the source may be 392×260 (admin
-				// variation) while we render at the configured width
-				// proportionally; in crop mode the source may be
-				// the same admin variation while CSS object-fit:cover
-				// constrains the visible box to W × H. Pre-computed
-				// here so the <img> width / height attributes prevent
-				// layout shift before the bytes land.
+				// ratio mode the longer axis is capped to the
+				// configured longerSide; the other axis follows the
+				// source's aspect. In crop mode the visible box is
+				// exactly W × H and CSS object-fit: cover handles
+				// any overflow from the admin-variation source.
+				// Pre-computed here so the <img> width / height
+				// attributes prevent layout shift before the bytes
+				// land.
 				$srcW = (int) ($row['thumbWidth']  ?? 0);
 				$srcH = (int) ($row['thumbHeight'] ?? 0);
 				if ($thumb['keepRatio']) {
-					$dispW = $srcW > 0 ? min($thumb['width'], $srcW) : $thumb['width'];
-					$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
-					$cls   = 'ml-thumb';
+					$longer = (int) $thumb['longerSide'];
+					if ($srcW >= $srcH) {
+						$dispW = $srcW > 0 ? min($longer, $srcW) : $longer;
+						$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
+					} else {
+						$dispH = $srcH > 0 ? min($longer, $srcH) : $longer;
+						$dispW = $srcH > 0 ? (int) round($srcW * $dispH / $srcH) : $srcW;
+					}
+					$cls = 'ml-thumb';
 				} else {
-					$dispW = $thumb['width'];
-					$dispH = $thumb['height'];
+					$dispW = (int) $thumb['width'];
+					$dispH = (int) $thumb['height'];
 					$cls   = 'ml-thumb ml-thumb-crop';
 				}
 				$out .= '<img class="' . $cls . '"'
