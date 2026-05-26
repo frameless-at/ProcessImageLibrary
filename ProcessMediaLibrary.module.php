@@ -954,81 +954,26 @@ class ProcessMediaLibrary extends Process {
 		$img = $this->resolvePageimage($page, $fieldName, $oldBasename);
 		if (!$img) return $this->jsonError('Image not found in field', 404);
 
-		// Resolve placeholders BEFORE the filename sanitiser runs —
-		// the sanitiser strips parens and would otherwise mangle the
-		// "(n)" / "(slug)" tokens before they could be expanded.
-		$resolved = $this->resolveRenamePattern($newStemRaw, [
-			'n'     => 1,
-			'page'  => $page,
-			'field' => $fieldName,
-		]);
-
-		// Sanitize the stem: PW's filename sanitizer normalizes case,
-		// strips invalid chars, applies basename rules. We only want
-		// the stem so any dot the user typed gets dropped — the
-		// extension is preserved from the original file.
-		$newStem = $sanitizer->filename($resolved, true);
-		$newStem = preg_replace('/\.+/', '', $newStem) ?? '';
-		if ($newStem === '') {
-			return $this->jsonError('New filename is empty');
+		$page->of(false);
+		$result = $this->performRename($img, $page, $fieldName, $newStemRaw, ['n' => 1]);
+		if (!$result['ok']) {
+			return $this->jsonError((string) $result['error']);
 		}
 
-		$dotPos = strrpos($oldBasename, '.');
-		$ext    = $dotPos === false ? '' : substr($oldBasename, $dotPos);
-		$newBasename = $newStem . $ext;
-
-		if ($newBasename === $oldBasename) {
+		if (!empty($result['unchanged'])) {
 			return $this->jsonResponse([
 				'ok'        => true,
-				'basename'  => $oldBasename,
+				'basename'  => $result['basename'],
 				'unchanged' => true,
 			]);
 		}
 
-		// Collision check inside the same Pageimages collection. Single-
-		// image fields can't collide with themselves; multi-image fields
-		// need an explicit lookup.
-		$fieldValue = $page->getUnformatted($fieldName);
-		if ($fieldValue instanceof Pageimages) {
-			$existing = $fieldValue->getFile($newBasename);
-			if ($existing && $existing !== $img) {
-				return $this->jsonError(
-					'A file named "' . $newBasename . '" already exists in this field'
-				);
-			}
-		}
-
-		// Drop variations before the rename — the cached files (e.g.
-		// basename.0x260.jpg) are keyed by the OLD basename and would
-		// be unreachable after rename. PW regenerates them on demand.
-		if (method_exists($img, 'removeVariations')) {
-			$img->removeVariations();
-		}
-
-		if (!method_exists($img, 'rename')) {
-			return $this->jsonError('Rename API not available on this ProcessWire version');
-		}
-
-		try {
-			$renameResult = $img->rename($newBasename);
-		} catch (\Throwable $e) {
-			return $this->jsonError('Rename error: ' . $e->getMessage());
-		}
-		if ($renameResult === false) {
-			return $this->jsonError('Rename failed');
-		}
-
-		$page->of(false);
 		if (!$page->save($fieldName)) {
 			return $this->jsonError('Save failed after rename');
 		}
-
 		$this->wire('cache')->deleteFor($this);
 
-		// $img->basename reflects the new name in-place after rename();
-		// echo that back so the client can rewrite cell attrs without
-		// guessing what the sanitizer did to the stem.
-		$finalBasename = (string) $img->basename;
+		$finalBasename = (string) $result['basename'];
 		$finalDot      = strrpos($finalBasename, '.');
 		return $this->jsonResponse([
 			'ok'        => true,
@@ -1040,10 +985,81 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
+	 * Core rename routine — shared by ___executeRename (single) and
+	 * ___executeBulk's basename branch (batch). Resolves placeholders
+	 * in $pattern using $n + the image's page / field context,
+	 * sanitises the result, runs the collision check inside the host
+	 * field's Pageimages, drops the OLD basename's variation files
+	 * (their names embed the old stem and would orphan on disk after
+	 * rename), then calls Pagefile::rename(). Page::save() stays
+	 * with the caller so multi-image batches save each page only once.
+	 *
+	 * Returns:
+	 *   ['ok' => true,  'basename' => '…', 'unchanged' => false|true]
+	 *   ['ok' => false, 'basename' => '<old>', 'error' => '<msg>']
+	 *
+	 * @param array{n?:int} $ctx
+	 * @return array<string,mixed>
+	 */
+	protected function performRename(Pageimage $img, Page $page, string $fieldName, string $pattern, array $ctx = []): array {
+		$sanitizer = $this->wire('sanitizer');
+		$oldBasename = (string) $img->basename;
+
+		$resolved = $this->resolveRenamePattern($pattern, [
+			'n'     => (int) ($ctx['n'] ?? 1),
+			'page'  => $page,
+			'field' => $fieldName,
+		]);
+		$newStem = $sanitizer->filename($resolved, true);
+		$newStem = preg_replace('/\.+/', '', $newStem) ?? '';
+		if ($newStem === '') {
+			return ['ok' => false, 'basename' => $oldBasename, 'error' => 'New filename is empty'];
+		}
+
+		$dotPos = strrpos($oldBasename, '.');
+		$ext    = $dotPos === false ? '' : substr($oldBasename, $dotPos);
+		$newBasename = $newStem . $ext;
+
+		if ($newBasename === $oldBasename) {
+			return ['ok' => true, 'basename' => $oldBasename, 'unchanged' => true];
+		}
+
+		$fieldValue = $page->getUnformatted($fieldName);
+		if ($fieldValue instanceof Pageimages) {
+			$existing = $fieldValue->getFile($newBasename);
+			if ($existing && $existing !== $img) {
+				return [
+					'ok' => false,
+					'basename' => $oldBasename,
+					'error' => 'A file named "' . $newBasename . '" already exists in this field',
+				];
+			}
+		}
+
+		if (method_exists($img, 'removeVariations')) {
+			$img->removeVariations();
+		}
+		if (!method_exists($img, 'rename')) {
+			return ['ok' => false, 'basename' => $oldBasename, 'error' => 'Rename API not available on this ProcessWire version'];
+		}
+
+		try {
+			$renameResult = $img->rename($newBasename);
+		} catch (\Throwable $e) {
+			return ['ok' => false, 'basename' => $oldBasename, 'error' => 'Rename error: ' . $e->getMessage()];
+		}
+		if ($renameResult === false) {
+			return ['ok' => false, 'basename' => $oldBasename, 'error' => 'Rename failed'];
+		}
+
+		return ['ok' => true, 'basename' => (string) $img->basename, 'unchanged' => false];
+	}
+
+	/**
 	 * Expand the rename pattern into a concrete stem for a given
-	 * image's context. Used by ___executeRename() and (future)
-	 * batch-rename so a pattern like "(slug)-(n2)" produces e.g.
-	 * "summer-festival-03" on the third row of a batch.
+	 * image's context. Used by performRename() so a pattern like
+	 * "(slug)-(n2)" produces e.g. "summer-festival-03" on the
+	 * third row of a batch.
 	 *
 	 * Supported tokens:
 	 *   (n)              counter — $ctx['n']
@@ -1181,13 +1197,18 @@ class ProcessMediaLibrary extends Process {
 		}
 
 		// Group by pageId so we save each page at most once per field.
+		// Each item carries a global counter that preserves the order
+		// the client sent — batch rename uses this for the (n)
+		// placeholder so numbering follows the user's selection order
+		// regardless of how items get redistributed across pages.
 		$byPage = [];
+		$counter = 0;
 		foreach ($items as $item) {
 			$pid = (int) ($item['pageId'] ?? 0);
 			$fn  = $sanitizer->fieldName((string) ($item['fieldName'] ?? ''));
 			$bn  = basename((string) ($item['basename'] ?? ''));
 			if (!$pid || !$fn || !$bn) continue;
-			$byPage[$pid][] = ['fieldName' => $fn, 'basename' => $bn];
+			$byPage[$pid][] = ['fieldName' => $fn, 'basename' => $bn, 'n' => ++$counter];
 		}
 		if (!$byPage) return $this->jsonError('No valid items');
 
@@ -1217,6 +1238,28 @@ class ProcessMediaLibrary extends Process {
 					$failed[] = sprintf('Field %s not managed', $fn);
 					continue;
 				}
+
+				// basename is the identity, not an editable subfield —
+				// editableSubfields() rightly excludes it. Branch the
+				// rename path before that gate.
+				if ($subfield === 'basename') {
+					$img = $this->resolvePageimage($page, $fn, $bn);
+					if (!$img) {
+						$failed[] = sprintf('Image %s not found in %d.%s', $bn, $pid, $fn);
+						continue;
+					}
+					$renameResult = $this->performRename($img, $page, $fn, $value, ['n' => (int) $it['n']]);
+					if (!$renameResult['ok']) {
+						$failed[] = sprintf('Rename %s in %s: %s', $bn, $fn, $renameResult['error']);
+						continue;
+					}
+					if (empty($renameResult['unchanged'])) {
+						$fieldsTouched[$fn] = true;
+					}
+					$succeeded++;
+					continue;
+				}
+
 				if (!in_array($subfield, $this->editableSubfields($fn), true)) {
 					$failed[] = sprintf('Subfield %s not editable on %s', $subfield, $fn);
 					continue;
@@ -1998,6 +2041,7 @@ class ProcessMediaLibrary extends Process {
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
 				'rename'           => $this->_('New filename'),
+				'renameHint'       => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (slug) page slug, (field) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
 				'importSaved'      => $this->_('Saved'),

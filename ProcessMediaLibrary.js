@@ -352,10 +352,7 @@
 			td.classList.add('ml-editing');
 
 			var original = td.textContent;
-			// Filename rename is a per-row operation — batch broadcast
-			// makes no sense (each file needs a unique name), so the
-			// batch path is disabled even when this row is selected.
-			var batch    = isBatchEdit(td) && td.dataset.input !== 'filename';
+			var batch    = isBatchEdit(td);
 			var widget   = buildPopupWidget(td, original);
 
 			var dialog = document.createElement('dialog');
@@ -365,6 +362,18 @@
 			header.textContent = columnLabelFor(td);
 			dialog.appendChild(header);
 
+			// Filename rename: surface the placeholder syntax so users
+			// don't have to know it's there. Shown in single-row context
+			// too because the same tokens work for "(slug)-cover" etc.;
+			// the counter just stays 1.
+			if (td.dataset.input === 'filename') {
+				var hint = document.createElement('p');
+				hint.className = 'ml-popup-hint';
+				hint.textContent = labels.renameHint
+					|| 'Placeholders: (n) counter, (n2)…(n5) padded, (slug) page slug, (field) field name.';
+				dialog.appendChild(hint);
+			}
+
 			dialog.appendChild(widget.element);
 
 			var batchBar = null;
@@ -373,7 +382,11 @@
 				var cb = batchBar.querySelector('input[type="radio"]:checked');
 				return cb ? cb.value : 'add';
 			}
-			if (batch) {
+			// Add / Replace mode picker only makes sense for the
+			// description / tags / customs broadcasts. Batch rename
+			// has just one mode (apply the pattern to every selected
+			// row with its (n) counter), so the radios stay hidden.
+			if (batch && td.dataset.input !== 'filename') {
 				batchBar = document.createElement('div');
 				batchBar.className = 'ml-batch-mode';
 				var radioName = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
@@ -441,6 +454,31 @@
 					teardown();
 					td.classList.add('ml-cell-saving');
 					td.title = labels.saving || 'Saving…';
+
+					// Batch: broadcast the pattern across the selection via
+					// the bulk endpoint (subfield=basename). Server tracks
+					// (n) per item in the order JS sent them. Single: hit
+					// the dedicated rename endpoint.
+					if (batch) {
+						runBulk('set', {
+							subfield: 'basename',
+							value:    newStem,
+							mode:     'replace'
+						}).then(function (result) {
+							var ok = reportBulk(result);
+							replaceFromQs(location.search, false);
+							if (!ok && td.isConnected) {
+								td.classList.remove('ml-cell-saving');
+								flashCell(td, false);
+							}
+						}).catch(function (err) {
+							if (!td.isConnected) return;
+							td.classList.remove('ml-cell-saving');
+							td.title = (err && err.message) || labels.error || 'Network error';
+							flashCell(td, false);
+						});
+						return;
+					}
 
 					enqueueSave(td.dataset.pageId, function () {
 						var fd = new FormData();
