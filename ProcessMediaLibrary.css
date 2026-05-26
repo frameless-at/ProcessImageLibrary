@@ -55,7 +55,10 @@
 	top: -3rem;
 	right: 0;
 	z-index: 5;
-	font-size: 1.5rem;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	font-size: 1.05rem;
 	line-height: 1;
 	color: #888;
 	text-decoration: none;
@@ -65,7 +68,11 @@
 	color: #333;
 }
 .ml-config-link .fa {
-	display: block;
+	font-size: 1.35em;
+	line-height: 1;
+}
+.ml-config-label {
+	font-size: 0.85em;
 }
 
 /* Horizontal-scroll wrapper so the wide table degrades to a swipe

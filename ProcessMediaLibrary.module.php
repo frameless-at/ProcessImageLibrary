@@ -288,12 +288,18 @@ class ProcessMediaLibrary extends Process {
 		$out  = '<div class="ml-root"' . $rootAttrs . '>';
 		// Cog → module settings. Position-absolute via CSS so it sits
 		// in the heading row instead of taking a row of its own; the
-		// link target is PW's standard module-edit URL.
-		$cfgUrl = $this->wire('config')->urls->admin . 'module/edit/?name=' . urlencode($this->className());
+		// link target is PW's standard module-edit URL. collapse_info=1
+		// asks PW to render the edit screen with the upper info panel
+		// pre-collapsed so the actual config inputs are above the fold.
+		$cfgUrl = $this->wire('config')->urls->admin . 'module/edit/?name='
+			. urlencode($this->className()) . '&collapse_info=1';
+		$cfgTitle = $this->_('Module settings');
+		$cfgLabel = $this->_('Config');
 		$out .= '<a class="ml-config-link" href="' . $sanitizer->entities($cfgUrl) . '"'
-			. ' title="' . $sanitizer->entities($this->_('Module settings')) . '"'
-			. ' aria-label="' . $sanitizer->entities($this->_('Module settings')) . '">'
+			. ' title="' . $sanitizer->entities($cfgTitle) . '"'
+			. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
 			. '<i class="fa fa-cog" aria-hidden="true"></i>'
+			. '<span class="ml-config-label">' . $sanitizer->entities($cfgLabel) . '</span>'
 			. '</a>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
