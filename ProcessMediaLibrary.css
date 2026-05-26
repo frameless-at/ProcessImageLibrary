@@ -232,25 +232,26 @@ textarea.ml-cell-input {
 	font-weight: normal;
 }
 
-/* Pagination row — three zones via grid: left group (summary +
-   prev/next), centered "Columns…" opener, right group (per-page
-   picker). 1fr/auto/1fr keeps the center cell truly centered
-   regardless of how wide the side groups grow. */
+/* Pagination row — flex with two groups: left (summary + prev/next),
+   right (per-page picker + columns-dialog icon). The right group's
+   gap is wider than the row gap so the icon doesn't crowd the
+   picker. margin-left:auto pins the right group to the far edge. */
 .ml-pagination {
-	display: grid;
-	grid-template-columns: 1fr auto 1fr;
+	display: flex;
 	align-items: center;
-	column-gap: 1rem;
+	gap: 1rem;
 	margin: 1rem 0 0;
 }
-.ml-pagination-left,
-.ml-pagination-right {
+.ml-pagination-left {
 	display: flex;
 	gap: 1rem;
 	align-items: center;
 }
 .ml-pagination-right {
-	justify-content: flex-end;
+	display: flex;
+	gap: 1.25rem;
+	align-items: center;
+	margin-left: auto;
 }
 .ml-pagination-summary {
 	color: #555;
@@ -259,17 +260,19 @@ textarea.ml-cell-input {
 	text-decoration: none;
 }
 .ml-columns-toggle {
-	font: inherit;
+	font-size: 1.05rem;
+	line-height: 1;
 	color: #555;
 	background: transparent;
 	border: 0;
-	padding: 0.15rem 0.4rem;
+	padding: 0.25rem 0.4rem;
 	cursor: pointer;
-	text-decoration: underline;
-	text-underline-offset: 2px;
 }
 .ml-columns-toggle:hover {
 	color: #111;
+}
+.ml-columns-toggle .fa {
+	display: block;
 }
 .ml-page-size {
 	color: #555;
@@ -290,18 +293,17 @@ textarea.ml-cell-input {
 }
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
-   columnWidth handling; here we collapse the pagination grid into a
-   single column so each zone stacks vertically, and shrink the
+   columnWidth handling; here we let the pagination flex-wrap so the
+   two zones stack vertically on narrow viewports, and shrink the
    gallery thumbs a touch so a row fits without horizontal scrolling
    becoming the only option. */
 @media (max-width: 640px) {
 	.ml-pagination {
-		grid-template-columns: 1fr;
+		flex-wrap: wrap;
 		row-gap: 0.5rem;
 	}
-	.ml-pagination-left,
 	.ml-pagination-right {
-		justify-content: flex-start;
+		margin-left: 0;
 		flex-wrap: wrap;
 	}
 	.ml-cell-thumb img {
