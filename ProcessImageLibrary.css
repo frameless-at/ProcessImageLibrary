@@ -1,0 +1,817 @@
+/* ProcessImageLibrary — admin styles. */
+
+.ml-root {
+	margin: 0 0 1rem;
+}
+
+/* Filter bar — InputfieldForm-rendered. The admin theme handles
+   most layout, spacing and labels; module-specific overrides
+   below tighten the rest. */
+.ml-filter-bar {
+	margin: 0;
+}
+
+/* Cap the tag-filter checkbox grid so a large tag pool stays
+   usable instead of pushing the rest of the filter UI off-screen.
+   Scrolls inside the fieldset when it overflows. */
+.ml-filter-bar .Inputfield_tags .InputfieldContent {
+	max-height: 14rem;
+	overflow-y: auto;
+}
+
+/* The actions sub-fieldset carries skipLabelHeader on the PHP
+   side; this hides any residual header chrome the admin theme
+   might still emit so the wrapper is pure layout grouping with
+   zero visual chrome. */
+.ml-filter-bar .Inputfield_mlActions > .InputfieldHeader {
+	display: none;
+}
+
+/* Action row: Apply + Reset pinned to the left edge, primary
+   (Apply) first. Buttons shrink to their content width inside
+   the flex row so they don't stretch to a column-width
+   allocation. */
+.ml-filter-bar .Inputfield_mlActions > .InputfieldContent > .Inputfields {
+	display: flex;
+	justify-content: flex-start;
+	align-items: center;
+	gap: 0.5rem;
+}
+.ml-filter-bar .Inputfield_mlActions .Inputfield {
+	width: auto;
+	flex: 0 0 auto;
+	margin: 0;
+}
+
+/* Module-settings cog. Sits absolute in the .ml-root so it lifts
+   into the page-heading row regardless of where the admin theme
+   draws that row. Adjust top offset if the theme's heading sits
+   at a different height. */
+.ml-root {
+	position: relative;
+}
+.ml-config-link {
+	position: absolute;
+	top: -3rem;
+	right: 0;
+	z-index: 5;
+	color: #888;
+	text-decoration: none;
+	padding: 0.25rem 0.4rem;
+	font-size: 0.9rem;
+}
+.ml-config-link:hover {
+	color: #333;
+}
+
+/* Horizontal-scroll wrapper so the wide table degrades to a swipe
+   on narrow viewports rather than blowing out the layout. */
+.ml-table-scroll {
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+	margin-top: 1rem;
+}
+
+/* Table */
+.ml-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.ml-table thead th {
+	white-space: nowrap;
+	background: #f5f5f5;
+}
+.ml-th-sortable a {
+	color: inherit;
+	text-decoration: none;
+	display: block;
+}
+.ml-th-sortable:hover {
+	background: #ebebeb;
+}
+.ml-th-sort-active {
+	background: #e3edf9 !important;
+}
+.ml-sort-arrow {
+	margin-left: 4px;
+	font-size: 0.85em;
+}
+.ml-table th,
+.ml-table td {
+	padding: 0.5rem 0.75rem;
+	vertical-align: top;
+}
+.ml-table tbody tr:hover {
+	background: #fafafa;
+}
+/* Thumb cell — dimensions driven by --ml-thumb-longer (keep-ratio
+   path) and --ml-thumb-w / --ml-thumb-h (crop path), set on
+   .ml-root from the module config. Keep-ratio variant caps BOTH
+   axes to the same longer-side value so portraits cap on height
+   and landscapes cap on width — aspect always preserved. Crop
+   variant fixes the visible box to the exact configured W × H
+   and lets the browser handle the center crop via object-fit, so
+   the source can stay PW's lazily-generated 260 px admin
+   variation. */
+.ml-cell-thumb img {
+	display: block;
+	max-width: var(--ml-thumb-longer, 100px);
+	max-height: var(--ml-thumb-longer, 100px);
+	width: auto;
+	height: auto;
+	border: 1px solid #e5e5e5;
+	background: #fafafa;
+}
+.ml-cell-thumb img.ml-thumb-crop {
+	width: var(--ml-thumb-w, 120px);
+	height: var(--ml-thumb-h, 80px);
+	max-width: none;
+	max-height: none;
+	object-fit: cover;
+}
+/* Clickable when host page is editable — JS opens the PW image
+   editor in a modal iframe. data-file-hash is only set in that case
+   (and is the matching key for finding the gridImage item there). */
+.ml-cell-thumb[data-file-hash] {
+	cursor: pointer;
+}
+.ml-cell-thumb[data-file-hash] img:hover {
+	outline: 2px solid #5b8cd6;
+}
+.ml-cell-page a {
+	font-weight: 500;
+}
+.ml-table code {
+	font-size: 0.85em;
+	word-break: break-all;
+}
+.ml-cell-desc,
+.ml-cell-tags {
+	min-width: 14rem;
+	max-width: 28rem;
+}
+.ml-cell-nowrap {
+	white-space: nowrap;
+}
+
+/* Non-applicable custom-field cell — the row's image field doesn't
+   host this custom, so the cell can't be edited. Muted + not-allowed
+   cursor signal that visually; a title attribute names the reason. */
+.ml-cell-na {
+	color: #c4c4c4;
+	cursor: not-allowed;
+	text-align: center;
+	user-select: none;
+}
+
+/* Inline edit */
+.ml-cell-editable {
+	/* pointer (not text) so iOS Safari fires click events on non-native
+	   interactive elements — without this, taps just trigger :hover. */
+	cursor: pointer;
+	position: relative;
+	/* Eliminate the 300ms tap delay on iOS and prevent double-tap zoom on cells. */
+	touch-action: manipulation;
+}
+.ml-cell-editable:hover {
+	background: #fffbe6;
+}
+.ml-cell-editable:empty::before {
+	content: "—";
+	color: #ccc;
+}
+.ml-editing {
+	background: #fffce8;
+	padding: 4px;
+}
+.ml-cell-input {
+	width: 100%;
+	box-sizing: border-box;
+	font: inherit;
+	border: 1px solid #888;
+	border-radius: 2px;
+	padding: 4px 6px;
+	background: #fff;
+}
+textarea.ml-cell-input {
+	resize: vertical;
+	min-height: 4.5em;
+}
+.ml-cell-saving {
+	opacity: 0.6;
+}
+.ml-cell-saved {
+	background: #e6f7e1 !important;
+	transition: background 0.3s ease-out;
+}
+.ml-cell-error {
+	background: #fde2e2 !important;
+	transition: background 0.3s ease-out;
+}
+
+/* AJAX re-render: dim the results region while a fetch is in flight,
+   and block clicks so users don't pile up overlapping requests. */
+.ml-results.ml-loading {
+	opacity: 0.5;
+	pointer-events: none;
+	transition: opacity 0.15s ease-out;
+}
+
+/* Bulk-selection checkbox column — narrow, vertical-centered. */
+.ml-cell-select {
+	width: 2rem;
+	text-align: center;
+	vertical-align: middle !important;
+	cursor: default;
+}
+.ml-cell-select input[type="checkbox"] {
+	margin: 0;
+	cursor: pointer;
+}
+
+/* Tag editor — checkbox grid for useTags=2 whitelist mode. */
+.ml-tag-editor {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	background: #fff;
+	border: 1px solid #888;
+	border-radius: 2px;
+	padding: 6px;
+	min-width: 12rem;
+}
+.ml-tag-editor-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	max-height: 12rem;
+	overflow-y: auto;
+}
+.ml-tag-editor-list label {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	white-space: nowrap;
+	cursor: pointer;
+	font-weight: normal;
+}
+.ml-tag-editor-done {
+	align-self: flex-start;
+	padding: 2px 10px;
+	cursor: pointer;
+}
+
+/* Batch-edit mode picker (Add default, Replace). Shown only when the
+   cell being edited belongs to the active selection. Commit happens on
+   blur or click-outside-cell, not on radio click. */
+.ml-batch-mode {
+	display: flex;
+	gap: 12px;
+	margin-top: 6px;
+	font-size: 0.9em;
+}
+.ml-batch-mode label {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	cursor: pointer;
+	font-weight: normal;
+}
+
+/* Pagination row — flex with two groups: left (summary + prev/next),
+   right (per-page picker + columns-dialog icon). The right group's
+   gap is wider than the row gap so the icon doesn't crowd the
+   picker. margin-left:auto pins the right group to the far edge. */
+.ml-pagination {
+	display: flex;
+	align-items: center;
+	gap: 1rem;
+	margin: 1rem 0 0;
+}
+.ml-pagination-left {
+	display: flex;
+	gap: 1rem;
+	align-items: center;
+}
+.ml-pagination-right {
+	display: flex;
+	gap: 1.25rem;
+	align-items: center;
+	margin-left: auto;
+}
+.ml-pagination-summary {
+	color: #555;
+}
+.ml-pagination-link {
+	text-decoration: none;
+}
+.ml-columns-toggle {
+	font-size: 1.05rem;
+	line-height: 1;
+	color: #555;
+	background: transparent;
+	border: 0;
+	padding: 0.25rem 0.4rem;
+	cursor: pointer;
+}
+.ml-columns-toggle:hover {
+	color: #111;
+}
+.ml-columns-toggle .fa {
+	display: block;
+}
+.ml-page-size {
+	color: #555;
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+.ml-page-size-picker {
+	font: inherit;
+	padding: 0.1rem 0.3rem;
+}
+
+/* Variations cell renders just a count — right-align like other
+   numeric cells for quick at-a-glance scanning. */
+.ml-cell-variations {
+	text-align: right;
+	color: #555;
+}
+
+/* Mobile tweaks. Filter controls already stack via the admin theme's
+   columnWidth handling; here we let the pagination flex-wrap so the
+   two zones stack vertically on narrow viewports, and shrink the
+   gallery thumbs a touch so a row fits without horizontal scrolling
+   becoming the only option. */
+@media (max-width: 640px) {
+	.ml-pagination {
+		flex-wrap: wrap;
+		row-gap: 0.5rem;
+	}
+	.ml-pagination-right {
+		margin-left: 0;
+		flex-wrap: wrap;
+	}
+	.ml-cell-thumb img {
+		max-width: 80px;
+	}
+	.ml-popup-editor {
+		width: 100vw;
+		max-width: 100vw;
+		max-height: 95vh;
+		border-radius: 0;
+	}
+	.ml-image-modal {
+		width: 100vw;
+		height: 100vh;
+		border-radius: 0;
+	}
+}
+
+/* Popup editor for textarea-typed subfields (description, custom
+   FieldtypeTextarea customs like "summary"). Native <dialog>, so
+   the browser handles the backdrop + Esc + focus trap for us. */
+.ml-popup-editor {
+	border: 1px solid #ccc;
+	border-radius: 4px;
+	padding: 1.25rem;
+	width: min(720px, 92vw);
+	max-height: 90vh;
+	overflow: auto;
+	background: #fff;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ml-popup-editor::backdrop {
+	background: rgba(0, 0, 0, 0.4);
+}
+.ml-popup-editor header {
+	font-weight: 600;
+	font-size: 1.05em;
+	margin-bottom: 0.75rem;
+}
+/* Secondary help text inside a popup (e.g. rename placeholder
+   syntax). Muted so it sits below the title without competing
+   with the input itself. */
+.ml-popup-hint {
+	margin: -0.25rem 0 0.75rem;
+	color: #777;
+	font-size: 0.85em;
+}
+.ml-popup-editor textarea {
+	display: block;
+	width: 100%;
+	min-height: 14em;
+	box-sizing: border-box;
+	font: inherit;
+	padding: 0.5rem;
+	border: 1px solid #c0c0c0;
+	border-radius: 3px;
+	resize: vertical;
+}
+.ml-popup-editor textarea:focus,
+.ml-popup-editor input[type="text"]:focus {
+	outline: 2px solid #5b8cd6;
+	outline-offset: -1px;
+}
+.ml-popup-editor input[type="text"] {
+	display: block;
+	width: 100%;
+	box-sizing: border-box;
+	font: inherit;
+	padding: 0.5rem;
+	border: 1px solid #c0c0c0;
+	border-radius: 3px;
+}
+
+/* Rename popup: stem input + locked extension chip side by side.
+   The extension stays inert (no focus, no editing) and visually
+   tags itself as immutable so the user doesn't try to type into it. */
+.ml-popup-filename {
+	display: flex;
+	align-items: stretch;
+	gap: 0;
+}
+.ml-popup-filename .ml-popup-input {
+	flex: 1 1 auto;
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+	border-right: 0;
+}
+.ml-popup-filename-ext {
+	display: inline-flex;
+	align-items: center;
+	padding: 0 0.5rem;
+	font: inherit;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	color: #777;
+	background: #f5f5f5;
+	border: 1px solid #c0c0c0;
+	border-top-right-radius: 3px;
+	border-bottom-right-radius: 3px;
+	user-select: none;
+}
+
+/* Filename cell — split into stem + extension so the inline edit
+   only touches the stem. Extension reads muted so the immutable
+   part is visually distinguishable at a glance. */
+.ml-cell-filename code {
+	display: inline;
+}
+.ml-cell-filename .ml-fn-ext {
+	color: #999;
+}
+/* Multilang tabs inside the popup — minimal styling that matches
+   the rest of the popup (tab bar above a single visible pane). */
+.ml-langtabs {
+	display: flex;
+	flex-direction: column;
+}
+.ml-langtabs-bar {
+	display: flex;
+	gap: 0.25rem;
+	border-bottom: 1px solid #d0d0d0;
+	margin-bottom: 0.5rem;
+}
+.ml-langtabs-tab {
+	background: #f5f5f5;
+	border: 1px solid #d0d0d0;
+	border-bottom: 0;
+	border-radius: 3px 3px 0 0;
+	padding: 0.35rem 0.75rem;
+	font: inherit;
+	cursor: pointer;
+	color: #555;
+}
+.ml-langtabs-tab:hover {
+	background: #e5e5e5;
+}
+.ml-langtabs-tab.ml-langtabs-tab-active {
+	background: #fff;
+	border-color: #c0c0c0;
+	color: #111;
+	font-weight: 600;
+	margin-bottom: -1px;
+}
+.ml-langtabs-pane {
+	display: block;
+	width: 100%;
+	box-sizing: border-box;
+	font: inherit;
+	padding: 0.5rem;
+	border: 1px solid #c0c0c0;
+	border-radius: 3px;
+	resize: vertical;
+}
+.ml-langtabs-pane:focus {
+	outline: 2px solid #5b8cd6;
+	outline-offset: -1px;
+}
+textarea.ml-langtabs-pane {
+	min-height: 12em;
+}
+
+/* Whitelist-mode tags: grid of checkboxes. Caps the height so a
+   long whitelist scrolls inside the dialog instead of pushing the
+   footer off-screen. */
+.ml-popup-tag-list {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+	gap: 0.25rem 0.75rem;
+	max-height: 50vh;
+	overflow-y: auto;
+	padding: 0.25rem;
+	border: 1px solid #e5e5e5;
+	border-radius: 3px;
+}
+.ml-popup-tag-list label {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	cursor: pointer;
+	padding: 0.2rem 0.3rem;
+	border-radius: 2px;
+}
+.ml-popup-tag-list label:hover {
+	background: #f5f5f5;
+}
+
+/* Column visibility — picker lives inside .ml-columns-dialog,
+   opened from the "Columns…" button in the pagination row. CSS
+   hides matching [data-col] cells; state syncs to $user->meta
+   via the user-prefs endpoint. */
+.ml-col-hidden {
+	display: none !important;
+}
+.ml-columns-dialog {
+	border: 1px solid #ccc;
+	border-radius: 4px;
+	padding: 1.25rem;
+	width: min(420px, 92vw);
+	max-height: 85vh;
+	overflow: auto;
+	background: #fff;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ml-columns-dialog::backdrop {
+	background: rgba(0, 0, 0, 0.4);
+}
+.ml-columns-dialog header {
+	font-weight: 600;
+	font-size: 1.05em;
+	margin-bottom: 0.5rem;
+}
+.ml-columns-hint {
+	margin: 0 0 0.75rem;
+	color: #777;
+	font-size: 0.9em;
+}
+.ml-columns-dialog footer {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 1rem;
+}
+.ml-columns-close {
+	font: inherit;
+	padding: 0.3rem 0.9rem;
+	cursor: pointer;
+}
+
+/* Bulk-result modal — replaces the old alert() for the
+   selection-as-paintbrush save report. Same chrome as the columns
+   dialog (border, padding, backdrop), but a touch wider to keep
+   long failure messages readable, and the inner list scrolls
+   when the report runs long. */
+.ml-bulk-result-dialog {
+	border: 1px solid #ccc;
+	border-radius: 4px;
+	padding: 1.25rem;
+	width: min(640px, 92vw);
+	max-height: 85vh;
+	overflow: auto;
+	background: #fff;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ml-bulk-result-dialog::backdrop {
+	background: rgba(0, 0, 0, 0.4);
+}
+.ml-bulk-result-header {
+	font-weight: 600;
+	font-size: 1.05em;
+	margin-bottom: 0.75rem;
+}
+.ml-bulk-result-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	max-height: 50vh;
+	overflow-y: auto;
+	border: 1px solid #e5e5e5;
+	border-radius: 3px;
+	background: #fafafa;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 0.85em;
+}
+.ml-bulk-result-list[hidden] {
+	display: none;
+}
+.ml-bulk-result-list li {
+	padding: 0.35rem 0.6rem;
+	border-bottom: 1px solid #eee;
+	word-break: break-word;
+	color: #c0392b;
+}
+.ml-bulk-result-list li:last-child {
+	border-bottom: 0;
+}
+.ml-bulk-result-dialog footer {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 1rem;
+}
+.ml-bulk-result-close {
+	font: inherit;
+	padding: 0.3rem 0.9rem;
+	cursor: pointer;
+}
+/* Single-column stack so the dialog's top-to-bottom reading order
+   matches the table's left-to-right column order. Each <li> is a
+   full-width row carrying checkbox + label + up/down reorder
+   buttons; the dialog itself caps height at 85vh and scrolls
+   internally when the list grows past the viewport. */
+.ml-columns-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.15rem;
+}
+.ml-columns-list li {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+	cursor: grab;
+}
+.ml-columns-list li:active {
+	cursor: grabbing;
+}
+.ml-columns-list li.ml-dragging {
+	opacity: 0.35;
+}
+.ml-columns-list label {
+	flex: 1 1 auto;
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	cursor: pointer;
+	padding: 0.2rem 0.3rem;
+	border-radius: 2px;
+	min-width: 0;
+}
+.ml-columns-list label:hover {
+	background: #f5f5f5;
+}
+.ml-col-move {
+	flex: 0 0 auto;
+	background: transparent;
+	border: 0;
+	color: #888;
+	cursor: pointer;
+	padding: 0.2rem 0.35rem;
+	line-height: 1;
+	font-size: 0.85em;
+	border-radius: 2px;
+}
+.ml-col-move:hover {
+	background: #f0f0f0;
+	color: #333;
+}
+.ml-col-move:focus-visible {
+	outline: 2px solid #5b8cd6;
+	outline-offset: -1px;
+}
+
+/* Visually-hidden live region — kept in the DOM and announced by
+   screen readers, invisible to sighted users. Same idiom as
+   Bootstrap's .visually-hidden, but local to the module. */
+.ml-live-region {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* Editable cells advertise themselves as buttons for keyboard
+   users — show a focus ring so the active cell is obvious. */
+.ml-cell-editable:focus-visible,
+.ml-cell-thumb[role="button"]:focus-visible {
+	outline: 2px solid #5b8cd6;
+	outline-offset: -2px;
+}
+
+/* Image-editor modal — wraps PW's ProcessPageEdit in an iframe so
+   the user gets the native crop / focus / variations UI plus all
+   page-level field editing. Sized near-fullscreen to give the
+   inner admin chrome room to breathe. */
+.ml-image-modal {
+	width: 95vw;
+	height: 95vh;
+	max-width: none;
+	max-height: none;
+	padding: 0;
+	border: 1px solid #ccc;
+	border-radius: 4px;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	background: #fff;
+}
+.ml-image-modal::backdrop {
+	background: rgba(0, 0, 0, 0.5);
+}
+.ml-image-modal-bar {
+	flex: 0 0 auto;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.5rem 1rem;
+	border-bottom: 1px solid #e5e5e5;
+	background: #f5f5f5;
+	gap: 1rem;
+}
+.ml-image-modal-title {
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.ml-image-modal-iframe {
+	flex: 1 1 auto;
+	width: 100%;
+	border: 0;
+	background: #fff;
+}
+.ml-popup-editor footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	margin-top: 1rem;
+}
+.ml-popup-editor .ml-batch-mode {
+	margin: 0.75rem 0 0;
+}
+
+/* Export / Import — collapsed fieldset at the bottom of the page.
+   The download is a direct <a>, the upload is AJAX-posted so the
+   user stays on their current filter view. */
+.ml-export-import {
+	margin-top: 1.5rem;
+}
+.ml-ei-help {
+	color: #555;
+	margin: 0 0 0.75rem;
+}
+.ml-import-form {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	margin: 0.5rem 0 0;
+}
+.ml-ei-file {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	color: #555;
+}
+.ml-import-status {
+	margin-top: 0.75rem;
+	white-space: pre-wrap;
+	color: #444;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 0.85em;
+}
+
+/* Empty / debug */
+.ml-empty {
+	padding: 2rem;
+	text-align: center;
+	color: #888;
+}
+.ml-debug dt {
+	font-weight: 600;
+	margin-top: 0.5rem;
+}
+.ml-debug pre {
+	background: #f5f5f5;
+	padding: 0.75rem;
+	border: 1px solid #e5e5e5;
+	border-radius: 3px;
+	overflow-x: auto;
+	max-height: 24rem;
+}
