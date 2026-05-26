@@ -17,7 +17,7 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		// --- Thumbnail rendering ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Thumbnail');
-		$fs->description = $this->_('Per-row preview image rendered into the table. The defaults match PW\'s admin image-field thumbnail (260 px on the longer axis, quality 90) so a variation already generated when the image was last viewed in the image-field UI is reused — no second resize pass per row.');
+		$fs->description = $this->_('Per-row preview image rendered into the table. The defaults match PW\'s admin image-field thumbnail (260 px on the shorter axis, quality 90, ratio preserved) so a variation already generated when the image was last viewed in the image-field UI is reused — no second resize pass per row.');
 
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbWidth';

@@ -20,11 +20,14 @@ class ProcessMediaLibrary extends Process {
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 	// Match PW's admin image-field UI defaults: gridSize*2 = 130*2 = 260
-	// on the longer axis, quality 90. When the table runs in keep-ratio
-	// mode, the runtime mirrors the admin's longer-axis logic so the
-	// variation PW lazily creates on first image-field view (e.g.
-	// "image.0x260.jpg" for portraits, "image.260x0.jpg" for landscapes)
-	// is reused without a second resize pass per row.
+	// on the SHORTER axis (the admin grid uses square cells, so the
+	// shorter side is the one scaled to fill the cell while the longer
+	// side overflows). Quality 90 matches $config->imageSizerOptions.
+	// In keep-ratio mode the runtime mirrors the admin's exact call
+	// signature so the variation PW lazily creates on first
+	// image-field view ("image.0x260.jpg" for landscapes,
+	// "image.260x0.jpg" for portraits) is reused without a second
+	// resize pass per row.
 	const THUMB_WIDTH_DEFAULT   = 260;
 	const THUMB_HEIGHT_DEFAULT  = 260;
 	const THUMB_QUALITY_DEFAULT = 90;
@@ -2272,24 +2275,37 @@ class ProcessMediaLibrary extends Process {
 			}
 			if (!$img instanceof Pageimage) continue;
 
-			// Keep-ratio mode mirrors PW's admin image-field UI:
-			// scale the LONGER axis to the configured width cap
-			// (height for portraits, width for landscapes). Same
-			// call signature PW makes itself on first view of the
-			// image in the field UI, so the variation it lazily
-			// generated (basename.0x260.jpg or basename.260x0.jpg
-			// with PW's defaults) is reused — no second resize pass
-			// per row. Images already smaller than the cap on both
-			// axes pass through unmodified (admin behaves the same).
+			// Keep-ratio mode mirrors PW's admin image-field UI
+			// (InputfieldImage::getAdminThumb): for landscape /
+			// square originals the SHORTER axis (height) is capped
+			// to the configured size via $img->size(0, $cap), for
+			// portraits the SHORTER axis (width) is capped via
+			// $img->size($cap, 0). That's the same call signature
+			// PW makes itself on first render of the image in the
+			// field UI, so the variation it lazily produced
+			// (basename.0x260.jpg for landscapes or basename.260x0.jpg
+			// for portraits with PW's defaults) is reused byte-for-byte
+			// — no second resize pass per row.
+			//
+			// Note this means the longer axis stays proportional and
+			// can be wider than $cap. In CSS the table thumb is
+			// constrained via max-width, so a 392×260 source still
+			// renders at the same visible size as a 120×80 crop;
+			// the bigger source just gives sharper HiDPI rendering.
+			//
+			// Pass-through when the original is already ≤ $cap on
+			// its shorter axis — admin behaves the same (skip resize).
 			if ($thumb['keepRatio']) {
 				$cap  = $thumb['width'];
 				$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
-				if ($img->height > $cap) {
-					$thumbImg = $img->size(0, $cap, $opts);
-				} elseif ($img->width > $cap) {
-					$thumbImg = $img->size($cap, 0, $opts);
+				if ($img->width >= $img->height) {
+					$thumbImg = ($img->height > $cap)
+						? $img->size(0, $cap, $opts)
+						: $img;
 				} else {
-					$thumbImg = $img;
+					$thumbImg = ($img->width > $cap)
+						? $img->size($cap, 0, $opts)
+						: $img;
 				}
 			} else {
 				$thumbImg = $img->size($thumb['width'], $thumb['height'], [
