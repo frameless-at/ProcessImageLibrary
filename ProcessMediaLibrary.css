@@ -129,27 +129,6 @@
 	max-height: none;
 	object-fit: cover;
 }
-/* Animated GIFs get a badge in the bottom-right of the cell since
-   the static thumbnail can't convey motion. SVG cells stay
-   unmarked — the file is vector and "live", but visually there's
-   nothing to flag. */
-.ml-cell-thumb {
-	position: relative;
-}
-.ml-cell-thumb[data-ext="gif"]::after {
-	content: "GIF";
-	position: absolute;
-	right: 0.5rem;
-	bottom: 0.5rem;
-	font-size: 0.65rem;
-	font-weight: 700;
-	letter-spacing: 0.05em;
-	color: #fff;
-	background: rgba(0, 0, 0, 0.7);
-	padding: 1px 4px;
-	border-radius: 2px;
-	pointer-events: none;
-}
 /* Clickable when host page is editable — JS opens the PW image
    editor in a modal iframe. data-file-hash is only set in that case
    (and is the matching key for finding the gridImage item there). */
