@@ -895,6 +895,131 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
+	 * Inline file rename. POSTed from the filename cell editor; the
+	 * client sends just the new stem (extension stays locked in the
+	 * UI), so the server reattaches the original extension and runs
+	 * the rename through Pagefile::rename(). Variation files are
+	 * removed first because their names embed the OLD basename and
+	 * would otherwise become orphan disk junk after the rename.
+	 *
+	 * Response carries the resulting basename so the client can swap
+	 * the row's identity attrs (data-basename, selection key) in
+	 * place — there's no follow-up table re-render, the row keeps its
+	 * focus and selection.
+	 */
+	public function ___executeRename() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+
+		$pageId      = (int) $input->post('pageId');
+		$fieldName   = $sanitizer->fieldName((string) $input->post('fieldName'));
+		$oldBasename = basename((string) $input->post('basename'));
+		$newStemRaw  = (string) $input->post('value');
+
+		if (!$pageId || !$fieldName || !$oldBasename) {
+			return $this->jsonError('Missing required parameter');
+		}
+		if (!in_array($fieldName, $this->discoverImageFields(), true)) {
+			return $this->jsonError('Field is not a managed image field');
+		}
+
+		$page = $this->wire('pages')->get($pageId);
+		if (!$page->id) return $this->jsonError('Page not found', 404);
+		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+
+		$img = $this->resolvePageimage($page, $fieldName, $oldBasename);
+		if (!$img) return $this->jsonError('Image not found in field', 404);
+
+		// Sanitize the stem: PW's filename sanitizer normalizes case,
+		// strips invalid chars, applies basename rules. We only want
+		// the stem so any dot the user typed gets dropped — the
+		// extension is preserved from the original file.
+		$newStem = $sanitizer->filename($newStemRaw, true);
+		$newStem = preg_replace('/\.+/', '', $newStem) ?? '';
+		if ($newStem === '') {
+			return $this->jsonError('New filename is empty');
+		}
+
+		$dotPos = strrpos($oldBasename, '.');
+		$ext    = $dotPos === false ? '' : substr($oldBasename, $dotPos);
+		$newBasename = $newStem . $ext;
+
+		if ($newBasename === $oldBasename) {
+			return $this->jsonResponse([
+				'ok'        => true,
+				'basename'  => $oldBasename,
+				'unchanged' => true,
+			]);
+		}
+
+		// Collision check inside the same Pageimages collection. Single-
+		// image fields can't collide with themselves; multi-image fields
+		// need an explicit lookup.
+		$fieldValue = $page->getUnformatted($fieldName);
+		if ($fieldValue instanceof Pageimages) {
+			$existing = $fieldValue->getFile($newBasename);
+			if ($existing && $existing !== $img) {
+				return $this->jsonError(
+					'A file named "' . $newBasename . '" already exists in this field'
+				);
+			}
+		}
+
+		// Drop variations before the rename — the cached files (e.g.
+		// basename.0x260.jpg) are keyed by the OLD basename and would
+		// be unreachable after rename. PW regenerates them on demand.
+		if (method_exists($img, 'removeVariations')) {
+			$img->removeVariations();
+		}
+
+		if (!method_exists($img, 'rename')) {
+			return $this->jsonError('Rename API not available on this ProcessWire version');
+		}
+
+		try {
+			$renameResult = $img->rename($newBasename);
+		} catch (\Throwable $e) {
+			return $this->jsonError('Rename error: ' . $e->getMessage());
+		}
+		if ($renameResult === false) {
+			return $this->jsonError('Rename failed');
+		}
+
+		$page->of(false);
+		if (!$page->save($fieldName)) {
+			return $this->jsonError('Save failed after rename');
+		}
+
+		$this->wire('cache')->deleteFor($this);
+
+		// $img->basename reflects the new name in-place after rename();
+		// echo that back so the client can rewrite cell attrs without
+		// guessing what the sanitizer did to the stem.
+		$finalBasename = (string) $img->basename;
+		$finalDot      = strrpos($finalBasename, '.');
+		return $this->jsonResponse([
+			'ok'        => true,
+			'basename'  => $finalBasename,
+			'stem'      => $finalDot === false ? $finalBasename : substr($finalBasename, 0, $finalDot),
+			'ext'       => $finalDot === false ? '' : substr($finalBasename, $finalDot),
+			'unchanged' => false,
+		]);
+	}
+
+	/**
 	 * Render an error response with an HTTP status code that JS callers can
 	 * branch on. Returned from executeSave; safe to use in any JSON endpoint.
 	 */
@@ -1773,6 +1898,7 @@ class ProcessMediaLibrary extends Process {
 			'saveUrl'   => $this->wire('page')->url . 'save/',
 			'renderUrl' => $this->wire('page')->url . 'data/',
 			'bulkUrl'   => $this->wire('page')->url . 'bulk/',
+			'renameUrl' => $this->wire('page')->url . 'rename/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -1811,6 +1937,7 @@ class ProcessMediaLibrary extends Process {
 				'save'             => $this->_('Save'),
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
+				'rename'           => $this->_('New filename'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
 				'importSaved'      => $this->_('Saved'),
@@ -2263,7 +2390,23 @@ class ProcessMediaLibrary extends Process {
 			$out .= '</td>';
 
 			$out .= '<td data-col="field"><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
-			$out .= '<td data-col="filename"><code>' . $san->entities((string) $row['basename']) . '</code></td>';
+			// Filename cell — inline-editable, but only the stem; the
+			// extension stays locked and rides along with the rename
+			// on the server. Stem + ext are split server-side so the JS
+			// editor doesn't have to re-parse the basename.
+			$bn      = (string) $row['basename'];
+			$dotPos  = strrpos($bn, '.');
+			$stem    = $dotPos === false ? $bn : substr($bn, 0, $dotPos);
+			$extPart = $dotPos === false ? '' : substr($bn, $dotPos); // includes the dot
+			$renameAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Rename %s'), $bn
+			)));
+			$out .= '<td class="ml-cell-filename ml-cell-editable" data-col="filename" ' . $editAttrs . $editA11y . $renameAria
+				. ' data-subfield="basename" data-input="filename"'
+				. ' data-stem="' . $san->entities($stem) . '"'
+				. ' data-ext="' . $san->entities($extPart) . '">'
+				. '<code><span class="ml-fn-stem">' . $san->entities($stem) . '</span>'
+				. '<span class="ml-fn-ext">' . $san->entities($extPart) . '</span></code></td>';
 			$descAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 				$this->_('Edit description of %s'), (string) $row['basename']
 			)));
