@@ -1445,6 +1445,15 @@ class ProcessImageLibrary extends Process {
 			$selector  = $this->buildSelector($eligibleTemplates);
 			$rawData   = $this->wire('pages')->findRaw($selector, $rawFields);
 			$rows      = $this->flattenRows($rawData, $imageFields);
+			// Repeater / RepeaterMatrix integration: an image inside a
+			// repeater field lives on a hidden repeater_<field> page,
+			// not on the editor's mental "host" page. Resolve those
+			// rows to their owner page BEFORE we cache, so sort by
+			// pageTitle, the template filter, and the table's Page
+			// link all operate on the owner. The original pageId stays
+			// on the row — that's the storage truth the save / rename
+			// endpoints need to write to.
+			$rows = $this->resolveRepeaterRows($rows);
 			// Selector-based invalidation: PW expires this entry whenever a
 			// page matching the eligible templates is saved — including our
 			// own inline-edit endpoint that wraps $page->save().
@@ -1486,12 +1495,76 @@ class ProcessImageLibrary extends Process {
 			'imgs'  => $imageFields,
 			'cust'  => $this->getCustomByField(),
 		];
-		// Bump suffix when the cached row shape changes — older
-		// entries stored multilang values as JSON-encoded strings;
-		// the v2 path keeps them as raw {langId: value} arrays so
-		// normalizeDescription() can pick the editor's language at
-		// display time.
-		return 'rows-v3-' . substr(md5((string) json_encode($keyData)), 0, 16);
+		// Bump suffix when the cached row shape changes:
+		//   v2: multilang values as raw {langId: value} arrays (was JSON)
+		//   v3: multilang round-trip in export / import
+		//   v4: repeater pages resolved to owner (pageTitle / templateId
+		//       overridden; ownerPageId + repeaterField added)
+		return 'rows-v4-' . substr(md5((string) json_encode($keyData)), 0, 16);
+	}
+
+	/**
+	 * Resolve repeater / RepeaterMatrix rows to their owning user-
+	 * facing page. Walked once over the freshly-flattened row list:
+	 *
+	 *   1. Gather pageIds of rows whose templateId is in the
+	 *      repeater-template set.
+	 *   2. Batch-load those repeater pages via getById().
+	 *   3. For each, walk getForPageRoot() up through any nested
+	 *      repeater containers until a non-repeater owner shows up.
+	 *   4. Override pageTitle + templateId on the row with the
+	 *      owner's, and record ownerPageId + repeaterField so the
+	 *      hydrate step can build display URLs and the table can
+	 *      annotate the Field column with the repeater context.
+	 *
+	 * pageId itself stays put — the image lives on the repeater
+	 * page in PW's data model, so save / rename endpoints continue
+	 * to target the right slot.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function resolveRepeaterRows(array $rows): array {
+		if (!$rows) return $rows;
+		$repeaterIds = $this->repeaterTemplateIds();
+		if (!$repeaterIds) return $rows;
+
+		$repeaterPageIds = [];
+		foreach ($rows as $r) {
+			if (isset($repeaterIds[(int) $r['templateId']])) {
+				$repeaterPageIds[(int) $r['pageId']] = true;
+			}
+		}
+		if (!$repeaterPageIds) return $rows;
+
+		$ownerByRepeaterId = [];
+		$repeaterPages = $this->wire('pages')->getById(array_keys($repeaterPageIds));
+		foreach ($repeaterPages as $rp) {
+			$owner = method_exists($rp, 'getForPageRoot') ? $rp->getForPageRoot() : null;
+			if (!$owner || !$owner->id || $owner->id === $rp->id) continue;
+			$field = method_exists($rp, 'getForField') ? $rp->getForField() : null;
+			$ownerByRepeaterId[(int) $rp->id] = [
+				'ownerPageId'    => (int) $owner->id,
+				'ownerTitle'     => (string) $owner->title,
+				'ownerTemplate'  => (int) $owner->template->id,
+				'repeaterField'  => $field ? (string) $field->name : '',
+			];
+		}
+		if (!$ownerByRepeaterId) return $rows;
+
+		foreach ($rows as &$r) {
+			$pid = (int) $r['pageId'];
+			if (!isset($ownerByRepeaterId[$pid])) continue;
+			$info = $ownerByRepeaterId[$pid];
+			$r['ownerPageId']   = $info['ownerPageId'];
+			$r['repeaterField'] = $info['repeaterField'];
+			// Override pageTitle + templateId so sort / filter / search
+			// operate on the owner. Original pageId stays.
+			$r['pageTitle']     = $info['ownerTitle'];
+			$r['templateId']    = $info['ownerTemplate'];
+		}
+		unset($r);
+		return $rows;
 	}
 
 	/**
@@ -1817,12 +1890,20 @@ class ProcessImageLibrary extends Process {
 	protected function hydrateSlice(array $slice): array {
 		if (!$slice) return [];
 
-		$pageIds = array_values(array_unique(array_column($slice, 'pageId')));
+		// Load the storage page (for image resolution) AND the owner
+		// page (for display URLs). For non-repeater rows ownerPageId is
+		// unset and we just reuse the storage page. Both lookups share
+		// one batched getById call.
+		$idSet = [];
+		foreach ($slice as $r) {
+			if (!empty($r['pageId']))      $idSet[(int) $r['pageId']]      = true;
+			if (!empty($r['ownerPageId'])) $idSet[(int) $r['ownerPageId']] = true;
+		}
 		// Build an explicit id => Page map. PageArray inherits WireArray::get(),
 		// which treats integer keys as array indexes (0, 1, 2…), not page IDs,
 		// so $pages->get($pageId) would silently return the wrong page.
 		$pagesById = [];
-		foreach ($this->wire('pages')->getById($pageIds) as $p) {
+		foreach ($this->wire('pages')->getById(array_keys($idSet)) as $p) {
 			$pagesById[$p->id] = $p;
 		}
 		$customByField = $this->getCustomByField();
@@ -1837,8 +1918,14 @@ class ProcessImageLibrary extends Process {
 			$page = $pagesById[$row['pageId']] ?? null;
 			if (!$page || !$page->id) continue;
 
-			$row['pageUrl']     = $page->url;
-			$row['pageEditUrl'] = $page->editUrl;
+			// Display URLs point at the owner page when the image lives
+			// in a repeater field; storage stays on $page.
+			$displayPage = $page;
+			if (!empty($row['ownerPageId']) && isset($pagesById[(int) $row['ownerPageId']])) {
+				$displayPage = $pagesById[(int) $row['ownerPageId']];
+			}
+			$row['pageUrl']     = $displayPage->url;
+			$row['pageEditUrl'] = $displayPage->editUrl;
 
 			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
 			if (!$img) continue;
@@ -2175,11 +2262,17 @@ class ProcessImageLibrary extends Process {
 		$q->columnWidth = 33;
 		$outer->add($q);
 
+		// Template dropdown lists only user-facing templates — the
+		// auto-generated repeater_<field> templates are excluded
+		// because rows from repeater fields have their templateId
+		// rewritten to the owner page's template at flatten time.
+		// Picking the owner template here naturally captures those
+		// rows too.
 		$tpl = $modules->get('InputfieldSelect');
 		$tpl->name        = 'template';
 		$tpl->label       = $this->_('Template');
 		$tpl->addOption('', $this->_('All templates'));
-		foreach ($eligibleTemplates as $t) $tpl->addOption($t, $t);
+		foreach ($this->userFacingTemplates($eligibleTemplates) as $t) $tpl->addOption($t, $t);
 		$tpl->value       = $filters['template'];
 		$tpl->columnWidth = 33;
 		$outer->add($tpl);
@@ -2501,7 +2594,14 @@ class ProcessImageLibrary extends Process {
 			}
 			$out .= '</td>';
 
-			$out .= '<td data-col="field"><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
+			// Field cell — for repeater-hosted rows, prefix the
+			// containing repeater field so editors can tell at a glance
+			// that the image lives inside (e.g.) "gallery.images" rather
+			// than a top-level field "images".
+			$fieldLabel = !empty($row['repeaterField'])
+				? $san->entities((string) $row['repeaterField']) . '.' . $san->entities((string) $row['fieldName'])
+				: $san->entities((string) $row['fieldName']);
+			$out .= '<td data-col="field"><code>' . $fieldLabel . '</code></td>';
 			// Filename cell — inline-editable, but only the stem; the
 			// extension stays locked and rides along with the rename
 			// on the server. Stem + ext are split server-side so the JS
