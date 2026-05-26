@@ -114,6 +114,12 @@
 			var subfield = td.dataset.subfield;
 			var tagsMode = parseInt(td.dataset.tagsMode || '0', 10);
 
+			// Filename rename has its own widget — text input + locked
+			// extension. Routed through commit()'s rename branch.
+			if (td.dataset.input === 'filename') {
+				return buildPopupFilename(td);
+			}
+
 			if (subfield === 'tags' && tagsMode === 2) {
 				return buildPopupCheckboxes(td, original);
 			}
@@ -273,6 +279,33 @@
 			};
 		}
 
+		// Filename rename: text input for the stem with the original
+		// extension visible-but-locked beside it. The widget only ever
+		// reports the stem back; commit() reattaches the extension on
+		// the server side using the original basename it has on file.
+		function buildPopupFilename(td) {
+			var wrap = document.createElement('div');
+			wrap.className = 'ml-popup-filename';
+			var input = document.createElement('input');
+			input.type = 'text';
+			input.className = 'ml-popup-input';
+			input.value = td.dataset.stem || '';
+			input.setAttribute('aria-label', labels.rename || 'New filename');
+			input.setAttribute('autocomplete', 'off');
+			input.setAttribute('spellcheck', 'false');
+			var extSpan = document.createElement('span');
+			extSpan.className = 'ml-popup-filename-ext';
+			extSpan.textContent = td.dataset.ext || '';
+			wrap.appendChild(input);
+			wrap.appendChild(extSpan);
+			return {
+				element: wrap,
+				rename: true,
+				getValue: function () { return input.value; },
+				focus:    function () { input.focus(); input.select(); }
+			};
+		}
+
 		function buildPopupCheckboxes(td, original) {
 			var allowed = [];
 			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
@@ -319,7 +352,10 @@
 			td.classList.add('ml-editing');
 
 			var original = td.textContent;
-			var batch    = isBatchEdit(td);
+			// Filename rename is a per-row operation — batch broadcast
+			// makes no sense (each file needs a unique name), so the
+			// batch path is disabled even when this row is selected.
+			var batch    = isBatchEdit(td) && td.dataset.input !== 'filename';
 			var widget   = buildPopupWidget(td, original);
 
 			var dialog = document.createElement('dialog');
@@ -390,6 +426,65 @@
 			function commit(mode) {
 				if (committed) return;
 				committed = true;
+
+				// Filename rename — own endpoint, own success path. The
+				// widget reports just the stem; the server reattaches
+				// the original extension, sanitizes the stem, deletes
+				// orphan variations and persists. On success we trigger
+				// a results-region re-render so every cell in the row
+				// (thumb URL, data-basename refs, selection key) catches
+				// up to the new identity.
+				if (td.dataset.input === 'filename') {
+					var newStem = String(widget.getValue() || '').trim();
+					var oldStem = td.dataset.stem || '';
+					if (newStem === '' || newStem === oldStem) { teardown(); return; }
+					teardown();
+					td.classList.add('ml-cell-saving');
+					td.title = labels.saving || 'Saving…';
+
+					enqueueSave(td.dataset.pageId, function () {
+						var fd = new FormData();
+						fd.append('pageId',    td.dataset.pageId);
+						fd.append('fieldName', td.dataset.field);
+						fd.append('basename',  td.dataset.basename);
+						fd.append('value',     newStem);
+						if (config.csrf && config.csrf.name) {
+							fd.append(config.csrf.name, config.csrf.value);
+						}
+						return fetch(config.renameUrl, {
+							method: 'POST',
+							body: fd,
+							credentials: 'same-origin'
+						}).then(function (res) {
+							return res.json().then(function (data) {
+								return { status: res.status, data: data };
+							});
+						});
+					}).then(function (result) {
+						if (!td.isConnected) { return; }
+						td.classList.remove('ml-cell-saving');
+						if (result && result.data && result.data.ok) {
+							announce(labels.saved || 'Saved');
+							// Re-render the table so every basename-bound
+							// attr (thumb URL included) refreshes from
+							// the server.
+							replaceFromQs(location.search, false);
+						} else {
+							var reason = (result && result.data && result.data.error)
+								|| ('HTTP ' + (result && result.status));
+							console.error('[MediaLibrary] rename failed:', result);
+							td.title = reason;
+							flashCell(td, false);
+						}
+					}).catch(function (err) {
+						if (!td.isConnected) return;
+						td.classList.remove('ml-cell-saving');
+						console.error('[MediaLibrary] rename errored:', err);
+						td.title = (err && err.message) || labels.error || 'Network error';
+						flashCell(td, false);
+					});
+					return;
+				}
 
 				// Multilang widgets hand back an object {langId: value};
 				// single-lang widgets hand back a plain string. Pull
