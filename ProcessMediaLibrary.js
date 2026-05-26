@@ -370,7 +370,7 @@
 				var hint = document.createElement('p');
 				hint.className = 'ml-popup-hint';
 				hint.textContent = labels.renameHint
-					|| 'Placeholders: (n) counter, (n2)…(n5) padded, (slug) page slug, (field) field name.';
+					|| 'Placeholders: (n) counter, (n2)…(n5) padded, (p) page name, (f) field name.';
 				dialog.appendChild(hint);
 			}
 
