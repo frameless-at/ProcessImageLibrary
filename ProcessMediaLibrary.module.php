@@ -72,34 +72,50 @@ class ProcessMediaLibrary extends Process {
 
 	/**
 	 * Admin-configured list of column keys to render hidden by
-	 * default. Per-user toggles in localStorage override this.
+	 * default. The per-user prefs in $user->meta('mediaLibraryPrefs')
+	 * override this on a column-by-column basis.
 	 *
 	 * @return array<int,string>
 	 */
 	/**
-	 * Read the user's saved column preferences from their meta
-	 * (per-user, cross-device — concept-preferred location). Returns
-	 * a normalized shape so JS + render code don't need to defend.
+	 * Read the user's saved view preferences from their meta
+	 * (per-user, cross-device). Normalized shape so JS + render
+	 * code don't need to defend against partial / legacy payloads.
 	 *
-	 * @return array{visible:array<string,bool>,order:array<int,string>}
+	 * pageSize is validated against the admin's PAGE_SIZE_OPTIONS;
+	 * an unknown saved value falls through to null so the URL +
+	 * admin-default path can decide.
+	 *
+	 * @return array{columns:array{visible:array<string,bool>,order:array<int,string>},pageSize:int|null}
 	 */
-	protected function getUserColumnsPref(): array {
-		$raw = $this->wire('user')->meta('mediaLibraryColumns');
+	protected function getUserPrefs(): array {
+		$raw = $this->wire('user')->meta('mediaLibraryPrefs');
 		$visible = [];
 		$order   = [];
+		$pageSize = null;
 		if (is_array($raw)) {
-			if (isset($raw['visible']) && is_array($raw['visible'])) {
-				foreach ($raw['visible'] as $col => $vis) {
+			$cols = isset($raw['columns']) && is_array($raw['columns']) ? $raw['columns'] : [];
+			if (isset($cols['visible']) && is_array($cols['visible'])) {
+				foreach ($cols['visible'] as $col => $vis) {
 					$visible[(string) $col] = (bool) $vis;
 				}
 			}
-			if (isset($raw['order']) && is_array($raw['order'])) {
-				foreach ($raw['order'] as $col) {
+			if (isset($cols['order']) && is_array($cols['order'])) {
+				foreach ($cols['order'] as $col) {
 					if (is_string($col) && $col !== '') $order[] = $col;
 				}
 			}
+			if (isset($raw['pageSize'])) {
+				$ps = (int) $raw['pageSize'];
+				if ($ps > 0 && in_array($ps, $this->getPageSizeOptions(), true)) {
+					$pageSize = $ps;
+				}
+			}
 		}
-		return ['visible' => $visible, 'order' => $order];
+		return [
+			'columns'  => ['visible' => $visible, 'order' => $order],
+			'pageSize' => $pageSize,
+		];
 	}
 
 	protected function getDefaultHiddenColumns(): array {
@@ -393,7 +409,7 @@ class ProcessMediaLibrary extends Process {
 		// nothing's saved for a column, fall back to the admin's
 		// "hidden by default" config so a fresh user lands on the
 		// site-wide preset before they touch a checkbox.
-		$pref = $this->getUserColumnsPref();
+		$pref = $this->getUserPrefs()['columns'];
 		$visible = $pref['visible'];
 		$order   = $pref['order'];
 		$defaultHidden = array_flip($this->getDefaultHiddenColumns());
@@ -1418,11 +1434,14 @@ class ProcessMediaLibrary extends Process {
 	 * current state are skipped so we don't pile up empty saves.
 	 */
 	/**
-	 * Persist column visibility + order to the current user's meta
-	 * (mediaLibraryColumns key). JS debounces calls here whenever a
-	 * checkbox toggles or a column gets drag-reordered, so on next
-	 * page load — on any device — the user sees the same column
-	 * layout they left off with.
+	 * Persist the user's view preferences (column visibility / order
+	 * and chosen page size) to $user->meta('mediaLibraryPrefs'). JS
+	 * debounces calls here whenever the user toggles a checkbox,
+	 * drag-reorders a column, or picks a different page size, and
+	 * always sends the full state so the saved record stays
+	 * consistent. Cross-device by design — the same user on a
+	 * different browser sees the same layout + page size on next
+	 * load.
 	 */
 	public function ___executeUserPrefs() {
 		$config = $this->wire('config');
@@ -1437,26 +1456,38 @@ class ProcessMediaLibrary extends Process {
 			return $this->jsonError('Invalid CSRF token', 403);
 		}
 
-		$raw = (string) $this->wire('input')->post('columns');
+		$raw = (string) $this->wire('input')->post('prefs');
 		$data = $raw !== '' ? json_decode($raw, true) : null;
 		if (!is_array($data)) {
 			return $this->jsonError('Invalid payload');
 		}
 
-		$clean = ['visible' => [], 'order' => []];
-		if (isset($data['visible']) && is_array($data['visible'])) {
-			foreach ($data['visible'] as $col => $vis) {
-				if (!is_string($col) || $col === '') continue;
-				$clean['visible'][$col] = (bool) $vis;
+		$clean = [
+			'columns'  => ['visible' => [], 'order' => []],
+			'pageSize' => null,
+		];
+		if (isset($data['columns']) && is_array($data['columns'])) {
+			$cols = $data['columns'];
+			if (isset($cols['visible']) && is_array($cols['visible'])) {
+				foreach ($cols['visible'] as $col => $vis) {
+					if (!is_string($col) || $col === '') continue;
+					$clean['columns']['visible'][$col] = (bool) $vis;
+				}
+			}
+			if (isset($cols['order']) && is_array($cols['order'])) {
+				foreach ($cols['order'] as $col) {
+					if (is_string($col) && $col !== '') $clean['columns']['order'][] = $col;
+				}
 			}
 		}
-		if (isset($data['order']) && is_array($data['order'])) {
-			foreach ($data['order'] as $col) {
-				if (is_string($col) && $col !== '') $clean['order'][] = $col;
+		if (isset($data['pageSize'])) {
+			$ps = (int) $data['pageSize'];
+			if ($ps > 0 && in_array($ps, $this->getPageSizeOptions(), true)) {
+				$clean['pageSize'] = $ps;
 			}
 		}
 
-		$this->wire('user')->meta('mediaLibraryColumns', $clean);
+		$this->wire('user')->meta('mediaLibraryPrefs', $clean);
 		return $this->jsonResponse(['ok' => true]);
 	}
 
@@ -2006,15 +2037,20 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Whitelist-validate the ps GET param against PAGE_SIZE_OPTIONS,
-	 * falling back to PAGE_SIZE_DEFAULT for missing / out-of-range
-	 * values. URL-driven (not stored) so it stays bookmarkable
-	 * alongside the other filter / sort / page state.
+	 * Resolve the effective page size for this request, in priority
+	 * order: ?ps= URL param (whitelist-validated) → user's saved
+	 * preference in $user->meta → admin-configured default. URL
+	 * wins so explicit links stay bookmarkable; user pref kicks in
+	 * for clean URLs so cross-device pagination matches the user's
+	 * last choice.
 	 */
 	protected function readPageSize(): int {
-		$ps = (int) $this->wire('input')->get('ps');
 		$opts = $this->getPageSizeOptions();
-		return in_array($ps, $opts, true) ? $ps : $this->getDefaultPageSize();
+		$ps = (int) $this->wire('input')->get('ps');
+		if (in_array($ps, $opts, true)) return $ps;
+		$saved = $this->getUserPrefs()['pageSize'];
+		if ($saved !== null) return $saved;
+		return $this->getDefaultPageSize();
 	}
 
 	/**
@@ -2744,10 +2780,11 @@ class ProcessMediaLibrary extends Process {
 			// matching popup tab so multilang edits open straight on
 			// the user's working language.
 			'currentLangId'        => $this->getCurrentLangKey(),
-			// Cross-device column prefs from user meta. JS reads this
-			// for its initial in-memory state and POSTs back to the
-			// user-prefs endpoint on changes.
-			'userColumns'          => $this->getUserColumnsPref(),
+			// Cross-device view prefs from $user->meta. JS reads this
+			// for its initial in-memory state (columns + page size)
+			// and POSTs the full state back to the user-prefs endpoint
+			// on any change.
+			'userPrefs'            => $this->getUserPrefs(),
 			'userPrefsUrl'         => $this->wire('page')->url . 'user-prefs/',
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
