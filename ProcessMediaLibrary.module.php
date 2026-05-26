@@ -895,17 +895,28 @@ class ProcessMediaLibrary extends Process {
 	}
 
 	/**
-	 * Inline file rename. POSTed from the filename cell editor; the
-	 * client sends just the new stem (extension stays locked in the
-	 * UI), so the server reattaches the original extension and runs
-	 * the rename through Pagefile::rename(). Variation files are
-	 * removed first because their names embed the OLD basename and
-	 * would otherwise become orphan disk junk after the rename.
+	 * File rename. POSTed from the filename cell editor (single-image
+	 * path) and — once wired — from the batch rename path. The client
+	 * sends just the new stem; the server preserves the original
+	 * extension, resolves any placeholder tokens, sanitises and
+	 * persists. Variation files are removed first because their
+	 * names embed the OLD basename and would otherwise become orphan
+	 * disk junk after the rename.
 	 *
-	 * Response carries the resulting basename so the client can swap
-	 * the row's identity attrs (data-basename, selection key) in
-	 * place — there's no follow-up table re-render, the row keeps its
-	 * focus and selection.
+	 * Placeholder syntax (resolveRenamePattern):
+	 *   (n)         counter (integer)
+	 *   (n2)…(n5)   zero-padded counter, N digits
+	 *   (slug)      page name (PW URL slug)
+	 *   (field)     image field name
+	 *
+	 * For single-image rename n is always 1; batch will iterate.
+	 * Unrecognised placeholders survive into the sanitiser, which
+	 * usually strips the parens — so a literal "(foo)" lands as
+	 * "foo" in the resulting filename.
+	 *
+	 * Response carries the resulting basename / stem / ext so the
+	 * client can either replace the row in-place or re-render the
+	 * results region.
 	 */
 	public function ___executeRename() {
 		$config = $this->wire('config');
@@ -943,11 +954,20 @@ class ProcessMediaLibrary extends Process {
 		$img = $this->resolvePageimage($page, $fieldName, $oldBasename);
 		if (!$img) return $this->jsonError('Image not found in field', 404);
 
+		// Resolve placeholders BEFORE the filename sanitiser runs —
+		// the sanitiser strips parens and would otherwise mangle the
+		// "(n)" / "(slug)" tokens before they could be expanded.
+		$resolved = $this->resolveRenamePattern($newStemRaw, [
+			'n'     => 1,
+			'page'  => $page,
+			'field' => $fieldName,
+		]);
+
 		// Sanitize the stem: PW's filename sanitizer normalizes case,
 		// strips invalid chars, applies basename rules. We only want
 		// the stem so any dot the user typed gets dropped — the
 		// extension is preserved from the original file.
-		$newStem = $sanitizer->filename($newStemRaw, true);
+		$newStem = $sanitizer->filename($resolved, true);
 		$newStem = preg_replace('/\.+/', '', $newStem) ?? '';
 		if ($newStem === '') {
 			return $this->jsonError('New filename is empty');
@@ -1017,6 +1037,46 @@ class ProcessMediaLibrary extends Process {
 			'ext'       => $finalDot === false ? '' : substr($finalBasename, $finalDot),
 			'unchanged' => false,
 		]);
+	}
+
+	/**
+	 * Expand the rename pattern into a concrete stem for a given
+	 * image's context. Used by ___executeRename() and (future)
+	 * batch-rename so a pattern like "(slug)-(n2)" produces e.g.
+	 * "summer-festival-03" on the third row of a batch.
+	 *
+	 * Supported tokens:
+	 *   (n)              counter — $ctx['n']
+	 *   (n2) … (n5)      zero-padded counter, N digits
+	 *   (slug)           page name (PW URL slug) — $ctx['page']->name
+	 *   (field)          image field name — $ctx['field']
+	 *
+	 * Unknown tokens are passed through verbatim; the sanitiser
+	 * downstream usually strips the parens. The helper itself does
+	 * NOT sanitise — that's the caller's job, so future paths can
+	 * apply additional rules (uniqueness, collision suffix, …)
+	 * before the sanitiser runs.
+	 *
+	 * @param array{n?:int,page?:Page,field?:string} $ctx
+	 */
+	protected function resolveRenamePattern(string $pattern, array $ctx): string {
+		$n     = (int) ($ctx['n']     ?? 0);
+		$page  = $ctx['page']  ?? null;
+		$field = (string) ($ctx['field'] ?? '');
+
+		return preg_replace_callback(
+			'/\((n[2-5]?|slug|field)\)/',
+			function ($m) use ($n, $page, $field) {
+				$key = $m[1];
+				if ($key === 'n')     return (string) $n;
+				if ($key === 'slug')  return ($page instanceof Page && $page->id) ? (string) $page->name : '';
+				if ($key === 'field') return $field;
+				// n2 … n5 — zero-padded counter
+				$digits = (int) substr($key, 1);
+				return str_pad((string) $n, $digits, '0', STR_PAD_LEFT);
+			},
+			$pattern
+		) ?? $pattern;
 	}
 
 	/**
