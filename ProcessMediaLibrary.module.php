@@ -19,9 +19,15 @@ class ProcessMediaLibrary extends Process {
 	const CACHE_PREFIX = 'media-library-';
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
-	const THUMB_WIDTH_DEFAULT   = 120;
-	const THUMB_HEIGHT_DEFAULT  = 80;
-	const THUMB_QUALITY_DEFAULT = 80;
+	// Match PW's admin image-field UI defaults: gridSize*2 = 130*2 = 260
+	// on the longer axis, quality 90. When the table runs in keep-ratio
+	// mode, the runtime mirrors the admin's longer-axis logic so the
+	// variation PW lazily creates on first image-field view (e.g.
+	// "image.0x260.jpg" for portraits, "image.260x0.jpg" for landscapes)
+	// is reused without a second resize pass per row.
+	const THUMB_WIDTH_DEFAULT   = 260;
+	const THUMB_HEIGHT_DEFAULT  = 260;
+	const THUMB_QUALITY_DEFAULT = 90;
 
 	/**
 	 * Admin-configurable thumbnail dimensions, JPEG quality and
@@ -36,12 +42,14 @@ class ProcessMediaLibrary extends Process {
 		// Storage migrated from "thumbCrop" (true = crop) to
 		// "thumbKeepRatio" (true = keep aspect, no crop). Both keys
 		// are still read so installs that saved the old name keep
-		// working until the admin re-saves the config; the new key
-		// takes precedence when present.
+		// behaving as before until the admin re-saves the config.
+		// Fresh installs (nothing saved either way) default to
+		// keep-ratio on — that's the mode that lets the runtime
+		// reuse PW's lazily-generated admin variations.
 		$keepRatio = $this->get('thumbKeepRatio');
 		if ($keepRatio === null) {
 			$oldCrop = $this->get('thumbCrop');
-			$keepRatio = $oldCrop === null ? false : !$oldCrop;
+			$keepRatio = $oldCrop === null ? true : !$oldCrop;
 		} else {
 			$keepRatio = (bool) $keepRatio;
 		}
@@ -2264,16 +2272,32 @@ class ProcessMediaLibrary extends Process {
 			}
 			if (!$img instanceof Pageimage) continue;
 
-			// Keep-ratio mode: pass height=0 so PW scales by width
-			// alone and the configured height is ignored entirely
-			// (row heights then vary per image's native aspect).
-			// Otherwise: exact width × height with center crop.
-			$thumbH = $thumb['keepRatio'] ? 0 : $thumb['height'];
-			$thumbImg = $img->size($thumb['width'], $thumbH, [
-				'upscaling' => false,
-				'quality'   => $thumb['quality'],
-				'cropping'  => !$thumb['keepRatio'],
-			]);
+			// Keep-ratio mode mirrors PW's admin image-field UI:
+			// scale the LONGER axis to the configured width cap
+			// (height for portraits, width for landscapes). Same
+			// call signature PW makes itself on first view of the
+			// image in the field UI, so the variation it lazily
+			// generated (basename.0x260.jpg or basename.260x0.jpg
+			// with PW's defaults) is reused — no second resize pass
+			// per row. Images already smaller than the cap on both
+			// axes pass through unmodified (admin behaves the same).
+			if ($thumb['keepRatio']) {
+				$cap  = $thumb['width'];
+				$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
+				if ($img->height > $cap) {
+					$thumbImg = $img->size(0, $cap, $opts);
+				} elseif ($img->width > $cap) {
+					$thumbImg = $img->size($cap, 0, $opts);
+				} else {
+					$thumbImg = $img;
+				}
+			} else {
+				$thumbImg = $img->size($thumb['width'], $thumb['height'], [
+					'upscaling' => false,
+					'quality'   => $thumb['quality'],
+					'cropping'  => true,
+				]);
+			}
 			$row['thumbUrl']    = $thumbImg->url;
 			$row['thumbWidth']  = (int) $thumbImg->width;
 			$row['thumbHeight'] = (int) $thumbImg->height;

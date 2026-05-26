@@ -17,7 +17,7 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		// --- Thumbnail rendering ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Thumbnail');
-		$fs->description = $this->_('Per-row preview image rendered into the table. Larger = better preview but more bytes per page; quality lower = faster generation + smaller cache.');
+		$fs->description = $this->_('Per-row preview image rendered into the table. The defaults match PW\'s admin image-field thumbnail (260 px on the longer axis, quality 90) so a variation already generated when the image was last viewed in the image-field UI is reused — no second resize pass per row.');
 
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbWidth';
@@ -60,17 +60,17 @@ class ProcessMediaLibraryConfig extends ModuleConfig {
 		// unchecked, exactly what the runtime reads back. Old
 		// "thumbCrop" key is migrated on the read side (see
 		// getThumbDims) so installs that saved the previous
-		// semantics keep working until they re-save here.
+		// semantics keep working until they re-save here; fresh
+		// installs default this ON so they get the admin-cache
+		// reuse out of the box.
 		$f = $modules->get('InputfieldCheckbox');
 		$f->name = 'thumbKeepRatio';
 		$f->skipLabel = Inputfield::skipLabelHeader;
 		$f->label2 = $this->_('Keep image ratio');
 		$savedKR = $this->get('thumbKeepRatio');
 		if ($savedKR === null) {
-			// First render after upgrade: derive from the legacy
-			// thumbCrop key (true = crop ⇒ keepRatio off).
 			$oldCrop = $this->get('thumbCrop');
-			$savedKR = $oldCrop === null ? false : !$oldCrop;
+			$savedKR = $oldCrop === null ? true : !$oldCrop;
 		}
 		$f->checked((bool) $savedKR);
 		$f->columnWidth = 50;
