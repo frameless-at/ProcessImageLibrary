@@ -60,15 +60,6 @@
 	top: -3rem;
 	right: 0;
 	z-index: 5;
-	color: var(--pw-muted-color, #888);
-	text-decoration: none;
-	padding: 0.25rem 0.4rem;
-	font-size: 0.9rem;
-}
-.ml-config-link:hover,
-.ml-config-link:focus {
-	color: var(--pw-text-color, #333);
-	text-decoration: none;
 }
 
 /* Horizontal-scroll wrapper so the wide table degrades to a swipe
