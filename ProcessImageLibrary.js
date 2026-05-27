@@ -1164,12 +1164,40 @@
 		// reflects what the user actually sees.
 		function applyFieldCapabilityFilter() {
 			if (!filterForm) return;
-			var caps   = (config.fieldCaps && typeof config.fieldCaps === 'object') ? config.fieldCaps : {};
-			var fldSel = filterForm.querySelector('select[name="field"]');
-			var field  = fldSel ? fldSel.value : '';
-			var cap    = field && caps[field] ? caps[field] : null;
-			var hasTags = !cap || cap.useTags === true;
-			var customs = cap ? (cap.customs || []) : null;
+			var caps      = (config.fieldCaps && typeof config.fieldCaps === 'object') ? config.fieldCaps : {};
+			var tplFields = (config.tplFields && typeof config.tplFields === 'object') ? config.tplFields : {};
+			var tplSel    = filterForm.querySelector('select[name="template"]');
+			var fldSel    = filterForm.querySelector('select[name="field"]');
+			var template  = tplSel ? tplSel.value : '';
+			var field     = fldSel ? fldSel.value : '';
+
+			// Effective capability set:
+			//  - specific field → that field's caps
+			//  - empty field + template → UNION of caps across the
+			//    template's image fields (so a template whose only
+			//    field has no tags / no customs collapses those
+			//    filters too)
+			//  - nothing selected → full universe (null = show all)
+			var hasTags, customs;
+			if (field && caps[field]) {
+				hasTags = caps[field].useTags === true;
+				customs = caps[field].customs || [];
+			} else if (template && tplFields[template]) {
+				var allowed = tplFields[template] || [];
+				hasTags = allowed.some(function (f) {
+					return caps[f] && caps[f].useTags === true;
+				});
+				var customsSet = {};
+				allowed.forEach(function (f) {
+					((caps[f] && caps[f].customs) || []).forEach(function (c) {
+						customsSet[c] = true;
+					});
+				});
+				customs = Object.keys(customsSet);
+			} else {
+				hasTags = true;
+				customs = null;
+			}
 			var changed = false;
 
 			// Tags filter fieldset (.Inputfield_mlTagsFs).
