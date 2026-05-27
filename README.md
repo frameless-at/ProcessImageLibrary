@@ -154,20 +154,23 @@ The Filename cell uses the same inline-edit popup. The input holds the file's st
 
 ### Placeholders
 
-Both single and batch rename support the same placeholder tokens. Server-side they expand BEFORE the filename sanitiser strips parents:
+The same token grammar applies to **every** text-shaped editor in the table: filename rename, description, free-form tags, custom text / textarea fields — single and batch alike. The popup shows a hint listing the tokens whenever they're applicable.
 
-| Token | Expands to | Example with n=3, page=`summer-festival`, field=`images` |
+| Token | Expands to | Example (n=3, total=12, page „Summer festival", field=`images`) |
 |---|---|---|
-| `(n)` | counter (integer) | `(n)` → `3` |
+| `(n)` | counter | `(n)` → `3` |
 | `(n2)` … `(n5)` | zero-padded counter, N digits | `(n3)` → `003` |
-| `(p)` | page name (PW URL slug) | `(p)` → `summer-festival` |
+| `(N)` | total in batch | `(n) of (N)` → `3 of 12` |
+| `(t)` | page title (user's admin language; follows repeater rows up to the owner) | `(t)` → `Summer festival` |
+| `(d)` | current date, `YYYY-MM-DD` | `(d)` → `2026-05-27` |
+| `(p)` | page name (PW URL slug; same repeater-owner resolution as `(t)`) | `(p)` → `summer-festival` |
 | `(f)` | image field name | `(f)` → `images` |
 
-Unknown tokens (`(foo)`) pass through; the sanitiser usually strips the parens, so they end up as plain text.
+Tokens expand server-side before sanitization. For single edits `(n)` is always `1` and `(N)` is `1`; for batch the counter follows the JS-sent selection order. Unknown tokens like `(foo)` pass through verbatim (the filename sanitizer usually strips the parens).
 
 ### Single rename
 
-Click any filename cell with the host page editable. The counter `n` is always `1` for single rename, so `(slug)-cover` becomes `summer-festival-cover` straight away.
+Click any filename cell with the host page editable. So `(p)-cover` becomes `summer-festival-cover` straight away.
 
 The server: removes the old basename's variation files (their names embed the old stem; they'd orphan on disk otherwise), calls `Pagefile::rename()`, saves the page, drops the module's row cache. The table re-renders with the new basename in every reference (thumb URL, `data-basename`, selection key).
 

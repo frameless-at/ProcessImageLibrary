@@ -362,15 +362,19 @@
 			header.textContent = columnLabelFor(td);
 			dialog.appendChild(header);
 
-			// Filename rename: surface the placeholder syntax so users
-			// don't have to know it's there. Shown in single-row context
-			// too because the same tokens work for "(slug)-cover" etc.;
-			// the counter just stays 1.
-			if (td.dataset.input === 'filename') {
+			// Placeholder hint — shown for every free-text editor
+			// (filename rename, description, free-form tags, text /
+			// textarea customs). Skipped for whitelist tag checkboxes
+			// since the user can't type into those.
+			var hasPlaceholders =
+				td.dataset.input === 'filename' ||
+				td.dataset.input === 'textarea' ||
+				(td.dataset.input === 'text' && parseInt(td.dataset.tagsMode || '0', 10) !== 2);
+			if (hasPlaceholders) {
 				var hint = document.createElement('p');
 				hint.className = 'ml-popup-hint';
-				hint.textContent = labels.renameHint
-					|| 'Placeholders: (n) counter, (n2)…(n5) padded, (p) page name, (f) field name.';
+				hint.textContent = labels.placeholderHint
+					|| 'Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.';
 				dialog.appendChild(hint);
 			}
 

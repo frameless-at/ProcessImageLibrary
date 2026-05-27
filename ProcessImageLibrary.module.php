@@ -833,6 +833,35 @@ class ProcessImageLibrary extends Process {
 		$img = $this->resolvePageimage($page, $fieldName, $basename);
 		if (!$img) return $this->jsonError('Image not found in field', 404);
 
+		// Output formatting off before mutating: setters work on the raw value
+		// and avoid double-encoding for fields like description.
+		$page->of(false);
+
+		// Multilang popup ships a per-language map alongside the
+		// primary value. When that's present, write each language
+		// directly instead of letting writeLangValue() pick one.
+		$langValuesJson = (string) $this->wire('input')->post('langValues');
+		$langValues = null;
+		if ($langValuesJson !== '') {
+			$decoded = json_decode($langValuesJson, true);
+			if (is_array($decoded)) $langValues = $decoded;
+		}
+
+		// Placeholder resolution — same token grammar as filename.
+		// Single-cell save → n = 1, total = 1. Resolver runs BEFORE
+		// the tag whitelist check so a typed "(d)" expands to the
+		// concrete date first and then gets validated as a normal
+		// token (whitelist users typically pick from checkboxes
+		// anyway, but free-text tag fields with placeholders work
+		// this way).
+		$ctx = $this->buildPlaceholderCtx($page, $fieldName, 1, 1);
+		$value = $this->resolveRenamePattern($value, $ctx);
+		if ($langValues !== null) {
+			foreach ($langValues as $lk => $lv) {
+				$langValues[$lk] = $this->resolveRenamePattern((string) $lv, $ctx);
+			}
+		}
+
 		// useTags=2 (whitelist): reject any token that isn't in the configured
 		// tagsList. Splits on whitespace + commas to match PW's own parsing.
 		if ($subfield === 'tags') {
@@ -848,20 +877,6 @@ class ProcessImageLibrary extends Process {
 				// Normalize separator to single space for consistency.
 				$value = implode(' ', $tokens);
 			}
-		}
-
-		// Output formatting off before mutating: setters work on the raw value
-		// and avoid double-encoding for fields like description.
-		$page->of(false);
-
-		// Multilang popup ships a per-language map alongside the
-		// primary value. When that's present, write each language
-		// directly instead of letting writeLangValue() pick one.
-		$langValuesJson = (string) $this->wire('input')->post('langValues');
-		$langValues = null;
-		if ($langValuesJson !== '') {
-			$decoded = json_decode($langValuesJson, true);
-			if (is_array($decoded)) $langValues = $decoded;
 		}
 
 		try {
@@ -911,9 +926,13 @@ class ProcessImageLibrary extends Process {
 	 * names embed the OLD basename and would otherwise become orphan
 	 * disk junk after the rename.
 	 *
-	 * Placeholder syntax (resolveRenamePattern):
-	 *   (n)         counter (integer)
-	 *   (n2)…(n5)   zero-padded counter, N digits
+	 * Placeholder syntax (see resolveRenamePattern for the full
+	 * grammar — same tokens work in description / tags / customs):
+	 *   (n)         counter
+	 *   (n2)…(n5)   zero-padded counter
+	 *   (N)         total
+	 *   (t)         page title
+	 *   (d)         date YYYY-MM-DD
 	 *   (p)         page name (PW URL slug)
 	 *   (f)         image field name
 	 *
@@ -963,7 +982,10 @@ class ProcessImageLibrary extends Process {
 		if (!$img) return $this->jsonError('Image not found in field', 404);
 
 		$page->of(false);
-		$result = $this->performRename($img, $page, $fieldName, $newStemRaw, ['n' => 1]);
+		$result = $this->performRename(
+			$img, $page, $fieldName, $newStemRaw,
+			$this->buildPlaceholderCtx($page, $fieldName, 1, 1)
+		);
 		if (!$result['ok']) {
 			return $this->jsonError((string) $result['error']);
 		}
@@ -1064,36 +1086,80 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Expand the rename pattern into a concrete stem for a given
-	 * image's context. Used by performRename() so a pattern like
-	 * "(p)-(n2)" produces e.g. "summer-festival-03" on the third
-	 * row of a batch.
+	 * Standard context bag for resolveRenamePattern. Centralizes the
+	 * date lookup (server timezone, Y-m-d) so every Save / Bulk /
+	 * Rename path shares the same value within one request — even
+	 * across multiple items in a batch, the (d) token expands to the
+	 * same string for every row, which is what users expect.
+	 */
+	protected function buildPlaceholderCtx(Page $page, string $fieldName, int $n, int $total): array {
+		static $date = null;
+		if ($date === null) $date = date('Y-m-d');
+		return [
+			'n'     => $n,
+			'total' => $total,
+			'page'  => $page,
+			'field' => $fieldName,
+			'date'  => $date,
+		];
+	}
+
+	/**
+	 * Expand a placeholder pattern into a concrete string for the
+	 * given image's context. Used by every Save / Bulk / Rename
+	 * path — same token grammar applies whether the user is typing
+	 * a filename stem, a description, a custom textarea, or a
+	 * free-form tag string.
 	 *
 	 * Supported tokens:
 	 *   (n)              counter — $ctx['n']
 	 *   (n2) … (n5)      zero-padded counter, N digits
-	 *   (p)              page name (PW URL slug) — $ctx['page']->name
+	 *   (N)              total — $ctx['total']
+	 *   (t)              page title in the editor's admin language;
+	 *                    follows repeater rows up to the owner page
+	 *                    so the stored title is meaningful even for
+	 *                    repeater-hosted images
+	 *   (d)              current date YYYY-MM-DD (server timezone)
+	 *   (p)              page name (PW URL slug); same repeater-
+	 *                    owner resolution as (t)
 	 *   (f)              image field name — $ctx['field']
 	 *
-	 * Unknown tokens are passed through verbatim; the sanitiser
-	 * downstream usually strips the parens. The helper itself does
-	 * NOT sanitise — that's the caller's job, so future paths can
-	 * apply additional rules (uniqueness, collision suffix, …)
-	 * before the sanitiser runs.
+	 * Unknown tokens are passed through verbatim; downstream
+	 * sanitisers (filename path) strip the parens, prose paths
+	 * leave them alone. The helper itself does NOT sanitise —
+	 * that's the caller's job.
 	 *
-	 * @param array{n?:int,page?:Page,field?:string} $ctx
+	 * @param array{n?:int,total?:int,page?:Page,field?:string,date?:string} $ctx
 	 */
 	protected function resolveRenamePattern(string $pattern, array $ctx): string {
 		$n     = (int) ($ctx['n']     ?? 0);
+		$total = (int) ($ctx['total'] ?? 0);
 		$page  = $ctx['page']  ?? null;
 		$field = (string) ($ctx['field'] ?? '');
+		$date  = (string) ($ctx['date']  ?? '');
+
+		// Owner-page resolution for (t) and (p): for repeater /
+		// RepeaterMatrix images the bare $page is the hidden
+		// repeater_<field> page whose title / name are admin-internal
+		// noise. Walk up to the user-facing owner so placeholders
+		// expand to something meaningful.
+		$ownerPage = $page;
+		if ($page instanceof Page && $page->id && method_exists($page, 'getForPageRoot')) {
+			$owner = $page->getForPageRoot();
+			if ($owner && $owner->id && $owner->id !== $page->id) {
+				$ownerPage = $owner;
+			}
+		}
 
 		return preg_replace_callback(
-			'/\((n[2-5]?|p|f)\)/',
-			function ($m) use ($n, $page, $field) {
+			'/\((n[2-5]?|N|t|d|p|f)\)/',
+			function ($m) use ($n, $total, $ownerPage, $field, $date) {
 				$key = $m[1];
 				if ($key === 'n') return (string) $n;
-				if ($key === 'p') return ($page instanceof Page && $page->id) ? (string) $page->name : '';
+				if ($key === 'N') return (string) $total;
+				if ($key === 't') return ($ownerPage instanceof Page && $ownerPage->id) ? (string) $ownerPage->title : '';
+				if ($key === 'd') return $date;
+				if ($key === 'p') return ($ownerPage instanceof Page && $ownerPage->id) ? (string) $ownerPage->name : '';
 				if ($key === 'f') return $field;
 				// n2 … n5 — zero-padded counter
 				$digits = (int) substr($key, 1);
@@ -1224,6 +1290,10 @@ class ProcessImageLibrary extends Process {
 		$failed      = [];
 		$tagsCfg     = $this->getTagsConfig();
 		$imageFields = $this->discoverImageFields();
+		// Total used by the (N) placeholder. Matches $counter from
+		// the byPage build above — i.e. the number of items the
+		// client sent that resolved to a valid pageId/field/basename.
+		$totalItems  = $counter;
 
 		foreach ($byPage as $pid => $pageItems) {
 			$page = $this->wire('pages')->get($pid);
@@ -1247,6 +1317,11 @@ class ProcessImageLibrary extends Process {
 					continue;
 				}
 
+				// Same context bag for every write path in this batch
+				// — counter + total are per-item, page + field + date
+				// shared. Cheap to build (date is memoized).
+				$ctx = $this->buildPlaceholderCtx($page, $fn, (int) $it['n'], $totalItems);
+
 				// basename is the identity, not an editable subfield —
 				// editableSubfields() rightly excludes it. Branch the
 				// rename path before that gate.
@@ -1256,7 +1331,7 @@ class ProcessImageLibrary extends Process {
 						$failed[] = sprintf('Image %s not found in %d.%s', $bn, $pid, $fn);
 						continue;
 					}
-					$renameResult = $this->performRename($img, $page, $fn, $value, ['n' => (int) $it['n']]);
+					$renameResult = $this->performRename($img, $page, $fn, $value, $ctx);
 					if (!$renameResult['ok']) {
 						$failed[] = sprintf('Rename %s in %s: %s', $bn, $fn, $renameResult['error']);
 						continue;
@@ -1279,7 +1354,14 @@ class ProcessImageLibrary extends Process {
 					continue;
 				}
 
-				$itemValue = $value;
+				// Placeholder resolution runs BEFORE any tag tokenizing
+				// / Add-merging — that way (d), (t), (n) become part of
+				// the literal value before the rest of the pipeline
+				// treats it as a single string. Tags whitelist mode
+				// users can't type these placeholders anyway (they pick
+				// from checkboxes), but free-text tags and descriptions
+				// support them.
+				$itemValue = $this->resolveRenamePattern((string) $value, $ctx);
 
 				if ($subfield === 'tags') {
 					$tokens = $this->splitTags($itemValue);
@@ -1317,7 +1399,14 @@ class ProcessImageLibrary extends Process {
 				}
 
 				if ($langValues !== null) {
-					$this->applyLangValues($img, $subfield, $langValues);
+					// Per-language placeholder resolution. (d) / (t) /
+					// (n) / (N) don't depend on language but live inside
+					// each slot's raw string; resolve uniformly.
+					$resolvedLangValues = [];
+					foreach ($langValues as $lk => $lv) {
+						$resolvedLangValues[$lk] = $this->resolveRenamePattern((string) $lv, $ctx);
+					}
+					$this->applyLangValues($img, $subfield, $resolvedLangValues);
 				} else {
 					$this->writeLangValue($img, $subfield, $itemValue);
 				}
@@ -2165,7 +2254,7 @@ class ProcessImageLibrary extends Process {
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
 				'rename'           => $this->_('New filename'),
-				'renameHint'       => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (p) page name, (f) field name.'),
+				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
 				'importSaved'      => $this->_('Saved'),
