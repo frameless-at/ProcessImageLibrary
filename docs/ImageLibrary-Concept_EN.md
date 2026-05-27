@@ -14,21 +14,26 @@ A ProcessWire module that shows **every image in a PW installation** in a single
 
 - Aggregates images from **all** `FieldtypeImage` fields on **all** templates in the installation (with configurable template and field blacklists)
 - Each table row = tuple `(page, fieldName, basename)`
+- **Repeater / RepeaterMatrix support**: images stored inside a repeater field are resolved up to their owner page so the Page column, sort and template filter operate on the visible owner — not on the internal `repeater_<field>` storage page
 - Inline edit of editable subfields (description, tags, custom fields); Textarea customs open a popup
-- **Multilingual subfields**: per-language tabs in the popup, round-trip in JSON / CSV export-import
+- **Multilingual subfields**: per-language tabs in the popup (pre-activated on the editor's current admin language), round-trip in JSON / CSV export-import
 - **Bulk edit** via "selection as paintbrush": ticked rows are updated alongside the next cell save in Add or Replace mode
+- **Filename rename**: inline (single image) or batch (across the active selection) via the same popup; placeholder grammar `(n)`, `(n2)..(n5)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)` works in every prose-shaped editor (filename, description, custom text/textarea) — tags excluded
+- **Date columns**: Uploaded (Pagefile `created`) and Modified, sortable, formatted in `$config->dateFormat`
 - **Variations column**: per-image counter from `$img->getVariations()`
 - **Export / Import**: JSON and CSV (with multilang-aware column suffixes `<subfield>_<langName>`)
-- Server-side filtering / sorting / pagination
+- Server-side filtering / sorting / pagination with **capability-based filter narrowing**: the Tags fieldset + each `Missing <custom>` checkbox hide live as soon as the chosen Template / Image-field has no fitting capability
 - Per-user column configuration in `$user->meta('imageLibraryPrefs')` — **cross-device**, including page size
 - Auto-detection of **Custom Fields on Images** (`field-{fieldname}` template, PW 3.0.142+)
+- AdminThemeUikit light / dark theme integration via `--pw-*` CSS custom properties
 
 **Out of scope (also in the current version):**
 
-- Uploading / deleting / moving images between pages
+- Uploading / deleting images
+- Moving images between pages
 - Variations management (crop / focus / regenerate) — module shows the variations counter but doesn't regenerate
 - Re-sorting within an image field (`$img->sort`)
-- Bulk delete / file rename / replace image (possible Phase-2 topics)
+- Bulk delete / replace image (possible Phase-2 topics)
 
 ## Architecture
 
@@ -42,11 +47,22 @@ A ProcessWire module that shows **every image in a PW installation** in a single
 ProcessImageLibrary/
 ├── ProcessImageLibrary.module.php
 ├── ProcessImageLibrary.info.json
+├── ProcessImageLibraryConfig.php
 ├── ProcessImageLibrary.css
 ├── ProcessImageLibrary.js
+├── src/
+│   ├── ImageLibraryDiscovery.php     # trait: image-field / template / tags-config introspection
+│   ├── ImageLibraryMultilang.php     # trait: per-language read/write, name⇄id mapping
+│   └── ImageLibraryExportImport.php  # trait: JSON + CSV emit, parse, idempotent re-apply
+├── docs/
+│   ├── ImageLibrary-Concept_EN.md
+│   ├── ImageLibrary-Konzept_DE.md
+│   └── screenshots/
 ├── README.md
 └── LICENSE
 ```
+
+The `src/` traits keep the main module file focused on AJAX endpoints + rendering; discovery, multilang and export/import each own a cohesive slice.
 
 **Methods:**
 
@@ -54,6 +70,7 @@ ProcessImageLibrary/
 - `___executeData()` — AJAX GET, returns only the `.ml-results` block (table + pagination) for filter/sort/page swaps.
 - `___executeSave()` — AJAX POST, validates + saves a cell change, returns JSON. Multilang-aware: the payload can carry `langId`, in which case only that language slot is written.
 - `___executeBulk()` — AJAX POST: apply an identical cell save to a selection (Add or Replace mode).
+- `___executeRename()` — AJAX POST, renames a single image's file (or every selected image in batch mode) via `Pagefile::rename()` after expanding placeholders and clearing old variation files.
 - `___executeExport()` — direct download of JSON or CSV honoring the active filters.
 - `___executeImport()` — AJAX POST, accepts a previously-exported (and externally edited) JSON / CSV file and writes it back; idempotent (unchanged items are skipped).
 - `___executeUserPrefs()` — AJAX POST, persists columns + page size into `$user->meta('imageLibraryPrefs')` (debounced).
@@ -191,10 +208,10 @@ All Phase-1 paths use the PW API exclusively. Expected latencies for a dataset o
 
 Mandatory / read-only:
 
-- **Thumb** (`$img->size(120, 80)->url`), `loading="lazy"`
-- **Page** (title + link to the PW edit page)
+- **Thumb** — rendered via a hybrid pipeline that prefers PW's lazily-generated 260 px admin variation and only falls back to a dedicated `$img->size()` when the configured display target exceeds the admin variation's longer side. `loading="lazy"` on the `<img>`.
+- **Page** (title + link to the PW edit page; resolves to the owner page when the image lives inside a Repeater / RepeaterMatrix item)
 - **Field** (field name, e.g. `images`, `lead_image`)
-- **Filename** (`$img->basename`)
+- **Filename** (`$img->basename`, inline-editable in single or batch mode)
 
 Visible by default / editable:
 
@@ -204,6 +221,7 @@ Visible by default / editable:
   - `useTags=1`: text input + autocomplete from historically used tags
   - `useTags=2`: multi-select from `tagsList`
   - `useTags=8|9`: multi-select + free text input
+- **Uploaded** (Pagefile `created`) and **Modified** — formatted via `$config->dateFormat`, sortable, read-only
 - **Dimensions** (`{w}×{h}`) — read-only
 - **Filesize** — read-only
 
@@ -238,17 +256,20 @@ Collapsible "Filters" fieldset (icon `fa-filter`) above the table. The label car
 | Filter | Filtered where | Note |
 |---|---|---|
 | Full-text search (page title, description, tags, filename, customs) | PHP | Word match, multilang-aware |
-| Template filter | PHP | from `eligibleTemplates` |
-| Image-field filter | PHP | from `imageFields`, narrows the custom-field dropdown |
-| "Missing description" / "Missing tags" | PHP | verified per image |
-| "Missing &lt;custom&gt;" | PHP | one checkbox filter per custom subfield, dynamic |
-| Tags | PHP | multi-select of actually-applied tags, AND semantics |
+| Template filter | PHP | from `eligibleTemplates`; live-narrows the Image-field dropdown to fields that actually live on the chosen template |
+| Image-field filter | PHP | from `imageFields` |
+| "Missing description" | PHP | always visible — every image has a description slot |
+| "Missing tags" | PHP | visible only when the active Template / Image-field selection has at least one field with `useTags` |
+| "Missing &lt;custom&gt;" | PHP | one checkbox filter per custom subfield; visible only when the active selection exposes that subfield |
+| Tags | PHP | multi-select of actually-applied tags, AND semantics; the whole fieldset hides when the selection has no tag-capable field |
+
+**Capability-based narrowing.** A second JS function mirrors the template→field pattern: as soon as a Template or Image-field is picked, the Tags fieldset and the `Missing tags` / `Missing <custom>` checkboxes hide and uncheck themselves when they don't apply. With only a Template selected, the effective capability set is the union across that template's image fields — so a template whose only image field has no tags / no customs also collapses those filters. Map shipped to JS as `config.fieldCaps`; PHP keeps emitting the full DOM so JS has something to toggle, same shape as the existing template→field narrowing.
 
 Filters are URL-state persisted and bookmarkable. Tags are emitted as a comma-separated value (`?tags=foo,bar`); the legacy bracket form (`?tags[]=…`) remains accepted. After "Apply" the fieldset auto-collapses so the results table has full vertical room.
 
 ## Sorting
 
-Column-header click toggles ascending/descending. Sortable fields: page title, field, filename, description, tags, width, filesize, and every custom subfield via `custom:<name>`.
+Column-header click toggles ascending/descending. Sortable fields: page title, field, filename, description, tags, width, filesize, `created` (Uploaded), `modified`, and every custom subfield via `custom:<name>`.
 
 **Default:** selectable in the module config (fieldset "Default sort") — column + direction. Built-in default is `pageTitle asc`. URL overrides (`?sort=basename&dir=desc`) win; URLs omit sort/dir when they match the configured default so shared links stay clean.
 
@@ -266,7 +287,7 @@ Column-header click toggles ascending/descending. Sortable fields: page title, f
 
 - **PHP:** Exclusively the PW API (`$pages->findRaw()`, `$pages->getMany()`, `$page->save()`, `$img->size()`, `$cache->save()`, etc.). **No direct SQL.**
 - **JS:** Vanilla, Fetch API, no framework dependency.
-- **CSS:** Compatible with AdminThemeUikit (UIkit classes where possible).
+- **CSS:** Compatible with AdminThemeUikit. All colour values route through PW's `--pw-*` CSS custom properties so the table follows the active light / dark theme without manual overrides. Sortable headers adopt PW's native `.tablesorter-headerAsc` / `.tablesorter-headerDesc` / `.tablesorter-header-inner` markup so the sort visuals match what other Process modules render.
 - **PW version:** 3.0.172+ (for `findRaw` with subfield wildcards) and 3.0.142+ (for custom-fields-on-images)
 - **PHP version:** 8.0+
 
@@ -297,7 +318,7 @@ MIT (or GPL depending on repo convention). The module should be submittable as a
 - **Column-config scope** → `$user->meta('imageLibraryPrefs')`, cross-device.
 - **Edit mode** → inline auto-save on blur/Enter.
 - **Filter URL state** → URL params, bookmarkable (tags as a comma-separated `?tags=…` value).
-- **Bulk operations** → selection-as-paintbrush implemented (Add/Replace modes). Bulk delete and file rename remain open.
+- **Bulk operations** → selection-as-paintbrush implemented (Add/Replace modes); single + batch filename rename implemented with placeholder grammar (`(n)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)`). Bulk delete remains open.
 - **Page size** → 50 default, picker with a configurable options list, selection in `$user->meta`.
 - **Permission granularity** → both: `image-library-access` as a hard gate for the admin page, `$page->editable()` per cell save.
 - **Variations column** → implemented (read-only counter).
@@ -309,7 +330,7 @@ MIT (or GPL depending on repo convention). The module should be submittable as a
 
 2. **Scaling beyond ~10 k images**: the current `findRaw + WireCache::saveFor` path is linear in the number of image rows. From 30 k+ the cache rebuild becomes noticeable. The path to `findMany` + per-image index is documented in this concept but not yet quantified.
 
-3. **Bulk delete / file rename / replace image** as a Phase-2 feature set: demand-driven by editor workflow.
+3. **Bulk delete / replace image** as a Phase-2 feature set: demand-driven by editor workflow (file rename has shipped).
 
 4. **WebP / AVIF / SVG / animated GIF** as the source format: currently `$img->size()` is called blindly. Works, but SVG → PNG (rasterization), animated GIFs become static. UI hint worthwhile?
 

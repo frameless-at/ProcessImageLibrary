@@ -6,7 +6,7 @@ A ProcessWire admin module that puts every image across every page and every ima
 
 ## Quick tour
 
-- **Single table view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates; rows are `(page, field, basename)` tuples.
+- **Single table view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates — including images that live inside Repeater / RepeaterMatrix fields, resolved up to their owner page. Rows are `(page, field, basename)` tuples.
 - **Inline editing** for description, tags and any custom subfields (PW 3.0.142+ field-on-image templates). Click a cell, type, hit save — that's it. Multilang installs get per-language tabs in the editor.
 - **Bulk edits as paintbrush** — tick a few rows, then edit any cell on a selected row to broadcast the change to all selected rows. Works for description, tags, customs, and filenames (with placeholder syntax for numbering).
 - **Filter, sort, paginate** with URL-state persistence so the view is bookmarkable. Per-user column visibility and order, page size — all stored in `$user->meta` so they follow the user across devices.
@@ -61,7 +61,7 @@ The runtime tries to ride PW's admin image-field variation (260 px on the shorte
 
 ### Default sort
 
-- **Column** — `pageTitle`, `fieldName`, `basename`, `description`, `tags`, `width`, `filesize`.
+- **Column** — `pageTitle`, `fieldName`, `basename`, `description`, `tags`, `width`, `filesize`, `created` (Uploaded), `modified`.
 - **Direction** — Ascending or Descending. Defaults `pageTitle asc`.
 
 URL overrides (`?sort=…&dir=…`) and header clicks always win; the default only applies on a clean URL.
@@ -86,12 +86,14 @@ Available filters:
 | Filter | What it does |
 |---|---|
 | Search | Word-match across page title, description, tags, filename, custom subfields |
-| Template | Restrict to pages of this template |
-| Image field | Restrict to images coming from one specific field (the field dropdown narrows to fields the chosen template actually carries) |
+| Template | Restrict to pages of this template; the Image-field dropdown narrows to fields the chosen template actually carries |
+| Image field | Restrict to images coming from one specific field |
 | Tags | Multi-select AND-match against pooled tags across all rows |
 | Missing description | Rows whose description is empty |
 | Missing tags | Rows whose tags are empty |
 | Missing &lt;custom&gt; | One checkbox per custom subfield; rows whose value for that subfield is empty |
+
+**Live capability narrowing.** As soon as you pick a Template or an Image field, the rest of the filter bar collapses to what's actually applicable: the Tags fieldset hides when the selection has no `useTags` field, and each `Missing <custom>` checkbox hides when the selection doesn't expose that subfield. Selecting just a Template uses the union of capabilities across its image fields, so a template whose only image field has no tags / no customs also drops those filters. Stale ticks get cleared automatically so what you submit matches what you see.
 
 All filter state lives in the URL (`?q=…&template=…&tags=foo,bar&…`) — bookmarkable, shareable.
 
@@ -100,10 +102,11 @@ After **Apply** the fieldset auto-collapses so the table has full vertical room.
 ## The table
 
 - **Thumb** — clickable when the host page is editable; opens the native PW page-edit form for this image in a full-screen iframe (with PW's crop / focus / variations UI).
-- **Page** — link to the page-edit screen.
-- **Field** — image field name, in a `<code>` block.
+- **Page** — link to the page-edit screen. For images that live inside a Repeater / RepeaterMatrix field, this resolves to the visible owner page (not the internal `repeater_<field>` storage page).
+- **Field** — image field name.
 - **Filename** — inline-editable (see [Renaming](#renaming-files)). Extension stays locked.
 - **Description, Tags** — inline-editable (see [Editing](#inline-editing)).
+- **Uploaded, Modified** — created / last-modified timestamps from the underlying Pagefile, formatted in `$config->dateFormat`. Read-only, sortable.
 - **Dimensions, Size, Variations** — read-only.
 - **Custom subfields** — auto-discovered from each image field's `field-{name}` custom template (PW 3.0.142+). Editable.
 
