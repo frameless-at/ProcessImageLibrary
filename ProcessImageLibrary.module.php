@@ -381,16 +381,19 @@ class ProcessImageLibrary extends Process {
 		// save outcomes to assistive tech ("Saved", "Save failed: …").
 		// aria-live=polite ⇒ won't interrupt other speech.
 		$out .= '<div class="ml-live-region" role="status" aria-live="polite" aria-atomic="true"></div>';
-		// Top-right toggle that opens the columns dialog. Same
-		// .ml-columns-toggle class + JS handler as the pagination-row
-		// instance — clicking either icon opens the same <dialog>.
-		// Positioning still comes from .ml-config-link
-		// (position: absolute; top/right/z-index).
-		$colsLabel = $sanitizer->entities($this->_('Columns'));
-		$out .= '<a class="ml-config-link ml-columns-toggle"'
-			. ' title="' . $colsLabel . '"'
-			. ' aria-label="' . $colsLabel . '">'
-			. '<i class="fa fa-columns" aria-hidden="true"></i>'
+		// Module-settings link. Position-absolute via CSS so it sits
+		// in the heading row instead of taking a row of its own.
+		// collapse_info=1 asks PW to render the edit screen with the
+		// upper info panel pre-collapsed so the actual config inputs
+		// are above the fold.
+		$cfgUrl = $this->wire('config')->urls->admin . 'module/edit/?name='
+			. urlencode($this->className()) . '&collapse_info=1';
+		$cfgTitle = $this->_('Module settings');
+		$cfgLabel = $this->_('Config');
+		$out .= '<a class="ml-config-link" href="' . $sanitizer->entities($cfgUrl) . '"'
+			. ' title="' . $sanitizer->entities($cfgTitle) . '"'
+			. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
+			. $sanitizer->entities($cfgLabel)
 			. '</a>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
@@ -2988,16 +2991,16 @@ class ProcessImageLibrary extends Process {
 		$out .= '</select></label>';
 
 		// Icon-only opener for the column-visibility dialog (rendered
-		// as a sibling of .ml-results). <button> since there's no
-		// fallback URL — without JS the picker is unavailable. The
-		// visible <i> stays decorative; the button itself carries
-		// the accessible name via aria-label / title.
+		// as a sibling of .ml-results). The <i> stays decorative;
+		// the anchor itself carries the accessible name via
+		// aria-label / title. Without JS the picker is unavailable —
+		// no href, the JS click handler runs the open.
 		$colsLabel = $san->entities($this->_('Columns'));
-		$out .= '<button type="button" class="ml-columns-toggle"'
+		$out .= '<a class="ml-columns-toggle"'
 			. ' title="' . $colsLabel . '"'
 			. ' aria-label="' . $colsLabel . '">'
 			. '<i class="fa fa-columns" aria-hidden="true"></i>'
-			. '</button>';
+			. '</a>';
 		$out .= '</div>';
 
 		$out .= '</div>';
