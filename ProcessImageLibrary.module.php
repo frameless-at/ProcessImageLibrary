@@ -191,6 +191,8 @@ class ProcessImageLibrary extends Process {
 		'tags'        => 'string',
 		'width'       => 'int',
 		'filesize'    => 'int',
+		'created'     => 'int',
+		'modified'    => 'int',
 	];
 
 	const DEFAULT_SORT = 'pageTitle';
@@ -212,6 +214,8 @@ class ProcessImageLibrary extends Process {
 		'filesize',
 		'width',
 		'height',
+		'created',
+		'modified',
 	];
 
 	/**
@@ -425,6 +429,8 @@ class ProcessImageLibrary extends Process {
 			'tags'        => $this->_('Tags'),
 			'dimensions'  => $this->_('Dimensions'),
 			'size'        => $this->_('Size'),
+			'created'     => $this->_('Uploaded'),
+			'modified'    => $this->_('Modified'),
 			'variations'  => $this->_('Variations'),
 		];
 		foreach ($customCols as $name) {
@@ -1596,7 +1602,9 @@ class ProcessImageLibrary extends Process {
 		//       (was leaking the cache-populator's user language across
 		//       editors); hydrateSlice sets the per-request user-
 		//       language title on top.
-		return 'rows-v5-' . substr(md5((string) json_encode($keyData)), 0, 16);
+		//   v6: created + modified Pagefile timestamps added to every
+		//       row (sortable, filterable, displayable as date columns).
+		return 'rows-v6-' . substr(md5((string) json_encode($keyData)), 0, 16);
 	}
 
 	/**
@@ -1767,6 +1775,12 @@ class ProcessImageLibrary extends Process {
 						'filesize'    => (int) ($img['filesize'] ?? 0),
 						'width'       => (int) ($img['width'] ?? 0),
 						'height'      => (int) ($img['height'] ?? 0),
+						// Pagefile timestamps — created = upload, modified =
+						// last metadata change. Both Unix seconds in the
+						// DB; render path formats per request via the
+						// admin theme's date format.
+						'created'     => (int) ($img['created']  ?? 0),
+						'modified'    => (int) ($img['modified'] ?? 0),
 						'ext'         => pathinfo($basename, PATHINFO_EXTENSION),
 						'custom'      => array_diff_key($img, $standardKeys),
 					];
@@ -2202,6 +2216,19 @@ class ProcessImageLibrary extends Process {
 		return $rounded . ' ' . $units[$i];
 	}
 
+	/**
+	 * Format a Unix timestamp the way the rest of the PW admin does —
+	 * uses $config->dateFormat if set, otherwise a sensible ISO-style
+	 * default. Empty / zero timestamps render as the empty string so
+	 * the cell looks blank for files that have no recorded date yet.
+	 */
+	protected function formatTimestamp(int $ts): string {
+		if ($ts <= 0) return '';
+		$fmt = (string) $this->wire('config')->dateFormat;
+		if ($fmt === '') $fmt = 'Y-m-d H:i';
+		return date($fmt, $ts);
+	}
+
 	protected function loadAssets(): void {
 		$config = $this->wire('config');
 		$session = $this->wire('session');
@@ -2590,6 +2617,8 @@ class ProcessImageLibrary extends Process {
 			['tags',        $this->_('Tags'),        'tags'],
 			['dimensions',  $this->_('Dimensions'),  'width'],
 			['size',        $this->_('Size'),        'filesize'],
+			['created',     $this->_('Uploaded'),    'created'],
+			['modified',    $this->_('Modified'),    'modified'],
 			['variations',  $this->_('Variations'),  null],
 		];
 		if (!$showTagsCol) {
@@ -2778,6 +2807,10 @@ class ProcessImageLibrary extends Process {
 			}
 			$out .= '<td class="ml-cell-nowrap" data-col="dimensions">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap" data-col="size">' . $san->entities($size) . '</td>';
+			$out .= '<td class="ml-cell-nowrap" data-col="created">'
+				. $san->entities($this->formatTimestamp((int) ($row['created']  ?? 0))) . '</td>';
+			$out .= '<td class="ml-cell-nowrap" data-col="modified">'
+				. $san->entities($this->formatTimestamp((int) ($row['modified'] ?? 0))) . '</td>';
 			$out .= '<td class="ml-cell-nowrap ml-cell-variations" data-col="variations">'
 				. (int) ($row['variationsCount'] ?? 0) . '</td>';
 

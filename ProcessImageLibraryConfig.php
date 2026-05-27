@@ -270,6 +270,8 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			'tags'        => $this->_('Tags'),
 			'dimensions'  => $this->_('Dimensions'),
 			'size'        => $this->_('Size'),
+			'created'     => $this->_('Uploaded'),
+			'modified'    => $this->_('Modified'),
 			'variations'  => $this->_('Variations'),
 		];
 		$instance = $this->wire('modules')->get('ProcessImageLibrary');

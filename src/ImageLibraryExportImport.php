@@ -176,6 +176,11 @@ trait ImageLibraryExportImport {
 					? ((int) $row['width']) . 'x' . ((int) $row['height'])
 					: '',
 				'filesize'    => (int) $row['filesize'],
+				// ISO 8601 keeps the round-trip readable and parsable
+				// by every spreadsheet / JSON consumer. Empty string
+				// when no timestamp is recorded yet.
+				'created'     => (int) ($row['created']  ?? 0) > 0 ? date('c', (int) $row['created'])  : '',
+				'modified'    => (int) ($row['modified'] ?? 0) > 0 ? date('c', (int) $row['modified']) : '',
 				'description' => $this->exportSubfieldValue($img, 'description'),
 				'tags'        => $this->exportSubfieldValue($img, 'tags'),
 				'custom'      => (object) $customs, // force {} when empty so the shape is consistent
@@ -192,7 +197,7 @@ trait ImageLibraryExportImport {
 				'imageCount'     => count($images),
 				'appliedFilter'  => (object) $this->summarizeActiveFilters($filters),
 				'editableFields' => ['description', 'tags', 'custom.*'],
-				'readOnlyFields' => ['id', 'pageId', 'fieldName', 'basename', 'url', 'dimensions', 'filesize', 'pageTitle', 'pageUrl'],
+				'readOnlyFields' => ['id', 'pageId', 'fieldName', 'basename', 'url', 'dimensions', 'filesize', 'created', 'modified', 'pageTitle', 'pageUrl'],
 			],
 			'images' => $images,
 		];
@@ -343,7 +348,7 @@ trait ImageLibraryExportImport {
 		}
 
 		$headers = ['id', 'pageId', 'fieldName', 'basename', 'url',
-			'pageTitle', 'pageUrl', 'dimensions', 'filesize'];
+			'pageTitle', 'pageUrl', 'dimensions', 'filesize', 'created', 'modified'];
 
 		// Build headers for description / tags — language-suffixed if
 		// any image carried multilang values for that subfield.
