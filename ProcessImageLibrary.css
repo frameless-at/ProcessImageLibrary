@@ -60,8 +60,18 @@
 	padding: 0.25rem 0.4rem;
 	font-size: 0.9rem;
 }
-.ml-config-link:hover {
+.ml-config-link:hover,
+.ml-config-link:focus {
 	color: #333;
+	text-decoration: none;
+}
+/* Cog icon trails the "Config" label — matches the link's text
+   size so the visual weight stays on the wordmark, inherits the
+   link colour so hover keeps the pair in sync. */
+.ml-config-link .fa {
+	font-size: 1em;
+	margin-left: 0.25em;
+	color: inherit;
 }
 
 /* Horizontal-scroll wrapper so the wide table degrades to a swipe
