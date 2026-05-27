@@ -258,7 +258,10 @@ ProcessImageLibrary/
 │   ├── ImageLibraryDiscovery.php        # trait: image-field / template / tags-config introspection
 │   ├── ImageLibraryMultilang.php        # trait: per-language read/write, name⇄id mapping
 │   └── ImageLibraryExportImport.php     # trait: JSON + CSV emit, parse, idempotent re-apply
-├── ImageLibrary-Konzept.md              # architecture / design notes (German)
+├── docs/
+│   ├── ImageLibrary-Konzept_EN.md      # architecture / design notes (English)
+│   ├── ImageLibrary-Konzept_DE.md      # German translation of the same
+│   └── screenshots/                    # README screenshots
 ├── README.md                            # this file
 └── LICENSE
 ```
