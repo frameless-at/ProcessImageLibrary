@@ -277,14 +277,16 @@ textarea.ml-cell-input {
 	display: flex;
 	gap: 12px;
 	margin-top: 6px;
-	font-size: 0.9em;
 }
 .ml-batch-mode label {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: 6px;
 	cursor: pointer;
 	font-weight: normal;
+}
+.ml-batch-mode input[type="radio"] {
+	margin-top: -2px;
 }
 
 /* Pagination row — flex with two groups: left (summary + prev/next),
