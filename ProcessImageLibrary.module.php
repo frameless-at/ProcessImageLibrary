@@ -346,10 +346,15 @@ class ProcessImageLibrary extends Process {
 		$sort         = $sortState['sort'];
 		$dir          = $sortState['dir'];
 		$requestedPg  = max(1, (int) $this->wire('input')->get('p'));
-		// Tag pool for the filter bar: union across the entire (cached)
-		// flat-row set, not scoped to other filters, so the picker shows
-		// every tag the user can possibly choose from.
-		$tagFilterPool = $this->flatUsedTags($this->loadRows($filters));
+		// Tag pool for the filter bar: scoped to the row-filter set
+		// (template / field / search / "missing X"), so a field without
+		// tags — or whose useTags flag is off — hides the picker entirely
+		// via the `if ($tagFilterPool)` gate in renderFilterBar. The tag
+		// filter itself is NOT applied here, so selecting a tag doesn't
+		// shrink the picker.
+		$tagFilterPool = $this->flatUsedTags(
+			$this->applyRowFilters($this->loadRows($filters), $filters)
+		);
 		$resultsHtml  = $this->renderResultsHtml($filters, $sort, $dir, $requestedPg, $customCols);
 
 		$session   = $this->wire('session');
@@ -2465,9 +2470,25 @@ class ProcessImageLibrary extends Process {
 
 		// Tags fieldset (full width, always open when present so the
 		// available tag set is visible alongside the rest of the
-		// filter UI).
-		if ($tagFilterPool) {
-			$selectedTags = $filters['tags'] ?? [];
+		// filter UI). Hidden when the row-filter scope yields no tags
+		// AND the user has no active tag selections — i.e. a field
+		// without useTags, or with useTags but nothing tagged yet,
+		// collapses the picker. If active selections exist but the
+		// new pool is empty (e.g. user switched to a no-tag field
+		// without first clearing the picker), we still render the
+		// fieldset with the stale selections visible so the user can
+		// uncheck them.
+		$selectedTags = $filters['tags'] ?? [];
+		if ($tagFilterPool || $selectedTags) {
+			// Merge active selections back in so a stuck filter is
+			// always removable, regardless of whether the tag is in
+			// the current pool.
+			$displayPool = $tagFilterPool;
+			foreach ($selectedTags as $t) {
+				if (!in_array($t, $displayPool, true)) $displayPool[] = $t;
+			}
+			sort($displayPool, SORT_NATURAL | SORT_FLAG_CASE);
+
 			/** @var \ProcessWire\InputfieldFieldset $tagsFs */
 			$tagsFs = $modules->get('InputfieldFieldset');
 			$tagsFs->label = $selectedTags
@@ -2481,7 +2502,7 @@ class ProcessImageLibrary extends Process {
 			$cbs->label       = $this->_('Active tags');
 			$cbs->skipLabel   = Inputfield::skipLabelHeader;
 			$cbs->optionColumns = 4;
-			foreach ($tagFilterPool as $t) $cbs->addOption($t, $t);
+			foreach ($displayPool as $t) $cbs->addOption($t, $t);
 			$cbs->value = $selectedTags;
 			$tagsFs->add($cbs);
 
@@ -2677,7 +2698,7 @@ class ProcessImageLibrary extends Process {
 		// selector for the sort-state visuals.
 		$out .= '<thead><tr class="tablesorter-headerRow">';
 		$out .= '<th class="ml-cell-select">'
-			. '<input type="checkbox" class="ml-select-all" title="'
+			. '<input type="checkbox" class="uk-checkbox ml-select-all" title="'
 			. $san->entities($this->_('Select all on page')) . '"></th>';
 		foreach ($headers as [$colKey, $label, $sortKey]) {
 			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters);
@@ -2718,7 +2739,7 @@ class ProcessImageLibrary extends Process {
 			$out .= '<tr>';
 
 			$out .= '<td class="ml-cell-select">'
-				. '<input type="checkbox" class="ml-select-row" data-key="'
+				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
 				. $san->entities($selKey) . '"></td>';
 
 			// Thumbnail cell becomes clickable when the host page is

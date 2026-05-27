@@ -234,7 +234,6 @@ textarea.ml-cell-input {
 	cursor: default;
 }
 .ml-cell-select input[type="checkbox"] {
-	margin: 0;
 	cursor: pointer;
 }
 
