@@ -26,8 +26,18 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		//   ratio on  → Longer side (66) + Quality (34)
 		//               Keep-ratio (100)
 
-		// Width × Height define the exact crop box when keep-ratio
-		// is off; hidden under keep-ratio.
+		// Layout intent:
+		//   ratio off → row 1: Width (33) + Height (33) + Quality (33)
+		//               row 2: Keep image ratio (100)
+		//   ratio on  → row 1: Longer side (66) + Quality (33)
+		//               row 2: Keep image ratio (100)
+		//
+		// 33 % (instead of an arithmetically "correct" 34 %) keeps the
+		// row sum under 100 % so admin-theme rounding doesn't tip Quality
+		// onto its own line. Quality stays at the same DOM position in
+		// both modes so it sits to the right in the rendered row whether
+		// it's the third slot (crop) or the second (ratio).
+
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbWidth';
 		$f->label = $this->_('Width (px)');
@@ -48,11 +58,9 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$f->columnWidth = 33;
 		$fs->add($f);
 
-		// Longer-side cap for the keep-ratio path. Shown only when
-		// the ratio checkbox is on; runtime caps the longer axis of
-		// the rendered thumb to this value (≤ 260 ⇒ reuse PW's
-		// admin variation as source, > 260 ⇒ produce a dedicated
-		// size($longer, 0) / size(0, $longer) variation).
+		// Longer-side cap for the keep-ratio path. ≤ 260 ⇒ reuse PW's
+		// admin variation as source; > 260 ⇒ runtime produces a
+		// dedicated size($longer, 0) / size(0, $longer) variation.
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbLongerSide';
 		$f->label = $this->_('Longer side (px)');
@@ -63,9 +71,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$f->columnWidth = 66;
 		$fs->add($f);
 
-		// Quality is mode-agnostic. columnWidth=34 fills the final
-		// slot in either layout: crop-mode row (33+33+34) and
-		// ratio-mode row (66+34).
+		// Quality is mode-agnostic; always the rightmost slot in row 1.
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbQuality';
 		$f->label = $this->_('JPEG quality (1–100)');
@@ -73,7 +79,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$f->min = 1;
 		$f->max = 100;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_QUALITY_DEFAULT);
-		$f->columnWidth = 34;
+		$f->columnWidth = 33;
 		$fs->add($f);
 
 		// Keep-aspect toggle on its own full-width row. Header
