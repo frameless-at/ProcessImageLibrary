@@ -176,11 +176,13 @@ trait ImageLibraryExportImport {
 					? ((int) $row['width']) . 'x' . ((int) $row['height'])
 					: '',
 				'filesize'    => (int) $row['filesize'],
-				// ISO 8601 keeps the round-trip readable and parsable
-				// by every spreadsheet / JSON consumer. Empty string
-				// when no timestamp is recorded yet.
-				'created'     => (int) ($row['created']  ?? 0) > 0 ? date('c', (int) $row['created'])  : '',
-				'modified'    => (int) ($row['modified'] ?? 0) > 0 ? date('c', (int) $row['modified']) : '',
+				// PW writes the underlying values as MySQL DATETIME
+				// strings ("YYYY-MM-DD HH:MM:SS"). Round-tripped
+				// straight as a string for export — readable in
+				// spreadsheets and parsable by every JSON/CSV
+				// consumer. Empty when no timestamp is recorded.
+				'created'     => (string) ($row['created']  ?? ''),
+				'modified'    => (string) ($row['modified'] ?? ''),
 				'description' => $this->exportSubfieldValue($img, 'description'),
 				'tags'        => $this->exportSubfieldValue($img, 'tags'),
 				'custom'      => (object) $customs, // force {} when empty so the shape is consistent

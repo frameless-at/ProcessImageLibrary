@@ -191,8 +191,10 @@ class ProcessImageLibrary extends Process {
 		'tags'        => 'string',
 		'width'       => 'int',
 		'filesize'    => 'int',
-		'created'     => 'int',
-		'modified'    => 'int',
+		// PW stores Pagefile created / modified as MySQL DATETIME
+		// strings; ISO-shaped, so string sort = chronological sort.
+		'created'     => 'string',
+		'modified'    => 'string',
 	];
 
 	const DEFAULT_SORT = 'pageTitle';
@@ -1604,7 +1606,10 @@ class ProcessImageLibrary extends Process {
 		//       language title on top.
 		//   v6: created + modified Pagefile timestamps added to every
 		//       row (sortable, filterable, displayable as date columns).
-		return 'rows-v6-' . substr(md5((string) json_encode($keyData)), 0, 16);
+		//   v7: created + modified stored as DATETIME strings, not
+		//       Unix-int casts (PW's DB schema is DATETIME; v6 cast
+		//       lost everything past the year).
+		return 'rows-v7-' . substr(md5((string) json_encode($keyData)), 0, 16);
 	}
 
 	/**
@@ -1775,12 +1780,17 @@ class ProcessImageLibrary extends Process {
 						'filesize'    => (int) ($img['filesize'] ?? 0),
 						'width'       => (int) ($img['width'] ?? 0),
 						'height'      => (int) ($img['height'] ?? 0),
-						// Pagefile timestamps — created = upload, modified =
-						// last metadata change. Both Unix seconds in the
-						// DB; render path formats per request via the
-						// admin theme's date format.
-						'created'     => (int) ($img['created']  ?? 0),
-						'modified'    => (int) ($img['modified'] ?? 0),
+						// Pagefile timestamps — created = upload,
+						// modified = last metadata change. PW stores
+						// both as MySQL DATETIME strings (e.g.
+						// "2026-05-27 17:00:45"), NOT Unix seconds —
+						// (int) casting would lose everything past
+						// the year. Keep them as strings: lex sort
+						// matches chronological sort for ISO-style
+						// datetime, and the format helper parses on
+						// render.
+						'created'     => (string) ($img['created']  ?? ''),
+						'modified'    => (string) ($img['modified'] ?? ''),
 						'ext'         => pathinfo($basename, PATHINFO_EXTENSION),
 						'custom'      => array_diff_key($img, $standardKeys),
 					];
@@ -2217,13 +2227,20 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Format a Unix timestamp the way the rest of the PW admin does —
-	 * uses $config->dateFormat if set, otherwise a sensible ISO-style
-	 * default. Empty / zero timestamps render as the empty string so
-	 * the cell looks blank for files that have no recorded date yet.
+	 * Format a stored Pagefile datetime for display. PW writes both
+	 * created and modified as MySQL DATETIME strings (e.g.
+	 * "2026-05-27 17:00:45"); accept either that or a Unix-timestamp
+	 * fallback so the helper stays robust. Uses $config->dateFormat
+	 * when set, otherwise a sensible "Y-m-d H:i" default. Empty /
+	 * zero / unparseable values render as the empty string so the
+	 * cell looks blank for files with no recorded date.
+	 *
+	 * @param int|string|null $val
 	 */
-	protected function formatTimestamp(int $ts): string {
-		if ($ts <= 0) return '';
+	protected function formatTimestamp($val): string {
+		if ($val === null || $val === '' || $val === '0000-00-00 00:00:00') return '';
+		$ts = is_numeric($val) ? (int) $val : strtotime((string) $val);
+		if (!$ts || $ts <= 0) return '';
 		$fmt = (string) $this->wire('config')->dateFormat;
 		if ($fmt === '') $fmt = 'Y-m-d H:i';
 		return date($fmt, $ts);
@@ -2808,9 +2825,9 @@ class ProcessImageLibrary extends Process {
 			$out .= '<td class="ml-cell-nowrap" data-col="dimensions">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap" data-col="size">' . $san->entities($size) . '</td>';
 			$out .= '<td class="ml-cell-nowrap" data-col="created">'
-				. $san->entities($this->formatTimestamp((int) ($row['created']  ?? 0))) . '</td>';
+				. $san->entities($this->formatTimestamp($row['created']  ?? '')) . '</td>';
 			$out .= '<td class="ml-cell-nowrap" data-col="modified">'
-				. $san->entities($this->formatTimestamp((int) ($row['modified'] ?? 0))) . '</td>';
+				. $san->entities($this->formatTimestamp($row['modified'] ?? '')) . '</td>';
 			$out .= '<td class="ml-cell-nowrap ml-cell-variations" data-col="variations">'
 				. (int) ($row['variationsCount'] ?? 0) . '</td>';
 

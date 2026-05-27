@@ -1,0 +1,9 @@
+# macOS / Dropbox sync droppings
+.DS_Store
+.dropbox*
+
+# Stray AdminTheme files — never belong in this repo, but Dropbox
+# sync has dumped them here at least once.
+/AdminThemeUikit/
+/AdminThemeReno/
+/AdminThemeDefault/
