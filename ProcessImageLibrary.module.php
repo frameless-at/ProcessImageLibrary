@@ -2645,12 +2645,20 @@ class ProcessImageLibrary extends Process {
 		// Outer scroller so the wide table can overflow horizontally
 		// on narrow viewports without breaking the table layout.
 		$out  = '<div class="ml-table-scroll">';
-		// AdminDataTable + uk-table-* — first lets non-UIkit themes
-		// (Reno, Default) pick up their own admin-table chrome; the
-		// uk-table-* set drives the active styling under AdminThemeUikit
-		// (its rules guard with :not(.uk-table) so the two don't clash).
-		$out .= '<table class="ml-table AdminDataTable uk-table uk-table-divider uk-table-small">';
-		$out .= '<thead><tr>';
+		// Class set is intentional, every entry carries weight:
+		//   ml-table         — module-side hooks
+		//   AdminDataTable   — non-Uikit themes (Reno, Default) pick
+		//                      up their own admin-table chrome here
+		//   AdminDataTableSortable — paired with tablesorter-* classes
+		//                      below to inherit the theme's sort
+		//                      styling (active-asc / desc colour,
+		//                      FontAwesome arrow glyphs) without
+		//                      re-implementing it module-side
+		//   uk-table*        — active styling under AdminThemeUikit
+		$out .= '<table class="ml-table AdminDataTable AdminDataTableSortable uk-table uk-table-divider uk-table-small">';
+		// tablesorter-headerRow matches AdminThemeUikit's compound
+		// selector for the sort-state visuals.
+		$out .= '<thead><tr class="tablesorter-headerRow">';
 		$out .= '<th class="ml-cell-select">'
 			. '<input type="checkbox" class="ml-select-all" title="'
 			. $san->entities($this->_('Select all on page')) . '"></th>';
@@ -2894,14 +2902,19 @@ class ProcessImageLibrary extends Process {
 		// Reset to page 1 — page numbers don't map across sort changes.
 		$href     = $this->buildUrl($filters, 1, $sortKey, $nextDir);
 
-		// CSS handles the arrow glyph via ::after — class on the
-		// <th> tells it which FontAwesome codepoint to render
-		// (unsorted, asc, desc) and whether to fade it. Matches
-		// the active-sort look of GitSync / Modules / Users.
-		$cls = 'ml-th-sortable';
+		// Use the same class names AdminThemeUikit's sort styles
+		// target, so its compound selector
+		// `.uk-table.AdminDataTableSortable tr.tablesorter-headerRow
+		// th.tablesorter-headerAsc` (etc.) matches and we inherit the
+		// active-colour, hover, FontAwesome arrow rules for free. The
+		// .tablesorter-header-inner wrapper inside the <th> is the
+		// hook the theme's ::after glyph attaches to.
 		if ($isActive) {
-			$cls .= ' ml-th-sort-active ml-th-sort-' . ($currentDir === 'asc' ? 'asc' : 'desc');
+			$thCls = $currentDir === 'asc' ? 'tablesorter-headerAsc' : 'tablesorter-headerDesc';
+		} else {
+			$thCls = 'tablesorter-headerUnSorted';
 		}
+		$thCls .= ' ml-th-sortable';
 
 		// A11y: aria-sort on the <th> tells assistive tech which
 		// column is sorted and in which direction; aria-label on the
@@ -2919,11 +2932,9 @@ class ProcessImageLibrary extends Process {
 			$labelText
 		);
 
-		$inner = $labelHtml;
-
-		return '<th class="' . $cls . '"' . $colAttr . $ariaSort . '>'
-			. '<a href="' . $san->entities($href) . '" aria-label="'
-			. $san->entities($linkAria) . '">' . $inner . '</a>'
+		return '<th class="' . $thCls . '"' . $colAttr . $ariaSort . '>'
+			. '<a class="tablesorter-header-inner" href="' . $san->entities($href) . '"'
+			. ' aria-label="' . $san->entities($linkAria) . '">' . $labelHtml . '</a>'
 			. '</th>';
 	}
 
