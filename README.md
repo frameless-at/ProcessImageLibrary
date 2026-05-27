@@ -99,8 +99,6 @@ After **Apply** the fieldset auto-collapses so the table has full vertical room.
 
 ## The table
 
-![Table closeup showing a thumbnail cell, page link, filename code, multilang description with per-language data attributes, tag tokens, dimensions, filesize](docs/screenshots/04-table.png)
-
 - **Thumb** — clickable when the host page is editable; opens the native PW page-edit form for this image in a full-screen iframe (with PW's crop / focus / variations UI).
 - **Page** — link to the page-edit screen.
 - **Field** — image field name, in a `<code>` block.
@@ -118,8 +116,6 @@ The `fa-columns` icon in the pagination row opens a `<dialog>` listing every col
 ![Columns dialog showing the toggleable list with up/down reorder buttons and the drag hint](docs/screenshots/05-columns-dialog.png)
 
 ### Pagination row
-
-![Pagination row at the bottom: page summary + prev/next on the left, per-page picker + columns icon on the right](docs/screenshots/06-pagination.png)
 
 - Summary + prev/next on the left
 - Per-page picker + columns icon on the right
@@ -158,7 +154,7 @@ The Filename cell uses the same inline-edit popup. The input holds the file's st
 
 ### Placeholders
 
-Both single and batch rename support the same placeholder tokens. Server-side they expand BEFORE the filename sanitiser strips parens:
+Both single and batch rename support the same placeholder tokens. Server-side they expand BEFORE the filename sanitiser strips parents:
 
 | Token | Expands to | Example with n=3, page=`summer-festival`, field=`images` |
 |---|---|---|
