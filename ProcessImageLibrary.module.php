@@ -2645,7 +2645,11 @@ class ProcessImageLibrary extends Process {
 		// Outer scroller so the wide table can overflow horizontally
 		// on narrow viewports without breaking the table layout.
 		$out  = '<div class="ml-table-scroll">';
-		$out .= '<table class="ml-table uk-table uk-table-divider uk-table-small">';
+		// AdminDataTable + uk-table-* — first lets non-UIkit themes
+		// (Reno, Default) pick up their own admin-table chrome; the
+		// uk-table-* set drives the active styling under AdminThemeUikit
+		// (its rules guard with :not(.uk-table) so the two don't clash).
+		$out .= '<table class="ml-table AdminDataTable uk-table uk-table-divider uk-table-small">';
 		$out .= '<thead><tr>';
 		$out .= '<th class="ml-cell-select">'
 			. '<input type="checkbox" class="ml-select-all" title="'
