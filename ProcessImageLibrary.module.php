@@ -2668,10 +2668,10 @@ class ProcessImageLibrary extends Process {
 			. '<input type="checkbox" class="ml-select-all" title="'
 			. $san->entities($this->_('Select all on page')) . '"></th>';
 		foreach ($headers as [$colKey, $label, $sortKey]) {
-			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters, false);
+			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters);
 		}
 		foreach ($customCols as $name) {
-			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters, true);
+			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters);
 		}
 		$out .= '</tr></thead><tbody>';
 
@@ -2886,17 +2886,15 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Render one <th>. If $sortKey is null the header is plain text; otherwise
-	 * it becomes a link that, when clicked, sets sort=$sortKey and toggles dir
-	 * (asc → desc → asc) while preserving the current filters. Custom-column
-	 * headers wrap the label in <code> like before.
+	 * Render one <th>. If $sortKey is null the header is plain text;
+	 * otherwise it becomes a link that, when clicked, sets sort=$sortKey
+	 * and toggles dir (asc → desc → asc) while preserving the current
+	 * filters.
 	 */
-	protected function renderSortableHeader(string $colKey, string $label, ?string $sortKey, string $currentSort, string $currentDir, array $filters, bool $codeLabel): string {
+	protected function renderSortableHeader(string $colKey, string $label, ?string $sortKey, string $currentSort, string $currentDir, array $filters): string {
 		$san = $this->wire('sanitizer');
 		$colAttr = ' data-col="' . $san->entities($colKey) . '"';
-		$labelHtml = $codeLabel
-			? '<code>' . $san->entities($label) . '</code>'
-			: $san->entities($label);
+		$labelHtml = $san->entities($label);
 
 		if ($sortKey === null) {
 			return '<th' . $colAttr . '>' . $labelHtml . '</th>';
