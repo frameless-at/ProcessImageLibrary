@@ -362,14 +362,17 @@
 			header.textContent = columnLabelFor(td);
 			dialog.appendChild(header);
 
-			// Placeholder hint — shown for every free-text editor
-			// (filename rename, description, free-form tags, text /
-			// textarea customs). Skipped for whitelist tag checkboxes
-			// since the user can't type into those.
+			// Placeholder hint — shown for every prose-shaped editor:
+			// filename rename + description + text / textarea customs.
+			// NOT for tags (any mode): tags are token sets where
+			// "(d)" → "2026-05-27" would land as a literal tag, which
+			// is editorial noise rather than useful metadata.
 			var hasPlaceholders =
-				td.dataset.input === 'filename' ||
-				td.dataset.input === 'textarea' ||
-				(td.dataset.input === 'text' && parseInt(td.dataset.tagsMode || '0', 10) !== 2);
+				td.dataset.subfield !== 'tags' && (
+					td.dataset.input === 'filename' ||
+					td.dataset.input === 'textarea' ||
+					td.dataset.input === 'text'
+				);
 			if (hasPlaceholders) {
 				var hint = document.createElement('p');
 				hint.className = 'ml-popup-hint';

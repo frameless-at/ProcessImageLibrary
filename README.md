@@ -154,7 +154,7 @@ The Filename cell uses the same inline-edit popup. The input holds the file's st
 
 ### Placeholders
 
-The same token grammar applies to **every** text-shaped editor in the table: filename rename, description, free-form tags, custom text / textarea fields — single and batch alike. The popup shows a hint listing the tokens whenever they're applicable.
+The same token grammar applies to **every** prose-shaped editor in the table: filename rename, description, custom text / textarea fields — single and batch alike. The popup shows a hint listing the tokens whenever they're applicable. Tags are skipped on purpose: they're token sets, and `(d)` → `2026-05-27` would land as a literal tag, which is editorial noise rather than useful metadata.
 
 | Token | Expands to | Example (n=3, total=12, page „Summer festival", field=`images`) |
 |---|---|---|

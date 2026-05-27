@@ -848,17 +848,16 @@ class ProcessImageLibrary extends Process {
 		}
 
 		// Placeholder resolution — same token grammar as filename.
-		// Single-cell save → n = 1, total = 1. Resolver runs BEFORE
-		// the tag whitelist check so a typed "(d)" expands to the
-		// concrete date first and then gets validated as a normal
-		// token (whitelist users typically pick from checkboxes
-		// anyway, but free-text tag fields with placeholders work
-		// this way).
-		$ctx = $this->buildPlaceholderCtx($page, $fieldName, 1, 1);
-		$value = $this->resolveRenamePattern($value, $ctx);
-		if ($langValues !== null) {
-			foreach ($langValues as $lk => $lv) {
-				$langValues[$lk] = $this->resolveRenamePattern((string) $lv, $ctx);
+		// Single-cell save → n = 1, total = 1. Skipped for tags
+		// (any mode): tags are token sets where "(d)" → date would
+		// land as a literal tag, which is editorial noise.
+		if ($subfield !== 'tags') {
+			$ctx = $this->buildPlaceholderCtx($page, $fieldName, 1, 1);
+			$value = $this->resolveRenamePattern($value, $ctx);
+			if ($langValues !== null) {
+				foreach ($langValues as $lk => $lv) {
+					$langValues[$lk] = $this->resolveRenamePattern((string) $lv, $ctx);
+				}
 			}
 		}
 
@@ -1354,14 +1353,15 @@ class ProcessImageLibrary extends Process {
 					continue;
 				}
 
-				// Placeholder resolution runs BEFORE any tag tokenizing
-				// / Add-merging — that way (d), (t), (n) become part of
-				// the literal value before the rest of the pipeline
-				// treats it as a single string. Tags whitelist mode
-				// users can't type these placeholders anyway (they pick
-				// from checkboxes), but free-text tags and descriptions
-				// support them.
-				$itemValue = $this->resolveRenamePattern((string) $value, $ctx);
+				// Placeholder resolution runs BEFORE any Add-merging —
+				// (d) / (t) / (n) etc. become part of the literal value
+				// before the pipeline treats it as a single string.
+				// Skipped for tags (any mode): tags are token sets,
+				// not prose; placeholder expansion would land as a
+				// literal "2026-05-27"-style tag, not useful metadata.
+				$itemValue = $subfield === 'tags'
+					? (string) $value
+					: $this->resolveRenamePattern((string) $value, $ctx);
 
 				if ($subfield === 'tags') {
 					$tokens = $this->splitTags($itemValue);
@@ -1399,14 +1399,17 @@ class ProcessImageLibrary extends Process {
 				}
 
 				if ($langValues !== null) {
-					// Per-language placeholder resolution. (d) / (t) /
-					// (n) / (N) don't depend on language but live inside
-					// each slot's raw string; resolve uniformly.
-					$resolvedLangValues = [];
-					foreach ($langValues as $lk => $lv) {
-						$resolvedLangValues[$lk] = $this->resolveRenamePattern((string) $lv, $ctx);
+					// Per-language placeholder resolution (skipped for
+					// tags — same reasoning as the scalar branch).
+					if ($subfield === 'tags') {
+						$this->applyLangValues($img, $subfield, $langValues);
+					} else {
+						$resolvedLangValues = [];
+						foreach ($langValues as $lk => $lv) {
+							$resolvedLangValues[$lk] = $this->resolveRenamePattern((string) $lv, $ctx);
+						}
+						$this->applyLangValues($img, $subfield, $resolvedLangValues);
 					}
-					$this->applyLangValues($img, $subfield, $resolvedLangValues);
 				} else {
 					$this->writeLangValue($img, $subfield, $itemValue);
 				}
