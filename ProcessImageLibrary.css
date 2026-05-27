@@ -427,8 +427,7 @@ textarea.ml-cell-input {
 }
 .ml-popup-editor textarea:focus,
 .ml-popup-editor input[type="text"]:focus {
-	outline: 1px solid var(--pw-main-color, #5b8cd6);
-	outline-offset: -1px;
+	outline: none;
 }
 .ml-popup-editor input[type="text"] {
 	display: block;
@@ -524,8 +523,7 @@ textarea.ml-cell-input {
 	color: var(--pw-text-color, inherit);
 }
 .ml-langtabs-pane:focus {
-	outline: 1px solid var(--pw-main-color, #5b8cd6);
-	outline-offset: -1px;
+	outline: none;
 }
 textarea.ml-langtabs-pane {
 	min-height: 12em;
@@ -710,8 +708,7 @@ textarea.ml-langtabs-pane {
 	color: var(--pw-text-color, #333);
 }
 .ml-col-move:focus-visible {
-	outline: 1px solid var(--pw-main-color, #5b8cd6);
-	outline-offset: -1px;
+	outline: none;
 }
 
 /* Visually-hidden live region — kept in the DOM and announced by
@@ -733,8 +730,7 @@ textarea.ml-langtabs-pane {
    users — show a focus ring so the active cell is obvious. */
 .ml-cell-editable:focus-visible,
 .ml-cell-thumb[role="button"]:focus-visible {
-	outline: 1px solid var(--pw-main-color, #5b8cd6);
-	outline-offset: -2px;
+	outline: none;
 }
 
 /* Image-editor modal — wraps PW's ProcessPageEdit in an iframe so
