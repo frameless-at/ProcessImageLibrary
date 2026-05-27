@@ -194,7 +194,7 @@
 				var pane;
 				if (isTextarea) {
 					pane = document.createElement('textarea');
-					pane.rows = 10;
+					pane.rows = 6;
 				} else {
 					pane = document.createElement('input');
 					pane.type = 'text';
@@ -258,7 +258,7 @@
 		function buildPopupTextarea(original) {
 			var ta = document.createElement('textarea');
 			ta.value = original;
-			ta.rows = 12;
+			ta.rows = 6;
 			return {
 				element: ta,
 				getValue: function () { return ta.value; },
