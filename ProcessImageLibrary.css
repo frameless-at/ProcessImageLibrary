@@ -427,7 +427,7 @@ textarea.ml-cell-input {
 }
 .ml-popup-editor textarea:focus,
 .ml-popup-editor input[type="text"]:focus {
-	outline: 2px solid var(--pw-main-color, #5b8cd6);
+	outline: 1px solid var(--pw-main-color, #5b8cd6);
 	outline-offset: -1px;
 }
 .ml-popup-editor input[type="text"] {
@@ -524,7 +524,7 @@ textarea.ml-cell-input {
 	color: var(--pw-text-color, inherit);
 }
 .ml-langtabs-pane:focus {
-	outline: 2px solid var(--pw-main-color, #5b8cd6);
+	outline: 1px solid var(--pw-main-color, #5b8cd6);
 	outline-offset: -1px;
 }
 textarea.ml-langtabs-pane {
@@ -710,7 +710,7 @@ textarea.ml-langtabs-pane {
 	color: var(--pw-text-color, #333);
 }
 .ml-col-move:focus-visible {
-	outline: 2px solid var(--pw-main-color, #5b8cd6);
+	outline: 1px solid var(--pw-main-color, #5b8cd6);
 	outline-offset: -1px;
 }
 
@@ -733,7 +733,7 @@ textarea.ml-langtabs-pane {
    users — show a focus ring so the active cell is obvious. */
 .ml-cell-editable:focus-visible,
 .ml-cell-thumb[role="button"]:focus-visible {
-	outline: 2px solid var(--pw-main-color, #5b8cd6);
+	outline: 1px solid var(--pw-main-color, #5b8cd6);
 	outline-offset: -2px;
 }
 

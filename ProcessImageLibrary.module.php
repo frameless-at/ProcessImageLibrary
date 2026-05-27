@@ -476,7 +476,7 @@ class ProcessImageLibrary extends Process {
 			$checked = $isVisible ? ' checked' : '';
 			$colKey = $san->entities($key);
 			$items .= '<li class="ml-col-item" draggable="true">'
-				. '<label><input type="checkbox" class="ml-col-toggle" data-col="'
+				. '<label><input type="checkbox" class="uk-checkbox ml-col-toggle" data-col="'
 				. $colKey . '"' . $checked . '> '
 				. $san->entities($label) . '</label>'
 				// Up / Down buttons for keyboard users — same effect as
