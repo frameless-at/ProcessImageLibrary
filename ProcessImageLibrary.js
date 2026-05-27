@@ -402,6 +402,7 @@
 					var lbl = document.createElement('label');
 					var rb = document.createElement('input');
 					rb.type = 'radio';
+					rb.className = 'uk-radio';
 					rb.name = radioName;
 					rb.value = mode;
 					if (mode === 'add') rb.checked = true;
