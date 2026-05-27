@@ -259,7 +259,7 @@ ProcessImageLibrary/
 │   ├── ImageLibraryMultilang.php        # trait: per-language read/write, name⇄id mapping
 │   └── ImageLibraryExportImport.php     # trait: JSON + CSV emit, parse, idempotent re-apply
 ├── docs/
-│   ├── ImageLibrary-Konzept_EN.md      # architecture / design notes (English)
+│   ├── ImageLibrary-Concept_EN.md      # architecture / design notes (English)
 │   ├── ImageLibrary-Konzept_DE.md      # German translation of the same
 │   └── screenshots/                    # README screenshots
 ├── README.md                            # this file

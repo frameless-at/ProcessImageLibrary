@@ -26,7 +26,7 @@ require_once __DIR__ . '/src/ImageLibraryExportImport.php';
  * renders, the row-cache pipeline, install / uninstall, and the small
  * primitives (resolvePageimage, splitTags, blacklist parsers).
  *
- * See docs/ImageLibrary-Konzept_EN.md for the architecture overview.
+ * See docs/ImageLibrary-Concept_EN.md for the architecture overview.
  */
 class ProcessImageLibrary extends Process {
 
