@@ -1500,7 +1500,11 @@ class ProcessImageLibrary extends Process {
 		//   v3: multilang round-trip in export / import
 		//   v4: repeater pages resolved to owner (pageTitle / templateId
 		//       overridden; ownerPageId + repeaterField added)
-		return 'rows-v4-' . substr(md5((string) json_encode($keyData)), 0, 16);
+		//   v5: cached pageTitle for repeater rows is default-language
+		//       (was leaking the cache-populator's user language across
+		//       editors); hydrateSlice sets the per-request user-
+		//       language title on top.
+		return 'rows-v5-' . substr(md5((string) json_encode($keyData)), 0, 16);
 	}
 
 	/**
@@ -1539,13 +1543,18 @@ class ProcessImageLibrary extends Process {
 
 		$ownerByRepeaterId = [];
 		$repeaterPages = $this->wire('pages')->getById(array_keys($repeaterPageIds));
+		// Title cached in the default language so the row cache stays
+		// language-neutral (one cache entry for all editors). The
+		// editor's own-language title is set in hydrateSlice() per
+		// request — that path is what the user actually sees.
+		$defaultLang = $this->wire('languages') ? $this->wire('languages')->getDefault() : null;
 		foreach ($repeaterPages as $rp) {
 			$owner = method_exists($rp, 'getForPageRoot') ? $rp->getForPageRoot() : null;
 			if (!$owner || !$owner->id || $owner->id === $rp->id) continue;
 			$field = method_exists($rp, 'getForField') ? $rp->getForField() : null;
 			$ownerByRepeaterId[(int) $rp->id] = [
 				'ownerPageId'    => (int) $owner->id,
-				'ownerTitle'     => (string) $owner->title,
+				'ownerTitle'     => $this->defaultLangTitle($owner, $defaultLang),
 				'ownerTemplate'  => (int) $owner->template->id,
 				'repeaterField'  => $field ? (string) $field->name : '',
 			];
@@ -1565,6 +1574,21 @@ class ProcessImageLibrary extends Process {
 		}
 		unset($r);
 		return $rows;
+	}
+
+	/**
+	 * Pull a page's title in the default language, regardless of the
+	 * current user's admin language. Used when writing language-
+	 * neutral values into the row cache; hydrateSlice() later
+	 * overrides for display with the editor's own language.
+	 */
+	protected function defaultLangTitle(Page $page, ?Language $defaultLang): string {
+		$title = $page->title;
+		if ($defaultLang && is_object($title) && method_exists($title, 'getLanguageValue')) {
+			$val = (string) $title->getLanguageValue($defaultLang);
+			if ($val !== '') return $val;
+		}
+		return (string) $title;
 	}
 
 	/**
@@ -1926,6 +1950,11 @@ class ProcessImageLibrary extends Process {
 			}
 			$row['pageUrl']     = $displayPage->url;
 			$row['pageEditUrl'] = $displayPage->editUrl;
+			// Title rendered in the editor's own admin language —
+			// the cached pageTitle is intentionally default-language
+			// (so sort / filter / search stay consistent across
+			// editors); this override flips display to user-language.
+			$row['pageTitle']   = (string) $displayPage->title;
 
 			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
 			if (!$img) continue;
