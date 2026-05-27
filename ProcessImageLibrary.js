@@ -322,6 +322,7 @@
 				var label = document.createElement('label');
 				var cb = document.createElement('input');
 				cb.type = 'checkbox';
+				cb.className = 'uk-checkbox';
 				cb.value = tag;
 				cb.checked = !!currentSet[tag];
 				label.appendChild(cb);
