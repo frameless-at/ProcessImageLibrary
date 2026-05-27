@@ -1865,10 +1865,22 @@ class ProcessImageLibrary extends Process {
 		$whitelist = array_keys(self::SORTABLE_COLUMNS);
 		foreach ($customCols as $name) $whitelist[] = 'custom:' . $name;
 
-		if (!in_array($sort, $whitelist, true)) {
+		if ($sort === '') {
+			// Empty sort = "use the configured default sort". Don't
+			// touch $dir — buildUrl omits sort+dir individually when
+			// each matches its own default, so a URL like ?dir=desc
+			// (default sort, flipped direction) must survive. Old
+			// code blanket-reset both whenever sort was empty, which
+			// killed the toggle-direction round-trip on the default
+			// sort column.
+			$sort = $this->getDefaultSort();
+		} elseif (!in_array($sort, $whitelist, true)) {
+			// Unknown sort key — fall back wholesale so an injected
+			// $_GET can't smuggle arbitrary keys into the row lookup.
 			$sort = $this->getDefaultSort();
 			$dir  = $this->getDefaultSortDir();
 		}
+		if ($dir === '') $dir = $this->getDefaultSortDir();
 		if ($dir !== 'desc') $dir = 'asc';
 
 		return ['sort' => $sort, 'dir' => $dir];
