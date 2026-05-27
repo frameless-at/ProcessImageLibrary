@@ -388,7 +388,6 @@ class ProcessImageLibrary extends Process {
 			. ' title="' . $sanitizer->entities($cfgTitle) . '"'
 			. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
 			. $sanitizer->entities($cfgLabel)
-			. ' <i class="fa fa-cog" aria-hidden="true"></i>'
 			. '</a>';
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
