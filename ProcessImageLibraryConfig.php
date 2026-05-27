@@ -15,63 +15,66 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$modules = $this->wire('modules');
 
 		// --- Thumbnail rendering ---
+		// PW's InputfieldWrapper::render() tracks columnWidthTotal
+		// across ALL children — showIf-hidden ones included. That
+		// breaks the Width/Height + Longer-side layout the moment
+		// both modes' fields share the DOM: the hidden mode's
+		// columnWidths still get added to the total, overflow past
+		// 100 %, force a reset, and the next visible field is
+		// rendered as "row start" — i.e. dropped onto a new row.
+		//
+		// So we render only the active mode's fields. The keep-ratio
+		// checkbox doubles as the mode toggle; switching modes
+		// requires Save + Reload, which is fine for a config screen
+		// edited rarely. Non-rendered fields' values remain in the
+		// module's stored config (ModuleConfig only overwrites the
+		// keys it received), so the other mode's last-saved Width /
+		// Height / Longer side reappear when the user toggles back.
+		$savedKR = $this->get('thumbKeepRatio');
+		if ($savedKR === null) {
+			$oldCrop = $this->get('thumbCrop');
+			$savedKR = $oldCrop === null ? true : !$oldCrop;
+		}
+		$keepRatio = (bool) $savedKR;
+
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Thumbnail');
 		$fs->description = $this->_('Per-row preview image rendered into the table. Up to 260 px on the longer side the runtime reuses PW\'s lazily-generated admin image-field variation — no second resize pass per row. Beyond that, a dedicated variation is produced for the table.');
 
-		// Field order is fixed; columnWidth + showIf together produce
-		// the two visible layouts:
-		//   ratio off → Width (33) + Height (33) + Quality (34)
-		//               Keep-ratio (100)
-		//   ratio on  → Longer side (66) + Quality (34)
-		//               Keep-ratio (100)
+		if ($keepRatio) {
+			// Ratio mode: Longer side (66) + Quality (33) — row 1.
+			$f = $modules->get('InputfieldInteger');
+			$f->name = 'thumbLongerSide';
+			$f->label = $this->_('Longer side (px)');
+			$f->value = (int) ($this->get('thumbLongerSide') ?: ProcessImageLibrary::THUMB_LONGER_SIDE_DEFAULT);
+			$f->min = 16;
+			$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_LONGER_SIDE_DEFAULT);
+			$f->columnWidth = 66;
+			$fs->add($f);
+		} else {
+			// Crop mode: Width (33) + Height (33) + Quality (33)
+			// — row 1.
+			$f = $modules->get('InputfieldInteger');
+			$f->name = 'thumbWidth';
+			$f->label = $this->_('Width (px)');
+			$f->value = (int) ($this->get('thumbWidth') ?: ProcessImageLibrary::THUMB_WIDTH_DEFAULT);
+			$f->min = 16;
+			$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_WIDTH_DEFAULT);
+			$f->columnWidth = 33;
+			$fs->add($f);
 
-		// Layout intent:
-		//   ratio off → row 1: Width (33) + Height (33) + Quality (33)
-		//               row 2: Keep image ratio (100)
-		//   ratio on  → row 1: Longer side (66) + Quality (33)
-		//               row 2: Keep image ratio (100)
-		//
-		// 33 % (instead of an arithmetically "correct" 34 %) keeps the
-		// row sum under 100 % so admin-theme rounding doesn't tip Quality
-		// onto its own line. Quality stays at the same DOM position in
-		// both modes so it sits to the right in the rendered row whether
-		// it's the third slot (crop) or the second (ratio).
+			$f = $modules->get('InputfieldInteger');
+			$f->name = 'thumbHeight';
+			$f->label = $this->_('Height (px)');
+			$f->value = (int) ($this->get('thumbHeight') ?: ProcessImageLibrary::THUMB_HEIGHT_DEFAULT);
+			$f->min = 16;
+			$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_HEIGHT_DEFAULT);
+			$f->columnWidth = 33;
+			$fs->add($f);
+		}
 
-		$f = $modules->get('InputfieldInteger');
-		$f->name = 'thumbWidth';
-		$f->label = $this->_('Width (px)');
-		$f->value = (int) ($this->get('thumbWidth') ?: ProcessImageLibrary::THUMB_WIDTH_DEFAULT);
-		$f->min = 16;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_WIDTH_DEFAULT);
-		$f->showIf = 'thumbKeepRatio!=1';
-		$f->columnWidth = 33;
-		$fs->add($f);
-
-		$f = $modules->get('InputfieldInteger');
-		$f->name = 'thumbHeight';
-		$f->label = $this->_('Height (px)');
-		$f->value = (int) ($this->get('thumbHeight') ?: ProcessImageLibrary::THUMB_HEIGHT_DEFAULT);
-		$f->min = 16;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_HEIGHT_DEFAULT);
-		$f->showIf = 'thumbKeepRatio!=1';
-		$f->columnWidth = 33;
-		$fs->add($f);
-
-		// Longer-side cap for the keep-ratio path. ≤ 260 ⇒ reuse PW's
-		// admin variation as source; > 260 ⇒ runtime produces a
-		// dedicated size($longer, 0) / size(0, $longer) variation.
-		$f = $modules->get('InputfieldInteger');
-		$f->name = 'thumbLongerSide';
-		$f->label = $this->_('Longer side (px)');
-		$f->value = (int) ($this->get('thumbLongerSide') ?: ProcessImageLibrary::THUMB_LONGER_SIDE_DEFAULT);
-		$f->min = 16;
-		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_LONGER_SIDE_DEFAULT);
-		$f->showIf = 'thumbKeepRatio=1';
-		$f->columnWidth = 66;
-		$fs->add($f);
-
-		// Quality is mode-agnostic; always the rightmost slot in row 1.
+		// Quality always closes row 1 — the runtime needs it
+		// regardless of mode.
 		$f = $modules->get('InputfieldInteger');
 		$f->name = 'thumbQuality';
 		$f->label = $this->_('JPEG quality (1–100)');
@@ -79,7 +82,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$f->min = 1;
 		$f->max = 100;
 		$f->notes = sprintf($this->_('Default: %d'), ProcessImageLibrary::THUMB_QUALITY_DEFAULT);
-		$f->columnWidth = 33;
+		$f->columnWidth = $keepRatio ? 33 : 34;
 		$fs->add($f);
 
 		// Keep-aspect toggle on its own full-width row. Header
@@ -94,12 +97,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$f->name = 'thumbKeepRatio';
 		$f->skipLabel = Inputfield::skipLabelHeader;
 		$f->label2 = $this->_('Keep image ratio');
-		$savedKR = $this->get('thumbKeepRatio');
-		if ($savedKR === null) {
-			$oldCrop = $this->get('thumbCrop');
-			$savedKR = $oldCrop === null ? true : !$oldCrop;
-		}
-		$f->checked((bool) $savedKR);
+		$f->checked($keepRatio);
 		$f->columnWidth = 100;
 		$fs->add($f);
 
