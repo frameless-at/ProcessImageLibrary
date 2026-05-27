@@ -90,20 +90,37 @@
 }
 .ml-table thead th {
 	white-space: nowrap;
-	background: var(--pw-main-background, #f5f5f5);
-	color: var(--pw-text-color, #111);
+	color: var(--pw-muted-color, #666);
 	border-bottom: 1px solid var(--pw-border-color, #ddd);
+	font-weight: 400;
+	text-transform: uppercase;
+	letter-spacing: 0.02em;
+	font-size: 0.85em;
 }
-.ml-th-sortable a {
+/* Header anchors are sort-toggle links, not navigation. Force every
+   colour state to inherit from the <th> so AdminThemeUikit's global
+   "a { color: #e83561 }" rule doesn't paint sortable headers in the
+   theme accent (was producing a stray bright "SUMMARY" cell). */
+.ml-th-sortable a,
+.ml-th-sortable a:link,
+.ml-th-sortable a:visited,
+.ml-th-sortable a:hover,
+.ml-th-sortable a:focus,
+.ml-th-sortable a:active {
 	color: inherit;
 	text-decoration: none;
 	display: block;
 }
 .ml-th-sortable:hover {
-	background: color-mix(in srgb, var(--pw-main-background, #eee) 60%, var(--pw-text-color, #000) 8%);
+	color: var(--pw-text-color, #111);
 }
+/* Active-sort indication is the arrow glyph plus a touch of weight
+   on the label — no background tint. Matches the rest of the admin
+   (Modules list, GitSync, Users — none of them paint the sort
+   column). */
 .ml-th-sort-active {
-	background: color-mix(in srgb, var(--pw-main-color, #5b8cd6) 12%, transparent) !important;
+	color: var(--pw-text-color, #111);
+	font-weight: 600;
 }
 .ml-sort-arrow {
 	margin-left: 4px;
