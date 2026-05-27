@@ -346,15 +346,12 @@ class ProcessImageLibrary extends Process {
 		$sort         = $sortState['sort'];
 		$dir          = $sortState['dir'];
 		$requestedPg  = max(1, (int) $this->wire('input')->get('p'));
-		// Tag pool for the filter bar: scoped to the row-filter set
-		// (template / field / search / "missing X"), so a field without
-		// tags — or whose useTags flag is off — hides the picker entirely
-		// via the `if ($tagFilterPool)` gate in renderFilterBar. The tag
-		// filter itself is NOT applied here, so selecting a tag doesn't
-		// shrink the picker.
-		$tagFilterPool = $this->flatUsedTags(
-			$this->applyRowFilters($this->loadRows($filters), $filters)
-		);
+		// Tag pool for the filter bar: union across the entire (cached)
+		// flat-row set. Field-specific visibility is handled by JS via
+		// config.fieldCaps (applyFieldCapabilityFilter) — the picker DOM
+		// is rendered unconditionally so JS can toggle .hidden as the
+		// user changes the field filter, same shape as template→field.
+		$tagFilterPool = $this->flatUsedTags($this->loadRows($filters));
 		$resultsHtml  = $this->renderResultsHtml($filters, $sort, $dir, $requestedPg, $customCols);
 
 		$session   = $this->wire('session');
@@ -2283,6 +2280,11 @@ class ProcessImageLibrary extends Process {
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
 			'tplFields' => $this->getTemplateFieldsMap($imageFields, $eligibleTemplates),
+			// Per-image-field capabilities. JS uses this to hide / show
+			// the Tags filter fieldset + the Missing-X checkboxes when
+			// the field filter changes, mirroring the server-side gate
+			// in renderFilterBar so AJAX result swaps stay consistent.
+			'fieldCaps' => $this->buildFieldCapsPayload($imageFields),
 			'defaultPageSize'      => $this->getDefaultPageSize(),
 			'defaultHiddenColumns' => $this->getDefaultHiddenColumns(),
 			// Languages list for the popup's multilang tabs. Each
@@ -2468,21 +2470,13 @@ class ProcessImageLibrary extends Process {
 		$fld->columnWidth = 34;
 		$outer->add($fld);
 
-		// Tags fieldset (full width, always open when present so the
-		// available tag set is visible alongside the rest of the
-		// filter UI). Hidden when the row-filter scope yields no tags
-		// AND the user has no active tag selections — i.e. a field
-		// without useTags, or with useTags but nothing tagged yet,
-		// collapses the picker. If active selections exist but the
-		// new pool is empty (e.g. user switched to a no-tag field
-		// without first clearing the picker), we still render the
-		// fieldset with the stale selections visible so the user can
-		// uncheck them.
+		// Tags fieldset (full width, always open when present). Rendered
+		// unconditionally so the JS field-capability filter has DOM to
+		// toggle — same pattern as the template→field narrowing: PHP
+		// emits everything, JS hides what doesn't apply to the current
+		// selection and resets invalidated values.
 		$selectedTags = $filters['tags'] ?? [];
 		if ($tagFilterPool || $selectedTags) {
-			// Merge active selections back in so a stuck filter is
-			// always removable, regardless of whether the tag is in
-			// the current pool.
 			$displayPool = $tagFilterPool;
 			foreach ($selectedTags as $t) {
 				if (!in_array($t, $displayPool, true)) $displayPool[] = $t;
@@ -2491,6 +2485,7 @@ class ProcessImageLibrary extends Process {
 
 			/** @var \ProcessWire\InputfieldFieldset $tagsFs */
 			$tagsFs = $modules->get('InputfieldFieldset');
+			$tagsFs->name  = 'mlTagsFs';
 			$tagsFs->label = $selectedTags
 				? sprintf($this->_('Tags (%d)'), count($selectedTags))
 				: $this->_('Tags');
@@ -2510,7 +2505,9 @@ class ProcessImageLibrary extends Process {
 		}
 
 		// Missing-X checkboxes inline, each 25% wide — fixed
-		// description/tags first, then one per custom field.
+		// description / tags first, then one per custom field. All
+		// rendered; JS hides / unchecks the ones that don't apply to
+		// the selected field, same as template→field.
 		$missingDef = [
 			'no_desc' => $this->_('Missing description'),
 			'no_tags' => $this->_('Missing tags'),

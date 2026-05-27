@@ -1155,17 +1155,86 @@
 			);
 		}
 
+		// Field-capability narrowing: with a specific image field
+		// selected, hide and uncheck any filter UI that doesn't apply
+		// to that field — Tags fieldset, "Missing tags", "Missing
+		// <custom>". Exact parallel of applyTemplateFieldFilter: PHP
+		// emits the full DOM, JS toggles .hidden + .disabled per
+		// element, and invalidated values are cleared so submission
+		// reflects what the user actually sees.
+		function applyFieldCapabilityFilter() {
+			if (!filterForm) return;
+			var caps   = (config.fieldCaps && typeof config.fieldCaps === 'object') ? config.fieldCaps : {};
+			var fldSel = filterForm.querySelector('select[name="field"]');
+			var field  = fldSel ? fldSel.value : '';
+			var cap    = field && caps[field] ? caps[field] : null;
+			var hasTags = !cap || cap.useTags === true;
+			var customs = cap ? (cap.customs || []) : null;
+			var changed = false;
+
+			// Tags filter fieldset (.Inputfield_mlTagsFs).
+			var tagsWrap = filterForm.querySelector('.Inputfield_mlTagsFs');
+			if (tagsWrap) {
+				tagsWrap.hidden = !hasTags;
+				if (!hasTags) {
+					tagsWrap.querySelectorAll('input[type="checkbox"]:checked').forEach(function (cb) {
+						cb.checked = false;
+						changed = true;
+					});
+				}
+			}
+
+			// "Missing tags" checkbox (.Inputfield_no_tags).
+			var missingTagsWrap = filterForm.querySelector('.Inputfield_no_tags');
+			if (missingTagsWrap) {
+				missingTagsWrap.hidden = !hasTags;
+				var noTagsCb = missingTagsWrap.querySelector('input[type="checkbox"]');
+				if (noTagsCb) noTagsCb.disabled = !hasTags;
+				if (!hasTags && noTagsCb && noTagsCb.checked) {
+					noTagsCb.checked = false;
+					changed = true;
+				}
+			}
+
+			// "Missing <custom>" wrappers (.Inputfield_no_custom_<name>).
+			filterForm.querySelectorAll('[class*="Inputfield_no_custom_"]').forEach(function (w) {
+				var match = /(?:^|\s)Inputfield_no_custom_([A-Za-z0-9_]+)(?:\s|$)/.exec(w.className);
+				if (!match) return;
+				var name = match[1];
+				var ok   = customs === null || customs.indexOf(name) !== -1;
+				w.hidden = !ok;
+				var cb = w.querySelector('input[type="checkbox"]');
+				if (cb) cb.disabled = !ok;
+				if (!ok && cb && cb.checked) {
+					cb.checked = false;
+					changed = true;
+				}
+			});
+
+			// Surface any auto-cleared filters to the reset-visibility +
+			// label-recompute logic so they reflect current state.
+			if (changed) {
+				updateResetVisibility();
+				recomputeFilterLabels();
+			}
+		}
+
 		if (filterForm) {
 			filterForm.addEventListener('input', updateResetVisibility);
 			filterForm.addEventListener('change', updateResetVisibility);
 			filterForm.addEventListener('change', function (e) {
-				if (e.target && e.target.name === 'template') applyTemplateFieldFilter();
+				if (!e.target) return;
+				if (e.target.name === 'template') applyTemplateFieldFilter();
+				if (e.target.name === 'template' || e.target.name === 'field') {
+					applyFieldCapabilityFilter();
+				}
 			});
 			// Sync initial state: narrow the field dropdown to the URL's
 			// template, then hide the Reset button if no filters apply
 			// (the wrapper renders visible by default — PW doesn't know
 			// about our visibility rule).
 			applyTemplateFieldFilter();
+			applyFieldCapabilityFilter();
 			updateResetVisibility();
 
 			filterForm.addEventListener('submit', function (e) {
@@ -1219,6 +1288,8 @@
 						s.selectedIndex = 0;
 					}
 				});
+				applyTemplateFieldFilter();
+				applyFieldCapabilityFilter();
 				updateResetVisibility();
 				recomputeFilterLabels();
 				replaceFromQs('', true);

@@ -264,6 +264,29 @@ trait ImageLibraryDiscovery {
 	}
 
 	/**
+	 * Per-image-field capability payload for the JS filter-bar narrowing:
+	 * `{ field: { useTags: bool, customs: [name, …] } }`. Consumed by
+	 * applyFieldCapabilityFilter() in the JS to hide / show the Tags
+	 * fieldset + Missing-X checkboxes as the user changes the field
+	 * filter, mirroring the server-side gate in renderFilterBar.
+	 *
+	 * @param array<int,string> $imageFields
+	 * @return array<string,array{useTags:bool,customs:array<int,string>}>
+	 */
+	protected function buildFieldCapsPayload(array $imageFields): array {
+		$tagsCfg = $this->getTagsConfig();
+		$cByF    = $this->getCustomByField();
+		$out = [];
+		foreach ($imageFields as $f) {
+			$out[$f] = [
+				'useTags' => ($tagsCfg[$f]['mode'] ?? 0) > 0,
+				'customs' => array_values($cByF[$f] ?? []),
+			];
+		}
+		return $out;
+	}
+
+	/**
 	 * Sorted unique custom-field column names across all image fields.
 	 *
 	 * Sourced from discovery (field-{name} templates), not from row data —
