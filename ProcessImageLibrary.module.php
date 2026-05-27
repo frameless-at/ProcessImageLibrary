@@ -2932,10 +2932,17 @@ class ProcessImageLibrary extends Process {
 			$labelText
 		);
 
+		// Native PW tablesorter renders the inner as a <div>; the
+		// theme's ::after arrow glyph + colour rules assume a
+		// block-level element with default inline-flow children.
+		// Keep our server-side <a> as a click wrapper *around* a
+		// <div class="tablesorter-header-inner"> so the styled
+		// element matches the original element type 1:1.
 		return '<th class="' . $thCls . '"' . $colAttr . $ariaSort . '>'
-			. '<a class="tablesorter-header-inner" href="' . $san->entities($href) . '"'
-			. ' aria-label="' . $san->entities($linkAria) . '">' . $labelHtml . '</a>'
-			. '</th>';
+			. '<a href="' . $san->entities($href) . '" aria-label="'
+			. $san->entities($linkAria) . '">'
+			. '<div class="tablesorter-header-inner">' . $labelHtml . '</div>'
+			. '</a></th>';
 	}
 
 	protected function renderPagination(int $total, int $page, int $totalPages, array $filters, string $sort = '', string $dir = '', ?int $pageSize = null): string {

@@ -95,11 +95,22 @@
 }
 /* Sortable-header colours and arrows come from AdminThemeUikit's
    own .tablesorter-* rules — we just emit the class names it
-   targets (see renderSortableHeader). The block-display rule below
-   keeps the <a> spanning the full header area so the entire <th>
-   reads as clickable. Padding stays at the .uk-table-small default
-   (10px 12px). */
-.ml-th-sortable .tablesorter-header-inner {
+   targets (see renderSortableHeader). Markup mirrors the native
+   PW shape: <th class="tablesorter-headerAsc/Desc/UnSorted"> →
+   <a href> (our click wrapper) → <div class="tablesorter-header-
+   inner"> (the theme-styled element).
+   The anchor is neutralised so AdminThemeUikit's global
+   "a { color: var(--pw-main-color) }" doesn't paint the header in
+   the accent. The div inside picks up colour + arrow from the
+   theme via the tablesorter-header* state classes on the <th>. */
+.ml-th-sortable a,
+.ml-th-sortable a:link,
+.ml-th-sortable a:visited,
+.ml-th-sortable a:hover,
+.ml-th-sortable a:focus,
+.ml-th-sortable a:active {
+	color: inherit;
+	text-decoration: none;
 	display: block;
 }
 .ml-table tbody tr {
