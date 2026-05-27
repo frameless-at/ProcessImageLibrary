@@ -324,8 +324,13 @@ textarea.ml-cell-input {
 	/* padding: 0.25rem 0.4rem; */
 	cursor: pointer;
 }
-.ml-columns-toggle:hover {
+.ml-columns-toggle:hover,
+.ml-columns-toggle:focus {
 	color: var(--pw-text-color, #111);
+	/* Beat AdminThemeUikit's "a:hover { text-decoration: underline }"
+	   — class+pseudo (0,2,0) outweighs type+pseudo (0,1,1), so no
+	   !important needed. */
+	text-decoration: none;
 }
 .ml-columns-toggle .fa {
 	display: block;
