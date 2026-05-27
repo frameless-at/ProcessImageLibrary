@@ -316,12 +316,12 @@ textarea.ml-cell-input {
 	text-decoration: none;
 }
 .ml-columns-toggle {
-	font-size: 1.05rem;
+	font-size: 1.15rem;
 	line-height: 1;
 	color: var(--pw-muted-color, #555);
 	background: transparent;
 	border: 0;
-	padding: 0.25rem 0.4rem;
+	/* padding: 0.25rem 0.4rem; */
 	cursor: pointer;
 }
 .ml-columns-toggle:hover {
