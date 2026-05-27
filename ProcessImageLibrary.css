@@ -90,12 +90,8 @@
 }
 .ml-table thead th {
 	white-space: nowrap;
-	color: var(--pw-muted-color, #666);
+	color: var(--pw-muted-color, #6c8dae);
 	border-bottom: 1px solid var(--pw-border-color, #ddd);
-	font-weight: 400;
-	text-transform: uppercase;
-	letter-spacing: 0.02em;
-	font-size: 0.85em;
 }
 /* Header anchors are sort-toggle links, not navigation. Force every
    colour state to inherit from the <th> so AdminThemeUikit's global
@@ -114,23 +110,32 @@
 .ml-th-sortable:hover {
 	color: var(--pw-text-color, #111);
 }
-/* Active-sort indication is the arrow glyph plus a touch of weight
-   on the label — no background tint. Matches the rest of the admin
-   (Modules list, GitSync, Users — none of them paint the sort
-   column). */
+/* Active sort uses the theme accent — matches GitSync, Modules
+   list, Users list. The arrow glyph is rendered via FontAwesome
+   on a ::after pseudo so we don't have to manage Unicode chars or
+   custom <span>s. */
 .ml-th-sort-active {
-	color: var(--pw-text-color, #111);
-	font-weight: 600;
+	color: var(--pw-main-color, #e83561);
 }
-.ml-sort-arrow {
-	margin-left: 4px;
-	font-size: 0.85em;
+.ml-th-sortable a::after {
+	font-family: fontAwesome;
+	margin: 0 0 0 5px;
+	opacity: 0.4;
+	font-weight: normal;
+	content: "\f0dc";  /* sort (both arrows, unsorted) */
 }
-.ml-table th,
-.ml-table td {
-	padding: 0.5rem 0.75rem;
-	vertical-align: top;
+.ml-th-sort-active a::after {
+	opacity: 1;
 }
+.ml-th-sort-asc a::after {
+	content: "\f0dd";  /* sort-down (asc) */
+}
+.ml-th-sort-desc a::after {
+	content: "\f0de";  /* sort-up (desc) */
+}
+/* Padding intentionally not overridden — .uk-table-small on the
+   <table> hands us 10px 12px, matching AdminThemeUikit's own data
+   tables. */
 .ml-table tbody tr {
 	border-bottom: 1px solid var(--pw-border-color, #eee);
 }

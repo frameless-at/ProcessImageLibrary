@@ -2893,8 +2893,15 @@ class ProcessImageLibrary extends Process {
 		$nextDir  = ($isActive && $currentDir === 'asc') ? 'desc' : 'asc';
 		// Reset to page 1 — page numbers don't map across sort changes.
 		$href     = $this->buildUrl($filters, 1, $sortKey, $nextDir);
-		$arrow    = $isActive ? ($currentDir === 'asc' ? '▲' : '▼') : '';
-		$cls      = 'ml-th-sortable' . ($isActive ? ' ml-th-sort-active' : '');
+
+		// CSS handles the arrow glyph via ::after — class on the
+		// <th> tells it which FontAwesome codepoint to render
+		// (unsorted, asc, desc) and whether to fade it. Matches
+		// the active-sort look of GitSync / Modules / Users.
+		$cls = 'ml-th-sortable';
+		if ($isActive) {
+			$cls .= ' ml-th-sort-active ml-th-sort-' . ($currentDir === 'asc' ? 'asc' : 'desc');
+		}
 
 		// A11y: aria-sort on the <th> tells assistive tech which
 		// column is sorted and in which direction; aria-label on the
@@ -2913,9 +2920,6 @@ class ProcessImageLibrary extends Process {
 		);
 
 		$inner = $labelHtml;
-		if ($arrow !== '') {
-			$inner .= ' <span class="ml-sort-arrow" aria-hidden="true">' . $arrow . '</span>';
-		}
 
 		return '<th class="' . $cls . '"' . $colAttr . $ariaSort . '>'
 			. '<a href="' . $san->entities($href) . '" aria-label="'
