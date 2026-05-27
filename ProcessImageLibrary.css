@@ -116,9 +116,10 @@
 .ml-table tbody tr {
 	border-bottom: 1px solid var(--pw-border-color, #eee);
 }
-.ml-table tbody tr:hover {
-	background: color-mix(in srgb, var(--pw-text-color, #000) 4%, transparent);
-}
+/* Row-level hover suppressed on purpose — cell-level hover for
+   editable cells (.ml-cell-editable:hover, further down) is the
+   only highlight we want, so the user's eye lands on the click
+   target, not the whole row. */
 /* Thumb cell — dimensions driven by --ml-thumb-longer (keep-ratio
    path) and --ml-thumb-w / --ml-thumb-h (crop path), set on
    .ml-root from the module config. Keep-ratio variant caps BOTH

@@ -2644,7 +2644,12 @@ class ProcessImageLibrary extends Process {
 
 		// Outer scroller so the wide table can overflow horizontally
 		// on narrow viewports without breaking the table layout.
-		$out  = '<div class="ml-table-scroll">';
+		// pw-table-responsive + uk-overflow-auto handle horizontal
+		// scroll on narrow viewports the same way every other PW
+		// data table does. pw-table-sortable is included because
+		// the inner table carries .AdminDataTableSortable; the
+		// wrapper class is what some PW-side JS hooks check.
+		$out  = '<div class="ml-table-scroll pw-table-responsive uk-overflow-auto pw-table-sortable">';
 		// Class set is intentional, every entry carries weight:
 		//   ml-table         — module-side hooks
 		//   AdminDataTable   — non-Uikit themes (Reno, Default) pick
