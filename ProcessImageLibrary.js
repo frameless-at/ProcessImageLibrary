@@ -1243,12 +1243,6 @@
 			if (isReplacing) return;
 			isReplacing = true;
 			results.classList.add('ml-loading');
-			// Body-level spinner so it escapes the .ml-results opacity
-			// fade — visible at full strength regardless of how dim
-			// the table contents are or how far the user scrolled.
-			var spinner = document.createElement('div');
-			spinner.className = 'ml-loading-spinner';
-			document.body.appendChild(spinner);
 
 			fetch(config.renderUrl + qs, {
 				credentials: 'same-origin',
@@ -1276,7 +1270,6 @@
 				throw err;
 			}).finally(function () {
 				results.classList.remove('ml-loading');
-				if (spinner.parentNode) spinner.remove();
 				isReplacing = false;
 			});
 		}
