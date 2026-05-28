@@ -21,6 +21,7 @@ A ProcessWire module that shows **every image in a PW installation** in a single
 - **Filename rename**: inline (single image) or batch (across the active selection) via the same popup; placeholder grammar `(n)`, `(n2)..(n5)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)` works in every prose-shaped editor (filename, description, custom text/textarea) — tags excluded
 - **Replace image in place**: click the upload icon on a row OR drag a file onto the row. Bytes swap, basename + URLs + Pagefile metadata stay. Extension match enforced (no jpg → png surprises). Variations regenerate server-side, the table row's thumb / dimensions / size / modified / variations cells patch in place
 - **Delete image (single + batch)**: trash icon on the row, behind a confirm dialog with count + filename preview + "no undo" warning. Selection-as-paintbrush applies: with N rows ticked, deleting on any selected row deletes the whole selection. Per-row failures land in the existing bulk-result modal
+- **Bookmarks**: saved filter combinations as a tab strip above the filter bar (`WireTabs uk-tab` markup — same chrome the rest of the admin uses, no module-specific tab CSS). Click a bookmark → AJAX filter swap + filter form reset + repopulate. "+ Add bookmark" only appears when the active filter isn't already saved. Storage piggy-backs on `$user->meta('imageLibraryPrefs').bookmarks`, cross-device; only filter-shaped params are kept (sort / page-size stay orthogonal)
 - **Date columns**: Uploaded (Pagefile `created`) and Modified, sortable, formatted in `$config->dateFormat`
 - **Variations column**: per-image counter from `$img->getVariations()`
 - **Export / Import**: JSON and CSV (with multilang-aware column suffixes `<subfield>_<langName>`). Image-URL variant picker on export — Original / 260 / 512 / 1024 px shorter side — so external pipelines (e.g. AI vision agents) can fetch cheap admin variations instead of the raw originals
@@ -76,7 +77,7 @@ The `src/` traits keep the main module file focused on AJAX endpoints + renderin
 - `___executeDelete()` — AJAX POST with an `items` array; single + batch share the path. Per page `$page->editable()`, then `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed lists so the JS can fade rows out and surface partial failures through the bulk-result dialog.
 - `___executeExport()` — direct download of JSON or CSV honoring the active filters. Reads `urlVariant` (`original` default; `260` / `512` / `1024` for same-axis variations) and emits the matching URL in the `url` column; the chosen variant is recorded in `meta.urlVariant`.
 - `___executeImport()` — AJAX POST, accepts a previously-exported (and externally edited) JSON / CSV file and writes it back; idempotent (unchanged items are skipped).
-- `___executeUserPrefs()` — AJAX POST, persists columns + page size into `$user->meta('imageLibraryPrefs')` (debounced).
+- `___executeUserPrefs()` — AJAX POST, persists columns + page size + bookmarks into `$user->meta('imageLibraryPrefs')` (debounced). Bookmarks are validated via `$sanitizer->text(maxLength: 80)` for the name and `canonicalizeBookmarkQs()` for the querystring, so saved + loaded shapes stay in lockstep.
 - `___install()` / `___uninstall()` — admin-page lifecycle + `image-library-access` permission.
 
 ## Data model (PW-native)
