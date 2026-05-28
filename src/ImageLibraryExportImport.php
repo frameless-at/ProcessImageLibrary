@@ -75,6 +75,23 @@ trait ImageLibraryExportImport {
 		$exportCsvLabel  = $this->_('Export CSV');
 		$importLabel = $this->_('Import');
 		$pickLabel   = $this->_('Choose JSON or CSV file');
+		$variantLabel = $this->_('Image URL');
+		$variantOriginal = $this->_('Original');
+		$variantSmall    = $this->_('Small — 260 px shorter side');
+		$variantMedium   = $this->_('Medium — 512 px shorter side');
+		$variantLarge    = $this->_('Large — 1024 px shorter side');
+
+		// JS reads the picker on click and appends ?urlVariant=<value>
+		// to the export URL before navigating. "original" omits the
+		// param so the default behaviour stays clean.
+		$variantPicker = '<label class="ml-export-variant-wrap">'
+			. '<span>' . $san->entities($variantLabel) . '</span> '
+			. '<select class="ml-export-variant uk-select uk-form-small" name="urlVariant">'
+			. '<option value="original">' . $san->entities($variantOriginal) . '</option>'
+			. '<option value="260">' . $san->entities($variantSmall) . '</option>'
+			. '<option value="512">' . $san->entities($variantMedium) . '</option>'
+			. '<option value="1024">' . $san->entities($variantLarge) . '</option>'
+			. '</select></label>';
 
 		return '<div class="Inputfield InputfieldFieldset InputfieldStateCollapsed ml-export-import">'
 			. '<label class="InputfieldHeader InputfieldStateToggle">'
@@ -84,7 +101,8 @@ trait ImageLibraryExportImport {
 			. '<p class="ml-ei-help">' . $san->entities(
 				$this->_('Export the current filter set as JSON or CSV — image URL, page context, current values. Edit externally, re-upload to apply changes.')
 			) . '</p>'
-			. '<p>'
+			. '<div class="ml-export-row">'
+			. $variantPicker
 			. '<a class="uk-button uk-button-primary uk-button-small ml-export-link"'
 			. ' href="' . $san->entities($exportUrl) . '"'
 			. ' data-export-base="' . $san->entities($exportBase) . '"'
@@ -95,7 +113,7 @@ trait ImageLibraryExportImport {
 			. ' data-export-base="' . $san->entities($exportBase) . '"'
 			. ' data-format="csv">'
 			. $san->entities($exportCsvLabel) . '</a>'
-			. '</p>'
+			. '</div>'
 			. '<form class="ml-import-form" enctype="multipart/form-data" method="post" action="'
 			. $san->entities($importUrl) . '">'
 			. '<input type="hidden" name="' . $san->entities($csrfName) . '" value="' . $san->entities($csrfValue) . '">'
@@ -131,6 +149,14 @@ trait ImageLibraryExportImport {
 
 		$customCols = $this->collectCustomNames();
 		$filters    = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
+
+		// urlVariant=original (default), or a numeric shorter-axis cap
+		// (260, 512, 1024) — emits the URL of a same-axis variation
+		// instead of the raw file so external consumers (AI vision
+		// pipelines, agents) can fetch cheaper bytes. Unknown / empty
+		// values fall back to the original URL.
+		$urlVariant = (string) $this->wire('input')->get('urlVariant');
+		$variantSize = ctype_digit($urlVariant) ? max(0, (int) $urlVariant) : 0;
 
 		$rows = $this->loadRows($filters);
 		$rows = $this->applyRowFilters($rows, $filters);
@@ -169,7 +195,7 @@ trait ImageLibraryExportImport {
 				'pageId'      => (int) $row['pageId'],
 				'fieldName'   => (string) $row['fieldName'],
 				'basename'    => (string) $row['basename'],
-				'url'         => $img->httpUrl,
+				'url'         => $this->exportImageUrl($img, $variantSize),
 				'pageTitle'   => $this->normalizeDescription($row['pageTitle']),
 				'pageUrl'     => $page->httpUrl,
 				'dimensions'  => ($row['width'] && $row['height'])
@@ -198,6 +224,7 @@ trait ImageLibraryExportImport {
 				'siteUrl'        => $siteUrl,
 				'imageCount'     => count($images),
 				'appliedFilter'  => (object) $this->summarizeActiveFilters($filters),
+				'urlVariant'     => $variantSize > 0 ? (string) $variantSize : 'original',
 				'editableFields' => ['description', 'tags', 'custom.*'],
 				'readOnlyFields' => ['id', 'pageId', 'fieldName', 'basename', 'url', 'dimensions', 'filesize', 'created', 'modified', 'pageTitle', 'pageUrl'],
 			],
@@ -310,6 +337,30 @@ trait ImageLibraryExportImport {
 	 * flattened — one row per image, with each Custom subfield
 	 * promoted to its own "custom_<name>" column (union across the
 	 * export, sorted, so the column layout stays stable across
+	 * Resolve the absolute URL for the exported "url" column. variantSize
+	 * = 0 → the original file. Any positive int → a same-axis variation
+	 * (admin-variation logic: shorter axis capped to that many pixels,
+	 * longer axis auto). SVG / GIF skip the resize so vectors / animation
+	 * survive. Falls back to the original URL on any size() failure.
+	 */
+	protected function exportImageUrl(Pageimage $img, int $variantSize): string {
+		if ($variantSize <= 0) return (string) $img->httpUrl;
+		$ext = strtolower((string) $img->ext);
+		if ($ext === 'svg' || $ext === 'gif') return (string) $img->httpUrl;
+		try {
+			$opts = ['upscaling' => false];
+			if ($img->width >= $img->height) {
+				$v = ($img->height > $variantSize) ? $img->size(0, $variantSize, $opts) : $img;
+			} else {
+				$v = ($img->width  > $variantSize) ? $img->size($variantSize, 0, $opts) : $img;
+			}
+			return (string) $v->httpUrl;
+		} catch (\Throwable $e) {
+			return (string) $img->httpUrl;
+		}
+	}
+
+	/**
 	 * rows). UTF-8 BOM prepended so Excel reads umlauts correctly;
 	 * fputcsv handles quoting + newlines-in-fields.
 	 *

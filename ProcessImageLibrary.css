@@ -860,6 +860,26 @@ textarea.ml-langtabs-pane {
 	color: var(--pw-muted-color, #555);
 	margin: 0 0 0.75rem;
 }
+/* Export row — variant picker on the left, the two export buttons
+   beside it. Same flex / gap rhythm as the import form below for
+   visual symmetry. */
+.ml-export-row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	align-items: center;
+	margin: 0.5rem 0 0;
+}
+.ml-export-variant-wrap {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	color: var(--pw-muted-color, #555);
+	margin-right: 0.5rem;
+}
+.ml-export-variant {
+	min-width: 18ch;
+}
 .ml-import-form {
 	display: flex;
 	flex-wrap: wrap;

@@ -1959,6 +1959,7 @@
 		// Browser sees Content-Disposition: attachment on the
 		// response and triggers a download without navigating away.
 		var exportLinks = document.querySelectorAll('.ml-export-link');
+		var exportVariantSel = document.querySelector('.ml-export-variant');
 		Array.prototype.forEach.call(exportLinks, function (link) {
 			link.addEventListener('click', function (e) {
 				var base = link.dataset.exportBase
@@ -1968,6 +1969,14 @@
 				var qs = location.search || '';
 				if (link.dataset.format === 'csv') {
 					qs += (qs ? '&' : '?') + 'format=csv';
+				}
+				// Image-URL variant — append only when the user picked
+				// something other than the default so clean URLs stay
+				// clean. Values are: "original" (omit) | "260" | "512"
+				// | "1024".
+				var variant = exportVariantSel ? exportVariantSel.value : '';
+				if (variant && variant !== 'original') {
+					qs += (qs ? '&' : '?') + 'urlVariant=' + encodeURIComponent(variant);
 				}
 				window.location.href = base + qs;
 			});
