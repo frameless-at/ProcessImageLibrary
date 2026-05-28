@@ -2757,10 +2757,13 @@ class ProcessImageLibrary extends Process {
 			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
 			. $allLabel . '</a></li>';
 
+		$bookmarkMatched = false;
 		foreach ($bookmarks as $idx => $b) {
 			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
 			$href  = $page->url . $canon;
-			$active = ($canon !== '' && $canon === $currentCanon) ? ' class="uk-active"' : '';
+			$isActive = ($canon !== '' && $canon === $currentCanon);
+			if ($isActive) $bookmarkMatched = true;
+			$active = $isActive ? ' class="uk-active"' : '';
 			$out .= '<li' . $active . ' data-bookmark-idx="' . (int) $idx . '">'
 				. '<a class="ml-bookmark"'
 				. ' href="' . $san->entities($href) . '"'
@@ -2775,10 +2778,12 @@ class ProcessImageLibrary extends Process {
 				. '</li>';
 		}
 
-		// Add button rightmost — opens the name-dialog. The js-only
-		// href stops the browser from following it; role="button"
-		// signals intent to assistive tech.
-		$out .= '<li class="ml-bookmarks-add"><a href="#" role="button"'
+		// Add button rightmost — opens the name-dialog. Hidden unless
+		// the current filter is BOTH non-empty AND not already saved
+		// as a bookmark; JS mirrors the same logic on every URL change
+		// so the toggle stays live.
+		$addHidden = ($currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
+		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
 			. ' title="' . $addTitle . '">'
 			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
 			. '</a></li>';

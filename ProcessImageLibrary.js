@@ -1880,18 +1880,25 @@
 			tabs.forEach(function (li) {
 				li.classList.remove('uk-active');
 			});
-			// All-tab is the first <li> that carries a .ml-bookmark
-			// anchor — always second in the strip (after Add).
-			var matched = false;
+			// Walk every tab with a .ml-bookmark anchor — that's both
+			// "Show all" (qs="") and the saved bookmarks. First match
+			// wins the active marker.
+			var bookmarkMatched = false;
 			tabs.forEach(function (li) {
 				var a = li.querySelector('a.ml-bookmark');
 				if (!a) return;
 				var qs = a.dataset.qs || '';
-				if (qs === current && !matched) {
+				if (qs === current && !li.classList.contains('uk-active')) {
 					li.classList.add('uk-active');
-					matched = true;
+					// A non-empty match means the current URL state
+					// IS a saved bookmark — gates the Add button.
+					if (qs !== '') bookmarkMatched = true;
 				}
 			});
+			// Add button visible only when a filter is active that's
+			// NOT already a saved bookmark; otherwise hidden.
+			var addLi = document.querySelector('.ml-bookmarks-add');
+			if (addLi) addLi.hidden = (current === '' || bookmarkMatched);
 		}
 
 		function bookmarksContainer() {
