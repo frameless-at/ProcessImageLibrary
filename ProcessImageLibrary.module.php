@@ -2745,21 +2745,13 @@ class ProcessImageLibrary extends Process {
 		$currentCanon = $this->canonicalizeBookmarkQs(http_build_query($this->bookmarkFilterPayload($filters)));
 		$addTitle = $san->entities($this->_('Save current filter as bookmark'));
 		$addLabel = $san->entities($this->_('Add bookmark'));
-		$allLabel = $san->entities($this->_('All'));
+		$allLabel = $san->entities($this->_('Show all'));
 		$delTitle = $san->entities($this->_('Delete bookmark'));
 
 		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
-		// Add button first (leftmost) per the brief — opens the
-		// name-dialog. The js-only href stops the browser from
-		// following it; tag with role="button" so screen readers
-		// pick the intent up.
-		$out .= '<li class="ml-bookmarks-add"><a href="#" role="button"'
-			. ' title="' . $addTitle . '">'
-			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
-			. '</a></li>';
 
-		// Baseline "All" tab — empty querystring, active iff nothing
-		// filter-shaped is currently set.
+		// Baseline "Show all" tab first — empty querystring, active
+		// iff nothing filter-shaped is currently set.
 		$allActive = $currentCanon === '' ? ' class="uk-active"' : '';
 		$out .= '<li' . $allActive . '>'
 			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
@@ -2777,9 +2769,19 @@ class ProcessImageLibrary extends Process {
 				. '</a>'
 				. '<button type="button" class="ml-bookmark-del"'
 				. ' aria-label="' . $delTitle . '"'
-				. ' title="' . $delTitle . '">×</button>'
+				. ' title="' . $delTitle . '">'
+				. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
+				. '</button>'
 				. '</li>';
 		}
+
+		// Add button rightmost — opens the name-dialog. The js-only
+		// href stops the browser from following it; role="button"
+		// signals intent to assistive tech.
+		$out .= '<li class="ml-bookmarks-add"><a href="#" role="button"'
+			. ' title="' . $addTitle . '">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
+			. '</a></li>';
 
 		$out .= '</ul>';
 		return $out;

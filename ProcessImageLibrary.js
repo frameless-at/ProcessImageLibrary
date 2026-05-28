@@ -1652,6 +1652,13 @@
 			applyTemplateFieldFilter();
 			applyFieldCapabilityFilter();
 			updateResetVisibility();
+			// Expose the live-narrowing helpers so the bookmark click
+			// handler (lives outside the filter-form scope) can run
+			// them after pushing values onto the form.
+			root._mlApplyTemplateFieldFilter   = applyTemplateFieldFilter;
+			root._mlApplyFieldCapabilityFilter = applyFieldCapabilityFilter;
+			root._mlUpdateResetVisibility      = updateResetVisibility;
+			root._mlRecomputeFilterLabels      = recomputeFilterLabels;
 
 			filterForm.addEventListener('submit', function (e) {
 				e.preventDefault();
@@ -1687,10 +1694,13 @@
 			// Also wipe the form's visible state — form.reset() goes back to
 			// the values present at page load, which here ARE the user's
 			// active filters, so we have to clear inputs manually.
-			filterForm.addEventListener('click', function (e) {
-				var reset = e.target.closest && e.target.closest('a[href="./"]');
-				if (!reset) return;
-				e.preventDefault();
+			// Wipe every input on the filter form back to the empty
+			// state. Shared by the Reset link AND the bookmark-click
+			// handler (which applies the bookmark's values onto the
+			// freshly-cleared form so stale checks / selects don't
+			// linger from whatever was active before).
+			function clearFilterForm() {
+				if (!filterForm) return;
 				filterForm.querySelectorAll('input[type="search"], input[type="text"], input[type="hidden"]').forEach(function (i) {
 					i.value = '';
 				});
@@ -1704,6 +1714,16 @@
 						s.selectedIndex = 0;
 					}
 				});
+			}
+			// Expose so the bookmark click handler (outside this
+			// scope) can reuse it.
+			root._mlClearFilterForm = clearFilterForm;
+
+			filterForm.addEventListener('click', function (e) {
+				var reset = e.target.closest && e.target.closest('a[href="./"]');
+				if (!reset) return;
+				e.preventDefault();
+				clearFilterForm();
 				applyTemplateFieldFilter();
 				applyFieldCapabilityFilter();
 				updateResetVisibility();
@@ -1881,11 +1901,13 @@
 		function rerenderBookmarksList() {
 			var ul = bookmarksContainer();
 			if (!ul) return;
-			// Wipe everything except Add + All (the first two <li>s)
-			// then append a fresh <li> per bookmark in memory order.
-			var keepers = ul.querySelectorAll('li.ml-bookmarks-add, li:nth-child(2)');
-			Array.from(ul.children).forEach(function (li) {
-				if (keepers[0] === li || keepers[1] === li) return;
+			// Wipe every bookmark <li>, keep "Show all" (first child)
+			// and the Add button (last child). Then insert fresh
+			// bookmark <li>s in memory order BEFORE the Add button so
+			// it stays rightmost.
+			var addLi = ul.querySelector('li.ml-bookmarks-add');
+			Array.from(ul.children).forEach(function (li, i) {
+				if (i === 0 || li === addLi) return;
 				li.remove();
 			});
 			bookmarks.forEach(function (b, idx) {
@@ -1893,7 +1915,7 @@
 				li.dataset.bookmarkIdx = String(idx);
 				var a = document.createElement('a');
 				a.className = 'ml-bookmark';
-				a.href = (config.adminUrl ? location.pathname : './') + (b.qs || '');
+				a.href = location.pathname + (b.qs || '');
 				a.dataset.qs = b.qs || '';
 				a.textContent = b.name;
 				li.appendChild(a);
@@ -1902,9 +1924,9 @@
 				del.className = 'ml-bookmark-del';
 				del.setAttribute('aria-label', labels.bookmarkDelete || 'Delete bookmark');
 				del.title = labels.bookmarkDelete || 'Delete bookmark';
-				del.textContent = '×';
+				del.innerHTML = '<i class="fa fa-trash-o" aria-hidden="true"></i>';
 				li.appendChild(del);
-				ul.appendChild(li);
+				ul.insertBefore(li, addLi);
 			});
 			syncBookmarkActive();
 		}
@@ -1999,11 +2021,50 @@
 			if (tab) {
 				e.preventDefault();
 				var qs = tab.dataset.qs || '';
+				applyBookmarkToForm(qs);
 				replaceFromQs(qs, true);
 				syncBookmarkActive();
 				return;
 			}
 		});
+
+		// Push the bookmark's filter values onto the filter form so
+		// what the user SEES matches what was just applied. Without
+		// this, the form keeps showing the previous filter's selects
+		// + checkboxes while the table reflects the bookmark — and
+		// the next Apply would resurrect the stale values.
+		function applyBookmarkToForm(qs) {
+			var filterForm = document.querySelector('.ml-filter-bar');
+			if (!filterForm) return;
+			if (typeof root._mlClearFilterForm === 'function') {
+				root._mlClearFilterForm();
+			}
+			var params = new URLSearchParams((qs || '').replace(/^\?/, ''));
+			params.forEach(function (v, k) {
+				if (k === 'tags' && v) {
+					v.split(',').forEach(function (tag) {
+						filterForm.querySelectorAll('input[name="tags[]"]').forEach(function (cb) {
+							if (cb.value === tag) cb.checked = true;
+						});
+					});
+					return;
+				}
+				var input = filterForm.querySelector('[name="' + k + '"]');
+				if (!input) return;
+				if (input.type === 'checkbox' || input.type === 'radio') {
+					input.checked = (v === '1' || v === 'on' || v === input.value);
+				} else {
+					input.value = v;
+				}
+			});
+			// Re-run the live narrowing + label updates so the form
+			// state is internally consistent (template→field hide
+			// rules, missing-X capability gates, "(N)" suffix).
+			if (typeof root._mlApplyTemplateFieldFilter === 'function') root._mlApplyTemplateFieldFilter();
+			if (typeof root._mlApplyFieldCapabilityFilter === 'function') root._mlApplyFieldCapabilityFilter();
+			if (typeof root._mlUpdateResetVisibility === 'function') root._mlUpdateResetVisibility();
+			if (typeof root._mlRecomputeFilterLabels === 'function') root._mlRecomputeFilterLabels();
+		}
 
 		// Reflect URL changes (back/forward, AJAX swap from filter
 		// bar) onto the bookmark active marker.
