@@ -965,17 +965,24 @@ textarea.ml-langtabs-pane {
 	margin-bottom: -1rem;
 }
 /* Per-tab delete button — same physical dimensions as the thumbnail
-   trash icon (32 × 32, font-size 1 rem, fa-trash-o, red hover). Sits
-   absolutely positioned in the top-right of its parent <li> so it
-   overlays the tab label area without taking flex space (which is
-   what made it dangle below the strip before). */
-.ml-bookmarks-tabs > li {
+   trash icon (32 × 32, font-size 1 rem, fa-trash-o, red hover).
+   Only user bookmark tabs (carry data-bookmark-idx) get the right-
+   side reservation + absolute icon; "Show all" and "Add bookmark"
+   don't, since they have nothing to delete. The icon sits centred
+   vertically on the tab's right edge, hover-revealed, ALWAYS taking
+   reserved space via padding-right on the <a> so the layout never
+   shifts and the icon never overlaps the tab label. */
+.ml-bookmarks-tabs > li[data-bookmark-idx] {
 	position: relative;
+}
+.ml-bookmarks-tabs > li[data-bookmark-idx] > a {
+	padding-right: 2.5rem;
 }
 .ml-bookmark-del {
 	position: absolute;
-	top: 2px;
-	right: 2px;
+	top: 50%;
+	right: 0.25rem;
+	transform: translateY(-50%);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
