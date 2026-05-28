@@ -153,9 +153,12 @@
 	position: relative;
 	width: var(--ml-thumb-cell-width, 100px);
 }
-/* Per-row action icons (Replace + Delete): top-right of the thumb
-   cell, fade in on row hover. Both share the same visual treatment
-   so they read as a paired action cluster. */
+/* Per-row action icons (Replace + Delete): pinned to opposite top
+   corners of the thumb cell so finger-tap on mobile doesn't risk
+   hitting the wrong action — Delete sits on the LEFT, Replace on
+   the RIGHT, the thumb itself between them. Both fade in on row
+   hover, sized at 32 px for a comfortable touch target without
+   eating the thumbnail. */
 .ml-replace-btn,
 .ml-delete-btn {
 	position: absolute;
@@ -163,21 +166,21 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 22px;
-	height: 22px;
+	width: 32px;
+	height: 32px;
 	padding: 0;
 	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 3px;
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, #333);
-	font-size: 0.8rem;
+	font-size: 1rem;
 	line-height: 1;
 	cursor: pointer;
 	opacity: 0;
 	transition: opacity 0.12s ease-out;
 }
-.ml-replace-btn { right: 30px; }
-.ml-delete-btn  { right: 4px; }
+.ml-delete-btn  { left: 4px; }
+.ml-replace-btn { right: 4px; }
 .ml-table tbody tr:hover .ml-replace-btn,
 .ml-table tbody tr:hover .ml-delete-btn,
 .ml-replace-btn:focus-visible,
@@ -288,9 +291,17 @@
 	color: var(--pw-code-color, inherit);
 }
 .ml-cell-desc,
-.ml-cell-tags {
+.ml-cell-tags,
+.ml-cell-textarea {
 	min-width: 14rem;
 	max-width: 28rem;
+}
+/* Text-typed custom subfields — short prose. Narrower than textarea
+   so columns don't sprawl, but wide enough that "credit" / "summary"
+   one-liners stay readable instead of wrapping every word. */
+.ml-cell-text {
+	min-width: 8rem;
+	max-width: 18rem;
 }
 .ml-cell-nowrap {
 	white-space: nowrap;

@@ -3197,13 +3197,21 @@ class ProcessImageLibrary extends Process {
 			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
 				$colAttr = ' data-col="custom:' . $san->entities($name) . '"';
+				// Type-class lives on every custom cell (NA + editable
+				// alike) so column-level width rules apply uniformly
+				// regardless of whether a given row has that subfield.
+				// Keyed by Inputfield type, not by field name, so the
+				// CSS scales to new custom subfields without per-name
+				// rules.
+				$inputType = $customInputTypes[$name] ?? 'text';
+				$typeClass = 'ml-cell-' . $san->entities($inputType);
 				// When the customCols list is the union across image
 				// fields (no field filter), some rows won't host every
 				// listed subfield — render those as visually disabled
 				// instead of editable so a click can't trigger an editor
 				// for a field the server would reject anyway.
 				if (!in_array($name, $rowCustoms, true)) {
-					$out .= '<td class="ml-cell-na"' . $colAttr . ' title="'
+					$out .= '<td class="ml-cell-na ' . $typeClass . '"' . $colAttr . ' title="'
 						. $san->entities(sprintf(
 							$this->_('%1$s is not configured on %2$s'),
 							$name,
@@ -3213,11 +3221,10 @@ class ProcessImageLibrary extends Process {
 				}
 				$raw = $row['custom'][$name] ?? '';
 				$val = $this->normalizeDescription($raw);
-				$inputType = $customInputTypes[$name] ?? 'text';
 				$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 					$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
 				)));
-				$out .= '<td class="ml-cell-editable"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+				$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
 					. ' data-subfield="' . $san->entities($name) . '"'
 					. ' data-input="' . $san->entities($inputType) . '"'
 					. $this->buildLangAttrs($raw) . '>'
