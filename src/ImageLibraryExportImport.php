@@ -81,14 +81,16 @@ trait ImageLibraryExportImport {
 		$variantMedium   = $this->_('Medium — 512 px shorter side');
 		$variantLarge    = $this->_('Large — 1024 px shorter side');
 
-		// Two-column layout: left column = Export (variant picker on
-		// top, two export buttons below); right column = Import (file
-		// picker on top, Import button below). Buttons match the
-		// dialog buttons (uk-button-primary / uk-button-secondary, no
-		// size modifier) so the same visual language carries through.
+		// Two-column layout: each column is a real <fieldset> with a
+		// <legend> so the grouping is semantic + accessible. CSS
+		// flexes the fieldsets to equal heights and pushes the action
+		// rows to the bottom (margin-top:auto) so the buttons line up
+		// horizontally across both columns regardless of how much
+		// space the inputs above consume.
 		$csvHref = $exportUrl . (str_contains($exportUrl, '?') ? '&' : '?') . 'format=csv';
 
-		$leftCol = '<div class="ml-ei-col ml-ei-col-export">'
+		$leftCol = '<fieldset class="ml-ei-fieldset ml-ei-fieldset-export">'
+			. '<legend>' . $san->entities($this->_('Export')) . '</legend>'
 			. '<label class="ml-export-variant-wrap">'
 			. '<span>' . $san->entities($variantLabel) . '</span> '
 			. '<select class="ml-export-variant uk-select" name="urlVariant">'
@@ -109,9 +111,10 @@ trait ImageLibraryExportImport {
 			. ' data-format="csv">'
 			. $san->entities($exportCsvLabel) . '</a>'
 			. '</div>'
-			. '</div>';
+			. '</fieldset>';
 
-		$rightCol = '<div class="ml-ei-col ml-ei-col-import">'
+		$rightCol = '<fieldset class="ml-ei-fieldset ml-ei-fieldset-import">'
+			. '<legend>' . $san->entities($this->_('Import')) . '</legend>'
 			. '<form class="ml-import-form" enctype="multipart/form-data" method="post" action="'
 			. $san->entities($importUrl) . '">'
 			. '<input type="hidden" name="' . $san->entities($csrfName) . '" value="' . $san->entities($csrfValue) . '">'
@@ -122,7 +125,7 @@ trait ImageLibraryExportImport {
 			. $san->entities($importLabel) . '</button>'
 			. '</div>'
 			. '</form>'
-			. '</div>';
+			. '</fieldset>';
 
 		// Toggle chevron matches what PW emits for a native
 		// InputfieldFieldset — the AdminTheme JS picks the .toggle-icon

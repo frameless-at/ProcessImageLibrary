@@ -861,27 +861,43 @@ textarea.ml-langtabs-pane {
 	margin: 0 0 0.75rem;
 }
 /* Two-column layout: Export on the left, Import on the right. Each
-   column stacks its input(s) on top and the action button row below
-   so the two halves read as parallel mini-forms. Wraps to a single
-   column on narrow viewports. */
+   column is a real <fieldset> with a <legend>; equal flex sizing
+   keeps them side by side at the same height. Wraps to a single
+   stack on narrow viewports. align-items:stretch is the flex default
+   so the two fieldsets fill the same vertical space, which combined
+   with margin-top:auto on .ml-ei-actions pushes the buttons to the
+   bottom of each column — so the action rows always line up
+   horizontally regardless of how much the inputs above consume. */
 .ml-ei-cols {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 2rem;
+	gap: 1rem;
 	margin: 0.5rem 0 0;
 }
-.ml-ei-col {
+.ml-ei-fieldset {
 	flex: 1 1 280px;
 	display: flex;
 	flex-direction: column;
 	gap: 0.75rem;
+	margin: 0;
+	padding: 0.75rem 1rem 1rem;
+	border: 1px solid var(--pw-border-color, #ddd);
+	border-radius: 4px;
+	background: var(--pw-blocks-background, #fff);
 }
-/* Action button row inside a column — buttons sit side by side with
-   the same gap rhythm the modal footers use. */
+.ml-ei-fieldset > legend {
+	padding: 0 0.4rem;
+	font-weight: 600;
+	font-size: 0.9em;
+	color: var(--pw-text-color, #333);
+}
+/* Action button row pinned to the bottom of its fieldset so all
+   columns' buttons sit at the same vertical position. */
 .ml-ei-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.5rem;
+	margin-top: auto;
 }
 /* Inputs (variant select on the left, file picker on the right) read
    as muted-labelled fields so the columns balance visually. */
@@ -895,7 +911,11 @@ textarea.ml-langtabs-pane {
 .ml-export-variant {
 	min-width: 18ch;
 }
+/* Import form fills the right fieldset so its inner action row can
+   still margin-top:auto to the bottom (the form is the level the
+   actions live at, not the fieldset). */
 .ml-import-form {
+	flex: 1;
 	display: flex;
 	flex-direction: column;
 	gap: 0.75rem;
