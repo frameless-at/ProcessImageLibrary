@@ -582,7 +582,7 @@ class ProcessImageLibrary extends Process {
 		$out .= '<p class="ml-columns-hint">' . $hint . '</p>';
 		$out .= $this->renderColumnsListMarkup($customCols);
 		$out .= '<footer>';
-		$out .= '<button type="button" class="ml-columns-close uk-button uk-button-default uk-button-small ui-priority-secondary">' . $close . '</button>';
+		$out .= '<button type="button" class="ml-columns-close uk-button uk-button-secondary">' . $close . '</button>';
 		$out .= '</footer>';
 		$out .= '</dialog>';
 		return $out;
