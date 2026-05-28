@@ -570,16 +570,24 @@
 					var oldStem = td.dataset.stem || '';
 					if (newStem === '' || newStem === oldStem) { teardown(); return; }
 					teardown();
-					// Optimistic update — show the new stem in the cell
-					// immediately so the rhythm matches a single inline
-					// save (which already does td.textContent = newValue
-					// before the AJAX call). Batch rename can't resolve
-					// the per-cell counter locally, so the template
-					// string is the best we can pin in place.
+					// Optimistic update — resolve placeholders on the
+					// originating cell now. For batch rename the per-row
+					// optimistic update + resolution happens below
+					// against bulkRenameCells; for single rename n=1,
+					// total=1, picked up from the row's own data attrs.
 					var stemEl = td.querySelector('.ml-fn-stem');
 					var prevStem = td.dataset.stem || '';
-					if (stemEl) stemEl.textContent = newStem;
-					td.dataset.stem = newStem;
+					var trRename = td.closest('tr');
+					var singleRenameCtx = {
+						n: 1, total: 1,
+						pageTitle: trRename ? (trRename.dataset.pageTitle || '') : '',
+						pageName:  trRename ? (trRename.dataset.pageName  || '') : '',
+						date:      todayIso,
+						field:     td.dataset.field || ''
+					};
+					var resolvedStemSingle = resolveTemplateClient(newStem, singleRenameCtx);
+					if (stemEl) stemEl.textContent = resolvedStemSingle;
+					td.dataset.stem = resolvedStemSingle;
 					td.classList.add('ml-cell-saving');
 					td.title = labels.saving || 'Saving…';
 
@@ -588,13 +596,32 @@
 					// (n) per item in the order JS sent them. Single: hit
 					// the dedicated rename endpoint.
 					if (batch) {
-						// Flash every selected row's filename cell, not
-						// just the originating one. Per-row counters
-						// resolve server-side, so we can't optimistic-
-						// update each row's stem — just signal that
-						// they're all being saved.
+						// Flash + optimistic stem update on every
+						// selected row's filename cell. Per-row
+						// placeholder context: n = selection-order
+						// index + 1, total = batch size, plus the row's
+						// own data attrs. Each cell stores its prev
+						// stem so a server failure can revert all.
 						var bulkRenameCells = batchCellsForSubfield('basename');
-						bulkRenameCells.forEach(function (c) {
+						var renameTotal = bulkRenameCells.length;
+						var prevStems = [];
+						bulkRenameCells.forEach(function (c, idx) {
+							var stEl = c.querySelector('.ml-fn-stem');
+							prevStems.push({
+								stemEl: stEl,
+								prev:   c.dataset.stem || ''
+							});
+							var trC = c.closest('tr');
+							var batchRenameCtx = {
+								n: idx + 1, total: renameTotal,
+								pageTitle: trC ? (trC.dataset.pageTitle || '') : '',
+								pageName:  trC ? (trC.dataset.pageName  || '') : '',
+								date:      todayIso,
+								field:     c.dataset.field || td.dataset.field || ''
+							};
+							var resolvedForRow = resolveTemplateClient(newStem, batchRenameCtx);
+							if (stEl) stEl.textContent = resolvedForRow;
+							c.dataset.stem = resolvedForRow;
 							if (c !== td) c.classList.add('ml-cell-saving');
 						});
 						runBulk('set', {
@@ -603,18 +630,19 @@
 							mode:     'replace'
 						}).then(function (result) {
 							var ok = reportBulk(result);
-							bulkRenameCells.forEach(function (c) {
+							bulkRenameCells.forEach(function (c, idx) {
 								if (!c.isConnected) return;
 								c.classList.remove('ml-cell-saving');
-								if (ok) flashCell(c, true);
-								else if (c === td) flashCell(c, false);
+								if (ok) {
+									flashCell(c, true);
+								} else {
+									// Revert this cell's optimistic stem.
+									var p = prevStems[idx];
+									if (p && p.stemEl) p.stemEl.textContent = p.prev;
+									c.dataset.stem = p ? p.prev : c.dataset.stem;
+									flashCell(c, false);
+								}
 							});
-							if (!ok && stemEl) {
-								// Revert the originating cell's optimistic
-								// stem; the others kept their old text.
-								stemEl.textContent = prevStem;
-								td.dataset.stem = prevStem;
-							}
 							// Selection keys are pageId:fieldName:basename
 							// and the renamed rows now carry NEW basenames
 							// — the old keys would resurface as stale
@@ -631,13 +659,14 @@
 								replaceFromQs(location.search, false);
 							}, ok ? 1400 : 0);
 						}).catch(function (err) {
-							bulkRenameCells.forEach(function (c) {
+							bulkRenameCells.forEach(function (c, idx) {
 								if (!c.isConnected) return;
 								c.classList.remove('ml-cell-saving');
+								var p = prevStems[idx];
+								if (p && p.stemEl) p.stemEl.textContent = p.prev;
+								c.dataset.stem = p ? p.prev : c.dataset.stem;
 								flashCell(c, false);
 							});
-							if (stemEl) stemEl.textContent = prevStem;
-							td.dataset.stem = prevStem;
 							td.title = (err && err.message) || labels.error || 'Network error';
 						});
 						return;
