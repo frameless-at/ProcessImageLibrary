@@ -111,15 +111,19 @@
 					tr.remove();
 					updatePaginationTotal(data.newTotal);
 					syncSelectAllHeader();
-					// Last row gone? Replace .ml-results with the
-					// server's empty-state markup so the user sees
-					// "No images match the current filters." instead
-					// of an empty table + pagination scaffold.
+					// Last row gone? Replace just the table wrapper
+					// with the empty-state paragraph, matching what
+					// the server emits for a zero-result filter URL.
+					// The pagination above/below stays — it's still
+					// shown on the no-results server render too.
 					if (tbody && tbody.children.length === 0) {
-						var resultsEl = root.querySelector('.ml-results');
-						if (resultsEl) {
+						var tableWrap = root.querySelector('.ml-results .ml-table-scroll');
+						if (tableWrap) {
 							var msg = labels.emptyResult || 'No images match the current filters.';
-							resultsEl.innerHTML = '<p class="ml-empty">' + msg + '</p>';
+							var p = document.createElement('p');
+							p.className = 'ml-empty';
+							p.textContent = msg;
+							tableWrap.replaceWith(p);
 						}
 					}
 				}, 250);
