@@ -419,7 +419,7 @@
 			var cancelBtn = document.createElement('button');
 			cancelBtn.type = 'button';
 			// Match the rest of the admin chrome — PW admin is UIkit.
-			cancelBtn.className = 'ml-popup-cancel uk-button uk-button-default uk-button-small';
+			cancelBtn.className = 'ml-popup-cancel uk-button uk-button-default uk-button-small ui-priority-secondary';
 			cancelBtn.textContent = labels.cancel || 'Cancel';
 			var saveBtn = document.createElement('button');
 			saveBtn.type = 'button';
@@ -713,7 +713,7 @@
 			title.textContent = titleTpl.replace('%s', basename);
 			var closeBtn = document.createElement('button');
 			closeBtn.type = 'button';
-			closeBtn.className = 'ml-image-modal-close uk-button uk-button-default uk-button-small';
+			closeBtn.className = 'ml-image-modal-close uk-button uk-button-default uk-button-small ui-priority-secondary';
 			closeBtn.textContent = labels.close || 'Close';
 			bar.appendChild(title);
 			bar.appendChild(closeBtn);
@@ -1021,11 +1021,11 @@
 			var footer = document.createElement('footer');
 			var cancelBtn = document.createElement('button');
 			cancelBtn.type = 'button';
-			cancelBtn.className = 'uk-button uk-button-default uk-button-small';
+			cancelBtn.className = 'uk-button uk-button-default uk-button-small ui-priority-secondary';
 			cancelBtn.textContent = labels.cancel || 'Cancel';
 			var okBtn = document.createElement('button');
 			okBtn.type = 'button';
-			okBtn.className = 'uk-button uk-button-danger uk-button-small';
+			okBtn.className = 'uk-button uk-button-primary uk-button-small';
 			okBtn.textContent = labels.deleteOk || 'Delete';
 			footer.appendChild(cancelBtn);
 			footer.appendChild(okBtn);
@@ -1269,7 +1269,7 @@
 				'<header class="ml-bulk-result-header"></header>'
 				+ '<ul class="ml-bulk-result-list"></ul>'
 				+ '<footer><button type="button" class="ml-bulk-result-close'
-				+ ' uk-button uk-button-default uk-button-small">'
+				+ ' uk-button uk-button-default uk-button-small ui-priority-secondary">'
 				+ ((labels && labels.close) ? labels.close : 'Close')
 				+ '</button></footer>';
 			root.appendChild(bulkDialog);
