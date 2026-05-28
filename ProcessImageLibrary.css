@@ -536,17 +536,22 @@ textarea.ml-cell-input {
    carry equal specificity but later cascade position; rather than
    chase load order we just win unconditionally. Covers .ml-root
    (the admin page region) plus every <dialog> the JS spawns into
-   <body>, and the elements themselves (not just descendants). */
-.ml-root:focus, .ml-root:focus-visible, .ml-root:focus-within,
-.ml-root *:focus, .ml-root *:focus-visible, .ml-root *:focus-within,
-.ml-popup-editor:focus, .ml-popup-editor:focus-visible, .ml-popup-editor:focus-within,
-.ml-popup-editor *:focus, .ml-popup-editor *:focus-visible, .ml-popup-editor *:focus-within,
-.ml-image-modal:focus, .ml-image-modal:focus-visible, .ml-image-modal:focus-within,
-.ml-image-modal *:focus, .ml-image-modal *:focus-visible, .ml-image-modal *:focus-within,
-.ml-bulk-result-dialog:focus, .ml-bulk-result-dialog:focus-visible, .ml-bulk-result-dialog:focus-within,
-.ml-bulk-result-dialog *:focus, .ml-bulk-result-dialog *:focus-visible, .ml-bulk-result-dialog *:focus-within,
-.ml-columns-dialog:focus, .ml-columns-dialog:focus-visible, .ml-columns-dialog:focus-within,
-.ml-columns-dialog *:focus, .ml-columns-dialog *:focus-visible, .ml-columns-dialog *:focus-within {
+   <body>, and the elements themselves (not just descendants).
+   :focus-within is intentionally NOT included — it matches every
+   ancestor of the focused element, and PW uses box-shadow for the
+   structural outline on InputfieldHeader / wrapper rows. Killing it
+   on ancestors would erase those structural shadows whenever any
+   child got focused. */
+.ml-root:focus, .ml-root:focus-visible,
+.ml-root *:focus, .ml-root *:focus-visible,
+.ml-popup-editor:focus, .ml-popup-editor:focus-visible,
+.ml-popup-editor *:focus, .ml-popup-editor *:focus-visible,
+.ml-image-modal:focus, .ml-image-modal:focus-visible,
+.ml-image-modal *:focus, .ml-image-modal *:focus-visible,
+.ml-bulk-result-dialog:focus, .ml-bulk-result-dialog:focus-visible,
+.ml-bulk-result-dialog *:focus, .ml-bulk-result-dialog *:focus-visible,
+.ml-columns-dialog:focus, .ml-columns-dialog:focus-visible,
+.ml-columns-dialog *:focus, .ml-columns-dialog *:focus-visible {
 	outline: none !important;
 	box-shadow: none !important;
 }
