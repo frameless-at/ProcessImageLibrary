@@ -209,6 +209,7 @@ class ProcessImageLibrary extends Process {
 		$visible = [];
 		$order   = [];
 		$pageSize = null;
+		$bookmarks = [];
 		if (is_array($raw)) {
 			$cols = isset($raw['columns']) && is_array($raw['columns']) ? $raw['columns'] : [];
 			if (isset($cols['visible']) && is_array($cols['visible'])) {
@@ -227,10 +228,20 @@ class ProcessImageLibrary extends Process {
 					$pageSize = $ps;
 				}
 			}
+			if (isset($raw['bookmarks']) && is_array($raw['bookmarks'])) {
+				foreach ($raw['bookmarks'] as $b) {
+					if (!is_array($b)) continue;
+					$name = (string) ($b['name'] ?? '');
+					$qs   = (string) ($b['qs']   ?? '');
+					if ($name === '') continue;
+					$bookmarks[] = ['name' => $name, 'qs' => $qs];
+				}
+			}
 		}
 		return [
-			'columns'  => ['visible' => $visible, 'order' => $order],
-			'pageSize' => $pageSize,
+			'columns'   => ['visible' => $visible, 'order' => $order],
+			'pageSize'  => $pageSize,
+			'bookmarks' => $bookmarks,
 		];
 	}
 
@@ -468,6 +479,12 @@ class ProcessImageLibrary extends Process {
 			. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
 			. $sanitizer->entities($cfgLabel)
 			. '</a>';
+		// Load PW's native tab module — same one Page Edit etc. use,
+		// so the WireTabs uk-tab markup picks up the admin's tab
+		// styling without us shipping new CSS.
+		$this->wire('modules')->get('JqueryWireTabs');
+		$prefs = $this->getUserPrefs();
+		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		// Column picker lives in a sibling <dialog> so it survives
@@ -1817,9 +1834,11 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Invalid payload');
 		}
 
+		$sanitizer = $this->wire('sanitizer');
 		$clean = [
-			'columns'  => ['visible' => [], 'order' => []],
-			'pageSize' => null,
+			'columns'   => ['visible' => [], 'order' => []],
+			'pageSize'  => null,
+			'bookmarks' => [],
 		];
 		if (isset($data['columns']) && is_array($data['columns'])) {
 			$cols = $data['columns'];
@@ -1841,9 +1860,49 @@ class ProcessImageLibrary extends Process {
 				$clean['pageSize'] = $ps;
 			}
 		}
+		if (isset($data['bookmarks']) && is_array($data['bookmarks'])) {
+			foreach ($data['bookmarks'] as $b) {
+				if (!is_array($b)) continue;
+				$name = $sanitizer->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
+				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
+				if ($name === '') continue;
+				$clean['bookmarks'][] = ['name' => $name, 'qs' => $qs];
+			}
+		}
 
 		$this->wire('user')->meta('imageLibraryPrefs', $clean);
 		return $this->jsonResponse(['ok' => true]);
+	}
+
+	/**
+	 * Canonical bookmark query string: only filter-shaped params
+	 * (q, template, field, tags, no_desc, no_tags, no_custom_*),
+	 * empty values dropped, keys alphabetically sorted. Same shape
+	 * the JS emits, so server-side bookmark matching ("which tab is
+	 * active for the current URL?") is a straight string compare.
+	 *
+	 * @param string $qs Full query string (with or without leading "?").
+	 */
+	protected function canonicalizeBookmarkQs(string $qs): string {
+		$qs = ltrim($qs, '?');
+		if ($qs === '') return '';
+		parse_str($qs, $params);
+		$keep = [];
+		foreach ($params as $k => $v) {
+			$k = (string) $k;
+			$ok = in_array($k, ['q', 'template', 'field', 'tags', 'no_desc', 'no_tags'], true)
+				|| strncmp($k, 'no_custom_', 10) === 0;
+			if (!$ok) continue;
+			if (is_array($v)) {
+				$v = implode(',', array_values($v));
+			}
+			$v = (string) $v;
+			if ($v === '') continue;
+			$keep[$k] = $v;
+		}
+		if (!$keep) return '';
+		ksort($keep);
+		return '?' . http_build_query($keep);
 	}
 
 	/**
@@ -2597,6 +2656,13 @@ class ProcessImageLibrary extends Process {
 				'importError'      => $this->_('Import failed'),
 				'batching'         => $this->_('Applying to %d selected…'),
 				'bulkResult'       => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
+				// Bookmark labels — the +tab dialog + delete/save toasts.
+				'bookmarkSave'     => $this->_('Save bookmark'),
+				'bookmarkHint'     => $this->_('Saves the active filter combination under a name.'),
+				'bookmarkSaved'    => $this->_('Bookmark saved'),
+				'bookmarkDeleted'  => $this->_('Bookmark deleted'),
+				'bookmarkDelete'   => $this->_('Delete bookmark'),
+				'bookmarkEmpty'    => $this->_('Apply some filters first.'),
 				// Delete confirm + result labels. The JS substitutes %d
 				// for the count; the %d placeholder stays literal in the
 				// translatable strings.
@@ -2659,6 +2725,91 @@ class ProcessImageLibrary extends Process {
 		return '<p class="ml-empty">' . $san->entities(
 			$this->_('You don\'t have edit access to any page with an image field. Ask an admin to grant the relevant page-edit permission.')
 		) . '</p>';
+	}
+
+	/**
+	 * Bookmarks bar: tab strip above the filter bar, listing the
+	 * user's saved filter combinations + a baseline "All" tab + an
+	 * Add button at the leftmost position. WireTabs + uk-tab classes
+	 * piggyback on the admin theme's native tab styling — no module
+	 * CSS for the chrome. Click handling is taken over by the module
+	 * JS so the tab navigates via the existing AJAX filter swap
+	 * pipeline (replaceFromQs).
+	 *
+	 * @param array<int,array{name:string,qs:string}> $bookmarks
+	 */
+	protected function renderBookmarksBar(array $filters, array $bookmarks): string {
+		$san  = $this->wire('sanitizer');
+		$page = $this->wire('page');
+
+		$currentCanon = $this->canonicalizeBookmarkQs(http_build_query($this->bookmarkFilterPayload($filters)));
+		$addTitle = $san->entities($this->_('Save current filter as bookmark'));
+		$addLabel = $san->entities($this->_('Add bookmark'));
+		$allLabel = $san->entities($this->_('All'));
+		$delTitle = $san->entities($this->_('Delete bookmark'));
+
+		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
+		// Add button first (leftmost) per the brief — opens the
+		// name-dialog. The js-only href stops the browser from
+		// following it; tag with role="button" so screen readers
+		// pick the intent up.
+		$out .= '<li class="ml-bookmarks-add"><a href="#" role="button"'
+			. ' title="' . $addTitle . '">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
+			. '</a></li>';
+
+		// Baseline "All" tab — empty querystring, active iff nothing
+		// filter-shaped is currently set.
+		$allActive = $currentCanon === '' ? ' class="uk-active"' : '';
+		$out .= '<li' . $allActive . '>'
+			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
+			. $allLabel . '</a></li>';
+
+		foreach ($bookmarks as $idx => $b) {
+			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
+			$href  = $page->url . $canon;
+			$active = ($canon !== '' && $canon === $currentCanon) ? ' class="uk-active"' : '';
+			$out .= '<li' . $active . ' data-bookmark-idx="' . (int) $idx . '">'
+				. '<a class="ml-bookmark"'
+				. ' href="' . $san->entities($href) . '"'
+				. ' data-qs="' . $san->entities($canon) . '">'
+				. $san->entities((string) $b['name'])
+				. '</a>'
+				. '<button type="button" class="ml-bookmark-del"'
+				. ' aria-label="' . $delTitle . '"'
+				. ' title="' . $delTitle . '">×</button>'
+				. '</li>';
+		}
+
+		$out .= '</ul>';
+		return $out;
+	}
+
+	/**
+	 * Reduce a filter array to the params that participate in a
+	 * bookmark — same param shape canonicalizeBookmarkQs filters
+	 * through, so the two stay in lockstep.
+	 *
+	 * @param array<string,mixed> $filters
+	 * @return array<string,string>
+	 */
+	protected function bookmarkFilterPayload(array $filters): array {
+		$out = [];
+		foreach (['q', 'template', 'field'] as $k) {
+			if (!empty($filters[$k])) $out[$k] = (string) $filters[$k];
+		}
+		if (!empty($filters['tags']) && is_array($filters['tags'])) {
+			$out['tags'] = implode(',', $filters['tags']);
+		}
+		foreach (['no_desc', 'no_tags'] as $k) {
+			if (!empty($filters[$k])) $out[$k] = '1';
+		}
+		if (!empty($filters['no_custom']) && is_array($filters['no_custom'])) {
+			foreach ($filters['no_custom'] as $name => $v) {
+				if ($v) $out['no_custom_' . $name] = '1';
+			}
+		}
+		return $out;
 	}
 
 	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = [], string $sort = '', string $dir = '', array $tagFilterPool = []): string {

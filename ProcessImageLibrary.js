@@ -1184,6 +1184,7 @@
 				if (push) {
 					history.pushState({ ml: qs }, '', location.pathname + qs);
 				}
+				if (root._mlSyncBookmarkActive) root._mlSyncBookmarkActive();
 			}).catch(function (err) {
 				// On network/server error, fall back to a full reload so the
 				// user still gets the navigation they asked for.
@@ -1795,6 +1796,10 @@
 		// the window goes over the wire. Always sends the full
 		// {columns, pageSize} state so the server record stays
 		// authoritative regardless of which control changed.
+		var bookmarks = (userPrefs.bookmarks && Array.isArray(userPrefs.bookmarks))
+			? userPrefs.bookmarks.slice()
+			: [];
+
 		var savePrefsTimer = null;
 		function saveUserPrefs() {
 			if (!config.userPrefsUrl) return;
@@ -1806,7 +1811,8 @@
 						visible: columnsState,
 						order:   columnsOrder
 					},
-					pageSize: readCurrentPageSize()
+					pageSize:  readCurrentPageSize(),
+					bookmarks: bookmarks
 				}));
 				if (config.csrf && config.csrf.name) {
 					fd.append(config.csrf.name, config.csrf.value);
@@ -1820,6 +1826,190 @@
 				});
 			}, 400);
 		}
+
+		// -- Bookmarks -------------------------------------------------
+		// Tab strip above the filter bar; each tab is a saved filter
+		// combination. State lives in $user->meta via the existing
+		// userPrefs endpoint. UI delegation: click a tab → AJAX-load
+		// its querystring; × on hover → delete; "+" leftmost → name-
+		// dialog → save current filter.
+
+		// Same shape canonicalizeBookmarkQs produces server-side, so
+		// active-tab detection is a straight string compare.
+		function canonicalFilterQs(qs) {
+			var u = new URLSearchParams((qs || '').replace(/^\?/, ''));
+			var allow = ['q', 'template', 'field', 'tags', 'no_desc', 'no_tags'];
+			var keep = [];
+			u.forEach(function (v, k) {
+				var ok = allow.indexOf(k) !== -1 || k.indexOf('no_custom_') === 0;
+				if (!ok) return;
+				if (v === '') return;
+				keep.push([k, v]);
+			});
+			if (!keep.length) return '';
+			keep.sort(function (a, b) { return a[0].localeCompare(b[0]); });
+			var out = new URLSearchParams();
+			keep.forEach(function (p) { out.append(p[0], p[1]); });
+			return '?' + out.toString();
+		}
+
+		function syncBookmarkActive() {
+			var tabs = document.querySelectorAll('.ml-bookmarks-tabs > li');
+			if (!tabs.length) return;
+			var current = canonicalFilterQs(location.search);
+			tabs.forEach(function (li) {
+				li.classList.remove('uk-active');
+			});
+			// All-tab is the first <li> that carries a .ml-bookmark
+			// anchor — always second in the strip (after Add).
+			var matched = false;
+			tabs.forEach(function (li) {
+				var a = li.querySelector('a.ml-bookmark');
+				if (!a) return;
+				var qs = a.dataset.qs || '';
+				if (qs === current && !matched) {
+					li.classList.add('uk-active');
+					matched = true;
+				}
+			});
+		}
+
+		function bookmarksContainer() {
+			return document.querySelector('.ml-bookmarks-tabs');
+		}
+
+		function rerenderBookmarksList() {
+			var ul = bookmarksContainer();
+			if (!ul) return;
+			// Wipe everything except Add + All (the first two <li>s)
+			// then append a fresh <li> per bookmark in memory order.
+			var keepers = ul.querySelectorAll('li.ml-bookmarks-add, li:nth-child(2)');
+			Array.from(ul.children).forEach(function (li) {
+				if (keepers[0] === li || keepers[1] === li) return;
+				li.remove();
+			});
+			bookmarks.forEach(function (b, idx) {
+				var li = document.createElement('li');
+				li.dataset.bookmarkIdx = String(idx);
+				var a = document.createElement('a');
+				a.className = 'ml-bookmark';
+				a.href = (config.adminUrl ? location.pathname : './') + (b.qs || '');
+				a.dataset.qs = b.qs || '';
+				a.textContent = b.name;
+				li.appendChild(a);
+				var del = document.createElement('button');
+				del.type = 'button';
+				del.className = 'ml-bookmark-del';
+				del.setAttribute('aria-label', labels.bookmarkDelete || 'Delete bookmark');
+				del.title = labels.bookmarkDelete || 'Delete bookmark';
+				del.textContent = '×';
+				li.appendChild(del);
+				ul.appendChild(li);
+			});
+			syncBookmarkActive();
+		}
+
+		function openBookmarkAddDialog() {
+			var current = canonicalFilterQs(location.search);
+			if (current === '') {
+				announce(labels.bookmarkEmpty || 'Apply some filters first.');
+				return;
+			}
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-bookmark-dialog';
+
+			var header = document.createElement('header');
+			header.textContent = labels.bookmarkSave || 'Save bookmark';
+			dialog.appendChild(header);
+
+			var hint = document.createElement('p');
+			hint.className = 'ml-popup-hint';
+			hint.textContent = labels.bookmarkHint || 'Saves the active filter combination under a name.';
+			dialog.appendChild(hint);
+
+			var input = document.createElement('input');
+			input.type = 'text';
+			input.className = 'uk-input';
+			input.required = true;
+			input.maxLength = 80;
+			dialog.appendChild(input);
+
+			var footer = document.createElement('footer');
+			var cancelBtn = document.createElement('button');
+			cancelBtn.type = 'button';
+			cancelBtn.className = 'uk-button uk-button-secondary';
+			cancelBtn.textContent = labels.cancel || 'Cancel';
+			var saveBtn = document.createElement('button');
+			saveBtn.type = 'button';
+			saveBtn.className = 'uk-button uk-button-primary';
+			saveBtn.textContent = labels.save || 'Save';
+			footer.appendChild(cancelBtn);
+			footer.appendChild(saveBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			function cleanup() { if (dialog.open) dialog.close(); }
+			cancelBtn.addEventListener('click', cleanup);
+
+			function commit() {
+				var name = input.value.trim();
+				if (!name) { input.focus(); return; }
+				bookmarks.push({ name: name, qs: current });
+				cleanup();
+				rerenderBookmarksList();
+				saveUserPrefs();
+				announce(labels.bookmarkSaved || 'Bookmark saved');
+			}
+			saveBtn.addEventListener('click', commit);
+			input.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter') { e.preventDefault(); commit(); }
+			});
+
+			dialog.showModal();
+			input.focus();
+		}
+
+		// Click delegation on the bookmarks bar — wraps Add, tab
+		// activation and delete in one handler so reorder via re-
+		// rendering doesn't invalidate listeners.
+		document.addEventListener('click', function (e) {
+			if (!e.target.closest) return;
+			var add = e.target.closest('.ml-bookmarks-add a');
+			if (add) {
+				e.preventDefault();
+				openBookmarkAddDialog();
+				return;
+			}
+			var del = e.target.closest('.ml-bookmark-del');
+			if (del) {
+				e.preventDefault();
+				e.stopPropagation();
+				var li = del.closest('li');
+				if (!li) return;
+				var idx = parseInt(li.dataset.bookmarkIdx, 10);
+				if (isNaN(idx) || idx < 0 || idx >= bookmarks.length) return;
+				bookmarks.splice(idx, 1);
+				rerenderBookmarksList();
+				saveUserPrefs();
+				announce(labels.bookmarkDeleted || 'Bookmark deleted');
+				return;
+			}
+			var tab = e.target.closest('a.ml-bookmark');
+			if (tab) {
+				e.preventDefault();
+				var qs = tab.dataset.qs || '';
+				replaceFromQs(qs, true);
+				syncBookmarkActive();
+				return;
+			}
+		});
+
+		// Reflect URL changes (back/forward, AJAX swap from filter
+		// bar) onto the bookmark active marker.
+		window.addEventListener('popstate', syncBookmarkActive);
+		root._mlSyncBookmarkActive = syncBookmarkActive;
+		syncBookmarkActive();
 
 		// Sync the <li> order in the picker to match columnsOrder
 		// (after init from user-meta, before drag-drop wiring).
