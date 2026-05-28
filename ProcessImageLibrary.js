@@ -528,6 +528,10 @@
 							mode:     'replace'
 						}).then(function (result) {
 							var ok = reportBulk(result);
+							if (ok && td.isConnected) {
+								td.classList.remove('ml-cell-saving');
+								flashCell(td, true);
+							}
 							// Selection keys are pageId:fieldName:basename
 							// and the renamed rows now carry NEW basenames
 							// — the old keys would resurface as stale
@@ -537,7 +541,12 @@
 							selection.clear();
 							syncCheckboxes();
 							syncSelectAllHeader();
-							replaceFromQs(location.search, false);
+							// Defer the re-render so the green flash plays
+							// before the table swap — matches the single
+							// inline save's flash → breath → action rhythm.
+							setTimeout(function () {
+								replaceFromQs(location.search, false);
+							}, ok ? 1400 : 0);
 							if (!ok && td.isConnected) {
 								td.classList.remove('ml-cell-saving');
 								flashCell(td, false);
@@ -573,11 +582,14 @@
 						if (!td.isConnected) { return; }
 						td.classList.remove('ml-cell-saving');
 						if (result && result.data && result.data.ok) {
-							announce(labels.saved || 'Saved');
-							// Re-render the table so every basename-bound
-							// attr (thumb URL included) refreshes from
-							// the server.
-							replaceFromQs(location.search, false);
+							flashCell(td, true);
+							// Defer re-render so the green flash plays
+							// before every basename-bound attr (thumb URL,
+							// data-basename refs, selection key) gets
+							// rebuilt from the server response.
+							setTimeout(function () {
+								replaceFromQs(location.search, false);
+							}, 1400);
 						} else {
 							var reason = (result && result.data && result.data.error)
 								|| ('HTTP ' + (result && result.status));
@@ -636,7 +648,16 @@
 					if (langValuesJson) bulkExtra.langValues = langValuesJson;
 					runBulk('set', bulkExtra).then(function (result) {
 						var ok = reportBulk(result);
-						replaceFromQs(location.search, false);
+						if (ok && td.isConnected) {
+							td.classList.remove('ml-cell-saving');
+							td.textContent = primaryValue;
+							flashCell(td, true);
+						}
+						// Defer re-render so the flash plays first,
+						// matching the single inline save's rhythm.
+						setTimeout(function () {
+							replaceFromQs(location.search, false);
+						}, ok ? 1400 : 0);
 						if (!ok && td.isConnected) {
 							td.textContent = original;
 							flashCell(td, false);
