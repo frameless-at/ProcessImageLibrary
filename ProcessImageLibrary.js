@@ -58,6 +58,9 @@
 		function postSave(payload) {
 			var fd = new FormData();
 			Object.keys(payload).forEach(function (k) { fd.append(k, payload[k]); });
+			// Send the current filter URL state so the server can
+			// tell us whether the saved row still belongs in this view.
+			fd.append('filterQs', location.search || '');
 			if (config.csrf && config.csrf.name) {
 				fd.append(config.csrf.name, config.csrf.value);
 			}
@@ -75,6 +78,40 @@
 			td.classList.add(cls);
 			setTimeout(function () { td.classList.remove(cls); }, 1200);
 			announce((ok ? (labels.saved || 'Saved') : (labels.error || 'Save failed')));
+		}
+
+		// Visible "Page X of Y — Z images" string — patch the count
+		// after a row falls out of the filtered view so the summary
+		// reflects DOM state without a full re-render.
+		function updatePaginationTotal(newTotal) {
+			if (typeof newTotal !== 'number' || newTotal < 0) return;
+			document.querySelectorAll('.ml-pagination-summary').forEach(function (el) {
+				el.textContent = el.textContent.replace(/\b\d+\s+image/, newTotal + ' image');
+			});
+		}
+
+		// Sequence after a successful save: flash green for 1200 ms so
+		// the user SEES the value applied, brief 200 ms breath so the
+		// post-flash state registers, then fade the row out over 250 ms,
+		// then drop from DOM + bump the pagination total. Used by the
+		// inline-edit success branch when the server says the row no
+		// longer matches the active filter set.
+		function fadeRowIfMismatched(td, data) {
+			if (!td || !data || data.stillMatches !== false) return;
+			setTimeout(function () {
+				var tr = td.closest('tr');
+				if (!tr || !tr.isConnected) return;
+				tr.classList.add('ml-row-deleting');
+				setTimeout(function () {
+					var cb = tr.querySelector('.ml-select-row');
+					if (cb && cb.dataset && cb.dataset.key) {
+						selection.delete(cb.dataset.key);
+					}
+					tr.remove();
+					updatePaginationTotal(data.newTotal);
+					syncSelectAllHeader();
+				}, 250);
+			}, 1400);
 		}
 
 		// Push a short message into the visually-hidden live region so
@@ -622,6 +659,7 @@
 						}
 						td.title = '';
 						flashCell(td, true);
+						fadeRowIfMismatched(td, result.data);
 					} else {
 						td.textContent = original;
 						var reason = (result && result.data && result.data.error)

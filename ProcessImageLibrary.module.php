@@ -1011,6 +1011,18 @@ class ProcessImageLibrary extends Process {
 		if ($langValues !== null) {
 			$response['langValues'] = $langValues;
 		}
+		// Match-aware UX: tell the client whether the saved row still
+		// passes the active filter set, so it can fade rows out that
+		// dropped out of scope (e.g. "missing tags" → user adds a tag).
+		$imageFields       = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		$customCols        = $this->collectCustomNames();
+		$filterQs          = (string) $this->wire('input')->post('filterQs');
+		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
+		$key               = sprintf('%d:%s:%s', $pageId, $fieldName, $basename);
+		$match             = $this->evaluateFilterTouchedRows([$key], $filters);
+		$response['stillMatches'] = !in_array($key, $match['vanished'], true);
+		$response['newTotal']     = $match['newTotal'];
 		return $this->jsonResponse($response);
 	}
 
@@ -1102,12 +1114,27 @@ class ProcessImageLibrary extends Process {
 
 		$finalBasename = (string) $result['basename'];
 		$finalDot      = strrpos($finalBasename, '.');
+
+		// Same match-aware UX as ___executeSave: report whether the
+		// renamed row still belongs in the active filter view. Match
+		// against the NEW basename — the row key follows the new
+		// filename, which is what the client's DOM also uses now.
+		$imageFields       = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		$customCols        = $this->collectCustomNames();
+		$filterQs          = (string) $this->wire('input')->post('filterQs');
+		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
+		$key               = sprintf('%d:%s:%s', $pageId, $fieldName, $finalBasename);
+		$match             = $this->evaluateFilterTouchedRows([$key], $filters);
+
 		return $this->jsonResponse([
-			'ok'        => true,
-			'basename'  => $finalBasename,
-			'stem'      => $finalDot === false ? $finalBasename : substr($finalBasename, 0, $finalDot),
-			'ext'       => $finalDot === false ? '' : substr($finalBasename, $finalDot),
-			'unchanged' => false,
+			'ok'           => true,
+			'basename'     => $finalBasename,
+			'stem'         => $finalDot === false ? $finalBasename : substr($finalBasename, 0, $finalDot),
+			'ext'          => $finalDot === false ? '' : substr($finalBasename, $finalDot),
+			'unchanged'    => false,
+			'stillMatches' => !in_array($key, $match['vanished'], true),
+			'newTotal'     => $match['newTotal'],
 		]);
 	}
 
@@ -1643,6 +1670,11 @@ class ProcessImageLibrary extends Process {
 		if (!$byPage) return $this->jsonError('No valid items');
 
 		$succeeded   = 0;
+		// Track every successful row so the match-aware check at the
+		// end can ask "which of these now fall out of the filter?".
+		// Renamed rows record the NEW basename (the key the client
+		// holds in its DOM after re-render).
+		$succeededKeys = [];
 		$failed      = [];
 		$tagsCfg     = $this->getTagsConfig();
 		$imageFields = $this->discoverImageFields();
@@ -1696,6 +1728,7 @@ class ProcessImageLibrary extends Process {
 						$fieldsTouched[$fn] = true;
 					}
 					$succeeded++;
+					$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, (string) $renameResult['basename']);
 					continue;
 				}
 
@@ -1744,6 +1777,7 @@ class ProcessImageLibrary extends Process {
 					// trailing space to every selected row.
 					if ($itemValue === '') {
 						$succeeded++;
+						$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
 						continue;
 					}
 					// Description / custom text: append with a single space
@@ -1772,6 +1806,7 @@ class ProcessImageLibrary extends Process {
 				}
 				$fieldsTouched[$fn] = true;
 				$succeeded++;
+				$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
 			}
 
 			foreach (array_keys($fieldsTouched) as $fn) {
@@ -1789,10 +1824,20 @@ class ProcessImageLibrary extends Process {
 			$this->wire('cache')->deleteFor($this);
 		}
 
+		// Match-aware UX: report which of the just-saved rows no
+		// longer pass the active filter so the client can fade them.
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		$customCols        = $this->collectCustomNames();
+		$filterQs          = (string) $this->wire('input')->post('filterQs');
+		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
+		$match             = $this->evaluateFilterTouchedRows($succeededKeys, $filters);
+
 		return $this->jsonResponse([
 			'ok'        => true,
 			'succeeded' => $succeeded,
 			'failed'    => $failed,
+			'vanished'  => $match['vanished'],
+			'newTotal'  => $match['newTotal'],
 		]);
 	}
 
@@ -2199,6 +2244,107 @@ class ProcessImageLibrary extends Process {
 	 * @param array<int,string> $customCols custom-field column names (whitelist for no_custom_*)
 	 * @return array<string,mixed>
 	 */
+	/**
+	 * Parse a raw querystring (typically the client's location.search
+	 * round-tripped via a hidden filterQs POST field) into the same
+	 * filter array shape readFilterInput emits. Used by the save /
+	 * bulk / rename AJAX endpoints to ask "does this row still match
+	 * the user's currently-applied filters after the change?" so the
+	 * client can fade rows out that fall out of scope.
+	 *
+	 * @param array<int,string> $imageFields
+	 * @param array<int,string> $eligibleTemplates
+	 * @param array<int,string> $customCols
+	 * @return array<string,mixed>
+	 */
+	protected function parseFilterQs(string $qs, array $imageFields, array $eligibleTemplates, array $customCols = []): array {
+		$qs = ltrim($qs, '?');
+		$params = [];
+		if ($qs !== '') parse_str($qs, $params);
+
+		$template = (string) ($params['template'] ?? '');
+		$field    = (string) ($params['field'] ?? '');
+
+		$noCustom = [];
+		foreach ($customCols as $name) {
+			if (!empty($params['no_custom_' . $name])) $noCustom[$name] = true;
+		}
+
+		$tags = [];
+		$rawTags = $params['tags'] ?? '';
+		if (is_array($rawTags)) {
+			foreach ($rawTags as $t) {
+				$t = trim((string) $t);
+				if ($t !== '') $tags[] = $t;
+			}
+		} elseif (is_string($rawTags) && $rawTags !== '') {
+			foreach ($this->splitTags($rawTags) as $t) $tags[] = $t;
+		}
+		$tags = array_values(array_unique($tags));
+
+		return [
+			'q'         => trim((string) ($params['q'] ?? '')),
+			'template'  => in_array($template, $eligibleTemplates, true) ? $template : '',
+			'field'     => in_array($field, $imageFields, true) ? $field : '',
+			'no_desc'   => !empty($params['no_desc']),
+			'no_tags'   => !empty($params['no_tags']),
+			'no_custom' => $noCustom,
+			'tags'      => $tags,
+		];
+	}
+
+	/**
+	 * Match-check after a write: for the just-touched rows, work out
+	 * which of them no longer belong in the current filtered view, and
+	 * return the new total visible count.
+	 *
+	 * Returns {vanished: ["pageId:fieldName:basename", …], newTotal: N}.
+	 * An empty filter set short-circuits — nothing can vanish from an
+	 * unfiltered view, so we skip the loadRows + apply pass.
+	 *
+	 * @param array<int,string> $touchedKeys
+	 * @param array<string,mixed> $filters
+	 * @return array{vanished:array<int,string>,newTotal:int}
+	 */
+	protected function evaluateFilterTouchedRows(array $touchedKeys, array $filters): array {
+		// No filters → nothing can vanish; skip the full reload.
+		// (newTotal stays unknown; client doesn't need it in this case.)
+		$anyFilter = ($filters['q'] ?? '') !== ''
+			|| ($filters['template'] ?? '') !== ''
+			|| ($filters['field'] ?? '') !== ''
+			|| !empty($filters['no_desc'])
+			|| !empty($filters['no_tags'])
+			|| !empty($filters['no_custom'])
+			|| !empty($filters['tags']);
+		if (!$anyFilter) {
+			return ['vanished' => [], 'newTotal' => -1];
+		}
+
+		$rows = $this->loadRows($filters);
+		$rows = $this->applyRowFilters($rows, $filters);
+		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
+
+		$present = [];
+		foreach ($rows as $r) {
+			$k = sprintf('%d:%s:%s',
+				(int) $r['pageId'],
+				(string) $r['fieldName'],
+				(string) $r['basename']
+			);
+			$present[$k] = true;
+		}
+
+		$vanished = [];
+		foreach ($touchedKeys as $k) {
+			if (!isset($present[$k])) $vanished[] = $k;
+		}
+
+		return [
+			'vanished' => $vanished,
+			'newTotal' => count($rows),
+		];
+	}
+
 	protected function readFilterInput(array $imageFields, array $eligibleTemplates, array $customCols = []): array {
 		$input    = $this->wire('input');
 		$template = (string) $input->get('template');
