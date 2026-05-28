@@ -528,6 +528,15 @@
 							mode:     'replace'
 						}).then(function (result) {
 							var ok = reportBulk(result);
+							// Selection keys are pageId:fieldName:basename
+							// and the renamed rows now carry NEW basenames
+							// — the old keys would resurface as stale
+							// "not found" failures on the next batch
+							// operation. Drop them so the user starts
+							// fresh after a rename batch.
+							selection.clear();
+							syncCheckboxes();
+							syncSelectAllHeader();
 							replaceFromQs(location.search, false);
 							if (!ok && td.isConnected) {
 								td.classList.remove('ml-cell-saving');

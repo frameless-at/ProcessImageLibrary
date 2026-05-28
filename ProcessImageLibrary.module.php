@@ -1418,11 +1418,16 @@ class ProcessImageLibrary extends Process {
 		$sanitizer = $this->wire('sanitizer');
 		$oldBasename = (string) $img->basename;
 
-		$resolved = $this->resolveRenamePattern($pattern, [
-			'n'     => (int) ($ctx['n'] ?? 1),
+		// Pass the caller's full ctx through (so total / date / etc.
+		// reach resolveRenamePattern) but ensure n / page / field have
+		// sane defaults. The previous version built a fresh dict with
+		// only those three keys, which dropped 'total' on the floor —
+		// (N) → 0 in every batch rename and (d) → empty string.
+		$resolved = $this->resolveRenamePattern($pattern, array_merge([
+			'n'     => 1,
 			'page'  => $page,
 			'field' => $fieldName,
-		]);
+		], $ctx));
 		$newStem = $sanitizer->filename($resolved, true);
 		$newStem = preg_replace('/\.+/', '', $newStem) ?? '';
 		if ($newStem === '') {
