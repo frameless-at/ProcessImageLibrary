@@ -1684,6 +1684,11 @@ class ProcessImageLibrary extends Process {
 		// Renamed rows record the NEW basename (the key the client
 		// holds in its DOM after re-render).
 		$succeededKeys = [];
+		// {oldKey: newKey} map of basename renames so the client can
+		// update its persistent selection Set across the rename
+		// instead of clearing it. Only populated by the rename branch
+		// (other subfields don't change basename).
+		$renamed = [];
 		$failed      = [];
 		$tagsCfg     = $this->getTagsConfig();
 		$imageFields = $this->discoverImageFields();
@@ -1737,7 +1742,12 @@ class ProcessImageLibrary extends Process {
 						$fieldsTouched[$fn] = true;
 					}
 					$succeeded++;
-					$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, (string) $renameResult['basename']);
+					$newBn = (string) $renameResult['basename'];
+					$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $newBn);
+					if ($newBn !== $bn) {
+						$renamed[sprintf('%d:%s:%s', $pid, $fn, $bn)]
+							= sprintf('%d:%s:%s', $pid, $fn, $newBn);
+					}
 					continue;
 				}
 
@@ -1847,6 +1857,7 @@ class ProcessImageLibrary extends Process {
 			'failed'    => $failed,
 			'vanished'  => $match['vanished'],
 			'newTotal'  => $match['newTotal'],
+			'renamed'   => (object) $renamed,
 		]);
 	}
 

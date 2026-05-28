@@ -643,18 +643,25 @@
 									flashCell(c, false);
 								}
 							});
-							// Selection keys are pageId:fieldName:basename
-							// and the renamed rows now carry NEW basenames
-							// — the old keys would resurface as stale
-							// "not found" failures on the next batch
-							// operation. Drop them so the user starts
-							// fresh after a rename batch.
-							selection.clear();
-							syncCheckboxes();
-							syncSelectAllHeader();
+							// Selection-set carry-over across rename:
+							// the server returns a {oldKey: newKey}
+							// map for every successful rename — apply
+							// it to the persistent selection so the
+							// user's choice survives the basename
+							// change instead of getting wiped.
+							var renamedMap = (result && result.data && result.data.renamed) || {};
+							Object.keys(renamedMap).forEach(function (oldKey) {
+								if (selection.has(oldKey)) {
+									selection.delete(oldKey);
+									selection.add(renamedMap[oldKey]);
+								}
+							});
 							// Defer the re-render so the green flash plays
 							// before the table swap — matches the single
 							// inline save's flash → breath → action rhythm.
+							// syncCheckboxes runs inside replaceFromQs so
+							// the new-key checkboxes re-tick from the
+							// updated selection.
 							setTimeout(function () {
 								replaceFromQs(location.search, false);
 							}, ok ? 1400 : 0);
@@ -695,6 +702,20 @@
 						td.classList.remove('ml-cell-saving');
 						if (result && result.data && result.data.ok) {
 							flashCell(td, true);
+							// Carry the persistent selection across the
+							// basename change — without this, ticking a
+							// row, renaming, then re-using bulk would
+							// either lose the selection or send a stale
+							// key. Same renaming-map idea as the bulk
+							// path, just for one item.
+							var oldKey = td.dataset.pageId + ':'
+								+ td.dataset.field + ':' + td.dataset.basename;
+							var newKey = td.dataset.pageId + ':'
+								+ td.dataset.field + ':' + result.data.basename;
+							if (oldKey !== newKey && selection.has(oldKey)) {
+								selection.delete(oldKey);
+								selection.add(newKey);
+							}
 							// Defer re-render so the green flash plays
 							// before every basename-bound attr (thumb URL,
 							// data-basename refs, selection key) gets
@@ -823,15 +844,9 @@
 								flashCell(c, false);
 							}
 						});
-						// A batch operation is a completion — clear the
-						// selection so every batch path (save + rename)
-						// ends with a fresh slate. Otherwise selection
-						// behaviour was inconsistent (rename cleared,
-						// inline save preserved) and users couldn't
-						// predict what would happen next.
-						selection.clear();
-						syncCheckboxes();
-						syncSelectAllHeader();
+						// Bulk inline save doesn't change basenames, so
+						// the selection keys are still valid — just
+						// re-sync the checkbox state across the swap.
 						// Defer re-render so the flash plays first,
 						// matching the single inline save's rhythm.
 						setTimeout(function () {
