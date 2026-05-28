@@ -2629,6 +2629,10 @@ class ProcessImageLibrary extends Process {
 			// (so sort / filter / search stay consistent across
 			// editors); this override flips display to user-language.
 			$row['pageTitle']   = (string) $displayPage->title;
+			// Page name (slug) for the (p) placeholder; owner-page-
+			// resolved like pageTitle so repeater rows expand to
+			// something meaningful.
+			$row['pageName']    = (string) $displayPage->name;
 
 			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
 			if (!$img) continue;
@@ -3331,14 +3335,19 @@ class ProcessImageLibrary extends Process {
 
 			// Row identity attrs (only when editable) so the JS
 			// drag-and-drop / click-replace handlers can resolve the
-			// target without walking into individual cells.
+			// target without walking into individual cells. Page
+			// title + name ride along so the batch-save optimistic
+			// update can resolve (t) / (p) placeholders per row.
 			$rowAttrs = '';
 			if (!empty($row['pageEditUrl'])) {
 				$rowAttrs = sprintf(
-					' data-page-id="%d" data-field="%s" data-basename="%s"',
+					' data-page-id="%d" data-field="%s" data-basename="%s"'
+					. ' data-page-title="%s" data-page-name="%s"',
 					(int) $row['pageId'],
 					$san->entities((string) $row['fieldName']),
-					$san->entities((string) $row['basename'])
+					$san->entities((string) $row['basename']),
+					$san->entities((string) ($row['pageTitle'] ?? '')),
+					$san->entities((string) ($row['pageName']  ?? ''))
 				);
 			}
 			$out .= '<tr' . $rowAttrs . '>';

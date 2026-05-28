@@ -97,6 +97,45 @@
 			return out;
 		}
 
+		// Mirror of the server-side resolveRenamePattern token grammar
+		// so the batch-save optimistic update can show the resolved
+		// per-row value instead of the raw template string. Same
+		// tokens, same per-row context inputs (n / total / pageTitle /
+		// pageName / date / field). The server still gets the raw
+		// template + does its own resolution; this is purely visual.
+		function resolveTemplateClient(template, ctx) {
+			if (template == null || !/\(([nN]|n[2-5]|t|d|p|f)\)/.test(template)) {
+				return template;
+			}
+			var n     = ctx.n     || 0;
+			var total = ctx.total || 0;
+			return template.replace(/\((n[2-5]?|N|t|d|p|f)\)/g, function (_m, tok) {
+				switch (tok) {
+					case 'n':  return String(n);
+					case 'n2': return String(n).padStart(2, '0');
+					case 'n3': return String(n).padStart(3, '0');
+					case 'n4': return String(n).padStart(4, '0');
+					case 'n5': return String(n).padStart(5, '0');
+					case 'N':  return String(total);
+					case 't':  return ctx.pageTitle || '';
+					case 'd':  return ctx.date      || '';
+					case 'p':  return ctx.pageName  || '';
+					case 'f':  return ctx.field     || '';
+				}
+				return _m;
+			});
+		}
+
+		// Today's date in the same YYYY-MM-DD form the server uses for
+		// the (d) placeholder. Memoised per init so every cell in a
+		// batch resolves to the same string.
+		var todayIso = (function () {
+			var d = new Date();
+			var mm = String(d.getMonth() + 1).padStart(2, '0');
+			var dd = String(d.getDate()).padStart(2, '0');
+			return d.getFullYear() + '-' + mm + '-' + dd;
+		})();
+
 		// Visible "Page X of Y — Z images" string — patch the count
 		// after a row falls out of the filtered view so the summary
 		// reflects DOM state without a full re-render.
@@ -688,29 +727,50 @@
 					}
 					teardown();
 					// Optimistic update on EVERY selected row's matching
-					// cell — Replace mode broadcasts primaryValue, Add
-					// mode merges the delta into each row's own original.
-					// Saving / flash signals apply to the whole batch so
-					// the user sees what's being changed.
+					// cell — Replace mode broadcasts the resolved
+					// template, Add mode merges the resolved delta into
+					// each row's own original. (n) / (N) / (t) / (p) /
+					// (d) / (f) are resolved per row mirroring the
+					// server's resolveRenamePattern so the cell shows
+					// what the row will actually store, not the raw
+					// template. Tags skip placeholder resolution (same
+					// rule the server uses).
 					var bulkCells = batchCellsForSubfield(td.dataset.subfield);
 					var savedTexts = [];
 					var resolvedMode = mode || 'replace';
-					bulkCells.forEach(function (c) {
+					var totalCount  = bulkCells.length;
+					var subf = td.dataset.subfield;
+					bulkCells.forEach(function (c, idx) {
 						savedTexts.push(c.textContent);
 						var rowOriginal = c.textContent;
-						var optimistic = primaryValue;
+						var tr = c.closest('tr');
+						var rowCtx = {
+							n:         idx + 1,
+							total:     totalCount,
+							pageTitle: tr ? (tr.dataset.pageTitle || '') : '',
+							pageName:  tr ? (tr.dataset.pageName  || '') : '',
+							date:      todayIso,
+							field:     c.dataset.field || td.dataset.field || ''
+						};
+						var resolved = (subf === 'tags')
+							? primaryValue
+							: resolveTemplateClient(primaryValue, rowCtx);
+						var resolvedDelta = (subf === 'tags')
+							? sendValue
+							: resolveTemplateClient(sendValue, rowCtx);
+						var optimistic = resolved;
 						if (resolvedMode === 'add' && !isMultilang) {
-							if (c.dataset.subfield === 'tags') {
+							if (subf === 'tags') {
 								var origToks = rowOriginal.split(/\s+/).filter(Boolean);
-								var addToks  = sendValue.split(/\s+/).filter(Boolean);
+								var addToks  = resolvedDelta.split(/\s+/).filter(Boolean);
 								var seen = Object.create(null);
 								var merged = [];
 								origToks.concat(addToks).forEach(function (t) {
 									if (!seen[t]) { seen[t] = true; merged.push(t); }
 								});
 								optimistic = merged.join(' ');
-							} else if (sendValue !== '') {
-								optimistic = (rowOriginal ? rowOriginal + ' ' : '') + sendValue;
+							} else if (resolvedDelta !== '') {
+								optimistic = (rowOriginal ? rowOriginal + ' ' : '') + resolvedDelta;
 							}
 						}
 						c.textContent = optimistic;
@@ -756,7 +816,23 @@
 				if (!isMultilang && primaryValue === original) { teardown(); return; }
 
 				teardown();
-				td.textContent = primaryValue;
+				// Optimistic update — resolve placeholders client-side
+				// so the cell shows the actual stored value during the
+				// AJAX round-trip, not the raw "(n) of (N)" template.
+				// Single save → n=1, total=1; pageTitle / pageName come
+				// from the row's data attrs. Tags skip resolution per
+				// the server-side rule.
+				var trSingle = td.closest('tr');
+				var singleCtx = {
+					n: 1, total: 1,
+					pageTitle: trSingle ? (trSingle.dataset.pageTitle || '') : '',
+					pageName:  trSingle ? (trSingle.dataset.pageName  || '') : '',
+					date:      todayIso,
+					field:     td.dataset.field || ''
+				};
+				td.textContent = (td.dataset.subfield === 'tags')
+					? primaryValue
+					: resolveTemplateClient(primaryValue, singleCtx);
 				td.classList.add('ml-cell-saving');
 				td.title = labels.saving || 'Saving…';
 
