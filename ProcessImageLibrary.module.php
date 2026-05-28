@@ -2803,6 +2803,10 @@ class ProcessImageLibrary extends Process {
 				'batching'         => $this->_('Applying to %d selected…'),
 				'bulkResult'       => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
 				// Bookmark labels — the +tab dialog + delete/save toasts.
+				// Shown by the client when a match-aware save removes
+				// the last row from the visible filter view; same
+				// string the server-rendered empty state uses.
+				'emptyResult'      => $this->_('No images match the current filters.'),
 				'bookmarkSave'     => $this->_('Save bookmark'),
 				'bookmarkHint'     => $this->_('Saves the active filter combination under a name.'),
 				'bookmarkSaved'    => $this->_('Bookmark saved'),

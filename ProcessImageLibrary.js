@@ -107,9 +107,21 @@
 					if (cb && cb.dataset && cb.dataset.key) {
 						selection.delete(cb.dataset.key);
 					}
+					var tbody = tr.parentNode;
 					tr.remove();
 					updatePaginationTotal(data.newTotal);
 					syncSelectAllHeader();
+					// Last row gone? Replace .ml-results with the
+					// server's empty-state markup so the user sees
+					// "No images match the current filters." instead
+					// of an empty table + pagination scaffold.
+					if (tbody && tbody.children.length === 0) {
+						var resultsEl = root.querySelector('.ml-results');
+						if (resultsEl) {
+							var msg = labels.emptyResult || 'No images match the current filters.';
+							resultsEl.innerHTML = '<p class="ml-empty">' + msg + '</p>';
+						}
+					}
 				}, 250);
 			}, 1400);
 		}
