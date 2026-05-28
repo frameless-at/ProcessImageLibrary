@@ -368,31 +368,32 @@ textarea.ml-cell-input {
 	transition: background 0.3s ease-out;
 }
 
-/* AJAX re-render: dim the table contents + park a spinner on top so
-   the user gets a clear "something is happening" signal in addition
-   to the pointer-events lock. Opacity goes on the children, not the
-   container, so the spinner pseudo-element stays at full opacity. */
+/* AJAX re-render: dim the results region + block clicks so users
+   don't pile up overlapping requests. The actual spinner is a
+   body-level element added by JS (.ml-loading-spinner) so it sits
+   outside the .ml-results opacity context — that's the only way to
+   keep the spinner at full strength while the table fades. */
 .ml-results.ml-loading {
-	position: relative;
-	pointer-events: none;
-}
-.ml-results.ml-loading > * {
 	opacity: 0.5;
+	pointer-events: none;
 	transition: opacity 0.15s ease-out;
 }
-.ml-results.ml-loading::after {
-	content: '';
-	position: absolute;
+/* Body-level spinner appended on the .ml-loading transition.
+   Position:fixed keeps it centred on the viewport regardless of how
+   tall the results region or how far the user has scrolled. */
+.ml-loading-spinner {
+	position: fixed;
 	top: 50%;
 	left: 50%;
-	width: 40px;
-	height: 40px;
-	margin: -20px 0 0 -20px;
-	border: 3px solid var(--pw-border-color, #ddd);
+	transform: translate(-50%, -50%);
+	width: 48px;
+	height: 48px;
+	border: 4px solid rgba(0, 0, 0, 0.15);
 	border-top-color: var(--pw-main-color, #5b8cd6);
 	border-radius: 50%;
 	animation: ml-spin 0.8s linear infinite;
-	z-index: 2;
+	z-index: 1000;
+	pointer-events: none;
 }
 @keyframes ml-spin {
 	to { transform: rotate(360deg); }
