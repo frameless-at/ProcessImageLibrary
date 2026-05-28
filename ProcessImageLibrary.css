@@ -981,14 +981,14 @@ textarea.ml-langtabs-pane {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 32px;
-	height: 32px;
+	width: 24px;
+	height: 24px;
 	padding: 0;
 	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 50%;
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, #333);
-	font-size: 1rem;
+	font-size: 0.8rem;
 	line-height: 1;
 	cursor: pointer;
 	opacity: 0;
