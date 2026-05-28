@@ -765,6 +765,166 @@
 			dialog.showModal();
 		}
 
+		// -- Replace image (click icon + drag-and-drop) ----------------
+		// Two entry paths share the same /replace/ endpoint:
+		//   1) The per-row Replace icon opens a hidden file picker.
+		//   2) Dragging a file from the OS onto a row drops it onto
+		//      that row's (pageId, field, basename) target.
+		// Constraints: single file per drop, extension must match the
+		// existing image's (server enforces too; client guards for a
+		// nicer error). Editable rows only — non-editable rows have
+		// no data-page-id, so the handlers never resolve a target.
+
+		function isEditableRow(tr) {
+			return tr && tr.matches && tr.matches('.ml-table tbody tr[data-page-id]');
+		}
+
+		function rowExt(tr) {
+			var bn = tr.getAttribute('data-basename') || '';
+			var dot = bn.lastIndexOf('.');
+			return dot === -1 ? '' : bn.slice(dot + 1).toLowerCase();
+		}
+
+		function fileExt(f) {
+			var name = (f && f.name) || '';
+			var dot = name.lastIndexOf('.');
+			return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+		}
+
+		function replaceImage(tr, file) {
+			if (!config.replaceUrl || !tr || !file) return;
+			var pageId = tr.getAttribute('data-page-id');
+			var field  = tr.getAttribute('data-field');
+			var basename = tr.getAttribute('data-basename');
+			if (!pageId || !field || !basename) return;
+
+			// Client-side extension guard — server enforces too, but
+			// failing fast saves an upload round trip.
+			if (rowExt(tr) !== fileExt(file)) {
+				announce(
+					(labels.error || 'Replace failed') + ': '
+					+ 'Extension mismatch (' + rowExt(tr) + ' vs ' + fileExt(file) + ')'
+				);
+				return;
+			}
+
+			tr.classList.add('ml-row-uploading');
+
+			var fd = new FormData();
+			fd.append('pageId', pageId);
+			fd.append('fieldName', field);
+			fd.append('basename', basename);
+			fd.append('file', file);
+			if (config.csrf && config.csrf.name) {
+				fd.append(config.csrf.name, config.csrf.value);
+			}
+
+			fetch(config.replaceUrl, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' },
+				body: fd
+			}).then(function (res) {
+				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
+			}).then(function (data) {
+				if (!data || !data.ok) {
+					announce((labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''));
+					return;
+				}
+				// Cache-bust the thumbnail src so the new bytes show
+				// up immediately. ?v=<filemtime> is stable enough that
+				// shared cache entries for the OLD bytes get bypassed,
+				// and reproducible enough that re-renders of the same
+				// version don't keep churning new URLs.
+				var img = tr.querySelector('.ml-cell-thumb img');
+				if (img && img.src) {
+					var bust = data.cacheBust || String(Date.now());
+					var u = new URL(img.src, location.href);
+					u.searchParams.set('v', bust);
+					img.src = u.toString();
+				}
+				announce(labels.saved || 'Saved');
+			}).catch(function (err) {
+				announce((labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'));
+			}).finally(function () {
+				tr.classList.remove('ml-row-uploading');
+			});
+		}
+
+		// Hidden file input — created once, reused for every click on
+		// .ml-replace-btn. We re-target it (data-current-row) right
+		// before opening so the change handler knows which row asked.
+		var replaceFileInput = document.createElement('input');
+		replaceFileInput.type = 'file';
+		replaceFileInput.style.display = 'none';
+		replaceFileInput.addEventListener('change', function () {
+			var tr = replaceFileInput._mlRow;
+			replaceFileInput._mlRow = null;
+			if (tr && replaceFileInput.files && replaceFileInput.files[0]) {
+				replaceImage(tr, replaceFileInput.files[0]);
+			}
+			replaceFileInput.value = '';
+		});
+		root.appendChild(replaceFileInput);
+
+		// Click delegation on the results region — survives AJAX
+		// swaps that replace .ml-results innerHTML.
+		results && results.addEventListener('click', function (e) {
+			var btn = e.target.closest && e.target.closest('.ml-replace-btn');
+			if (!btn) return;
+			// stopImmediatePropagation so the sibling delegated click
+			// handler (below in this file) doesn't ALSO interpret this
+			// click as a thumb activation and open the image editor.
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			var tr = btn.closest('tr');
+			if (!isEditableRow(tr)) return;
+			// Hint to the OS picker: filter to extensions matching the
+			// row's existing file. The user can still override but it
+			// reduces accidental wrong-format picks.
+			var ext = rowExt(tr);
+			replaceFileInput.accept = ext ? '.' + ext : '';
+			replaceFileInput._mlRow = tr;
+			replaceFileInput.click();
+		});
+
+		// Drag-and-drop on rows. Global dragover prevent-default keeps
+		// the browser from opening the file when the user drops outside
+		// a drop zone; per-row handlers add the highlight + dispatch
+		// to replaceImage on the actual drop.
+		document.addEventListener('dragover', function (e) {
+			if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1) {
+				e.preventDefault();
+			}
+		});
+		results && results.addEventListener('dragenter', function (e) {
+			var tr = e.target.closest && e.target.closest('tr');
+			if (!isEditableRow(tr)) return;
+			if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') === -1) return;
+			tr.classList.add('ml-row-drop-target');
+		});
+		results && results.addEventListener('dragleave', function (e) {
+			var tr = e.target.closest && e.target.closest('tr');
+			if (!tr) return;
+			// dragleave fires when crossing child boundaries too — only
+			// drop the highlight when the pointer actually exits the row.
+			if (e.relatedTarget && tr.contains(e.relatedTarget)) return;
+			tr.classList.remove('ml-row-drop-target');
+		});
+		results && results.addEventListener('drop', function (e) {
+			var tr = e.target.closest && e.target.closest('tr');
+			if (!isEditableRow(tr)) return;
+			if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+			e.preventDefault();
+			e.stopPropagation();
+			tr.classList.remove('ml-row-drop-target');
+			if (e.dataTransfer.files.length > 1) {
+				announce((labels.error || 'Replace failed') + ': only one file at a time');
+				return;
+			}
+			replaceImage(tr, e.dataTransfer.files[0]);
+		});
+
 		// -- AJAX re-render --------------------------------------------
 
 		function replaceFromHref(href) {

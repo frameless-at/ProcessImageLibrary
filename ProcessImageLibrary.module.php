@@ -1024,6 +1024,114 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * AJAX endpoint: swap an image's file bytes while keeping basename,
+	 * Pagefile metadata (description, tags, customs, multilang) and every
+	 * URL pointing at it intact. Triggered by the in-row Replace icon AND
+	 * by drag-and-drop of a file onto the row.
+	 *
+	 * Expects POST + CSRF + file upload "file" and string fields pageId,
+	 * fieldName, basename. Extension of the uploaded file MUST match the
+	 * existing image's extension — Replace explicitly does not allow
+	 * format changes (jpg → png would break references). Editors who
+	 * want a different format should delete + upload instead.
+	 *
+	 * Process: validate → move tmp upload onto the image's filename →
+	 * removeVariations() so cached renders get regenerated → save the
+	 * page (Pages::saved hook drops the row cache). Returns the new
+	 * filemtime so JS can cache-bust the thumbnail.
+	 */
+	public function ___executeReplace() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+
+		$pageId    = (int) $input->post('pageId');
+		$fieldName = $sanitizer->fieldName((string) $input->post('fieldName'));
+		$basename  = basename((string) $input->post('basename'));
+
+		if (!$pageId || !$fieldName || !$basename) {
+			return $this->jsonError('Missing required parameter');
+		}
+		if (!in_array($fieldName, $this->discoverImageFields(), true)) {
+			return $this->jsonError('Field is not a managed image field');
+		}
+
+		if (empty($_FILES['file']['tmp_name']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+			return $this->jsonError('No file uploaded');
+		}
+		$tmpPath = (string) $_FILES['file']['tmp_name'];
+		$uploadName = (string) ($_FILES['file']['name'] ?? '');
+
+		$page = $this->wire('pages')->get($pageId);
+		if (!$page->id) return $this->jsonError('Page not found', 404);
+		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+
+		$img = $this->resolvePageimage($page, $fieldName, $basename);
+		if (!$img) return $this->jsonError('Image not found in field', 404);
+
+		// Extension match enforcement — Replace preserves the basename
+		// (and therefore the URL); changing the extension would break
+		// every reference that points at the old URL.
+		$oldExt = strtolower(pathinfo($basename, PATHINFO_EXTENSION));
+		$newExt = strtolower(pathinfo($uploadName, PATHINFO_EXTENSION));
+		if ($newExt === '' || $oldExt === '') {
+			return $this->jsonError('Both files must have an extension');
+		}
+		if ($oldExt !== $newExt) {
+			return $this->jsonError(sprintf(
+				'Extension mismatch: existing is .%s, upload is .%s. Replace keeps the original format.',
+				$oldExt, $newExt
+			));
+		}
+
+		$targetPath = (string) $img->filename;
+		if ($targetPath === '' || !is_file($targetPath)) {
+			return $this->jsonError('Original file not found on disk');
+		}
+
+		// move_uploaded_file (vs rename) keeps PHP's safe-upload check
+		// intact — refuses tmp paths that aren't from a real upload.
+		if (!@move_uploaded_file($tmpPath, $targetPath)) {
+			return $this->jsonError('Could not write replacement file');
+		}
+
+		$page->of(false);
+		try {
+			// Old variations were rendered from the old bytes — they
+			// have to go regardless of whether anyone re-requests them
+			// immediately.
+			$img->removeVariations();
+			if (!$page->save($fieldName)) {
+				return $this->jsonError('Save failed after replace');
+			}
+			$this->wire('cache')->deleteFor($this);
+		} catch (\Exception $e) {
+			return $this->jsonError('Replace error: ' . $e->getMessage());
+		}
+
+		clearstatcache(true, $targetPath);
+		$mtime = @filemtime($targetPath);
+		return $this->jsonResponse([
+			'ok'        => true,
+			'basename'  => $basename,
+			'cacheBust' => $mtime ? (string) $mtime : (string) time(),
+			'filesize'  => (int) @filesize($targetPath),
+		]);
+	}
+
+	/**
 	 * Core rename routine — shared by ___executeRename (single) and
 	 * ___executeBulk's basename branch (batch). Resolves placeholders
 	 * in $pattern using $n + the image's page / field context,
@@ -2275,7 +2383,8 @@ class ProcessImageLibrary extends Process {
 			'saveUrl'   => $this->wire('page')->url . 'save/',
 			'renderUrl' => $this->wire('page')->url . 'data/',
 			'bulkUrl'   => $this->wire('page')->url . 'bulk/',
-			'renameUrl' => $this->wire('page')->url . 'rename/',
+			'renameUrl'  => $this->wire('page')->url . 'rename/',
+			'replaceUrl' => $this->wire('page')->url . 'replace/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -2733,7 +2842,19 @@ class ProcessImageLibrary extends Process {
 				(string) $row['basename']
 			);
 
-			$out .= '<tr>';
+			// Row identity attrs (only when editable) so the JS
+			// drag-and-drop / click-replace handlers can resolve the
+			// target without walking into individual cells.
+			$rowAttrs = '';
+			if (!empty($row['pageEditUrl'])) {
+				$rowAttrs = sprintf(
+					' data-page-id="%d" data-field="%s" data-basename="%s"',
+					(int) $row['pageId'],
+					$san->entities((string) $row['fieldName']),
+					$san->entities((string) $row['basename'])
+				);
+			}
+			$out .= '<tr' . $rowAttrs . '>';
 
 			$out .= '<td class="ml-cell-select">'
 				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
@@ -2795,6 +2916,20 @@ class ProcessImageLibrary extends Process {
 					. ' loading="lazy"'
 					. ' width="' . $dispW . '"'
 					. ' height="' . $dispH . '">';
+			}
+			// Replace icon — visible on row hover, opens the file picker
+			// for an in-place file swap. Drag-and-drop on the whole row
+			// is the parallel path; both end up calling the same JS
+			// handler against the same /replace/ endpoint.
+			if (!empty($row['pageEditUrl'])) {
+				$replaceLabel = $san->entities(sprintf(
+					$this->_('Replace %s'), (string) $row['basename']
+				));
+				$out .= '<button type="button" class="ml-replace-btn"'
+					. ' title="' . $replaceLabel . '"'
+					. ' aria-label="' . $replaceLabel . '">'
+					. '<i class="fa fa-upload" aria-hidden="true"></i>'
+					. '</button>';
 			}
 			$out .= '</td>';
 
