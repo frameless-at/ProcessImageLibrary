@@ -1924,7 +1924,7 @@
 				del.className = 'ml-bookmark-del';
 				del.setAttribute('aria-label', labels.bookmarkDelete || 'Delete bookmark');
 				del.title = labels.bookmarkDelete || 'Delete bookmark';
-				del.innerHTML = '<i class="fa fa-trash-o" aria-hidden="true"></i>';
+				del.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
 				li.appendChild(del);
 				ul.insertBefore(li, addLi);
 			});

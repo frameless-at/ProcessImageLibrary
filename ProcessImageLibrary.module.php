@@ -2770,7 +2770,7 @@ class ProcessImageLibrary extends Process {
 				. '<button type="button" class="ml-bookmark-del"'
 				. ' aria-label="' . $delTitle . '"'
 				. ' title="' . $delTitle . '">'
-				. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
+				. '<i class="fa fa-times" aria-hidden="true"></i>'
 				. '</button>'
 				. '</li>';
 		}

@@ -963,25 +963,21 @@ textarea.ml-langtabs-pane {
 .ml-bookmarks-tabs {
 	margin-bottom: 0;
 }
-/* Per-tab delete button — same physical dimensions as the thumbnail
-   trash icon (32 × 32, font-size 1 rem, fa-trash-o, red hover).
-   Only user bookmark tabs (carry data-bookmark-idx) get the right-
-   side reservation + absolute icon; "Show all" and "Add bookmark"
-   don't, since they have nothing to delete. The icon sits centred
-   vertically on the tab's right edge, hover-revealed, ALWAYS taking
-   reserved space via padding-right on the <a> so the layout never
-   shifts and the icon never overlaps the tab label. */
+/* Uniform 30 px gap between every tab so the bookmark trash button
+   has room to sit in the gap rather than overlapping a neighbour. */
+.ml-bookmarks-tabs > li > a {
+	margin-right: 30px;
+}
+/* Per-tab delete button — round 32 × 32 chip with an X icon, sits in
+   the right gap of each user bookmark tab. Hover-only reveal; same
+   red-on-hover the thumbnail trash uses. */
 .ml-bookmarks-tabs > li[data-bookmark-idx] {
 	position: relative;
 }
-.ml-bookmarks-tabs > li[data-bookmark-idx] > a {
-	margin-right: 2.5rem;
-}
 .ml-bookmark-del {
 	position: absolute;
-	top: 50%;
+	top: 10%;
 	right: 0.25rem;
-	transform: translateY(-50%);
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -989,7 +985,7 @@ textarea.ml-langtabs-pane {
 	height: 32px;
 	padding: 0;
 	border: 1px solid var(--pw-border-color, #ccc);
-	border-radius: 3px;
+	border-radius: 50%;
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, #333);
 	font-size: 1rem;
