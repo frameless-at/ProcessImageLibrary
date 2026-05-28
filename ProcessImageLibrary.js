@@ -80,6 +80,23 @@
 			announce((ok ? (labels.saved || 'Saved') : (labels.error || 'Save failed')));
 		}
 
+		// For a batch save, collect the matching subfield cell on every
+		// currently-selected row. The originating cell is included, so
+		// the caller can flash + optimistic-update the whole set in one
+		// pass and the visual feedback covers every row the broadcast
+		// will touch.
+		function batchCellsForSubfield(subfield) {
+			if (!results || !subfield) return [];
+			var out = [];
+			results.querySelectorAll('.ml-table tbody tr').forEach(function (tr) {
+				var cb = tr.querySelector('.ml-select-row');
+				if (!cb || !cb.dataset.key || !selection.has(cb.dataset.key)) return;
+				var c = tr.querySelector('[data-subfield="' + subfield + '"]');
+				if (c) out.push(c);
+			});
+			return out;
+		}
+
 		// Visible "Page X of Y — Z images" string — patch the count
 		// after a row falls out of the filtered view so the summary
 		// reflects DOM state without a full re-render.
@@ -532,15 +549,32 @@
 					// (n) per item in the order JS sent them. Single: hit
 					// the dedicated rename endpoint.
 					if (batch) {
+						// Flash every selected row's filename cell, not
+						// just the originating one. Per-row counters
+						// resolve server-side, so we can't optimistic-
+						// update each row's stem — just signal that
+						// they're all being saved.
+						var bulkRenameCells = batchCellsForSubfield('basename');
+						bulkRenameCells.forEach(function (c) {
+							if (c !== td) c.classList.add('ml-cell-saving');
+						});
 						runBulk('set', {
 							subfield: 'basename',
 							value:    newStem,
 							mode:     'replace'
 						}).then(function (result) {
 							var ok = reportBulk(result);
-							if (ok && td.isConnected) {
-								td.classList.remove('ml-cell-saving');
-								flashCell(td, true);
+							bulkRenameCells.forEach(function (c) {
+								if (!c.isConnected) return;
+								c.classList.remove('ml-cell-saving');
+								if (ok) flashCell(c, true);
+								else if (c === td) flashCell(c, false);
+							});
+							if (!ok && stemEl) {
+								// Revert the originating cell's optimistic
+								// stem; the others kept their old text.
+								stemEl.textContent = prevStem;
+								td.dataset.stem = prevStem;
 							}
 							// Selection keys are pageId:fieldName:basename
 							// and the renamed rows now carry NEW basenames
@@ -557,20 +591,15 @@
 							setTimeout(function () {
 								replaceFromQs(location.search, false);
 							}, ok ? 1400 : 0);
-							if (!ok && td.isConnected) {
-								// Revert the optimistic stem update.
-								if (stemEl) stemEl.textContent = prevStem;
-								td.dataset.stem = prevStem;
-								td.classList.remove('ml-cell-saving');
-								flashCell(td, false);
-							}
 						}).catch(function (err) {
-							if (!td.isConnected) return;
+							bulkRenameCells.forEach(function (c) {
+								if (!c.isConnected) return;
+								c.classList.remove('ml-cell-saving');
+								flashCell(c, false);
+							});
 							if (stemEl) stemEl.textContent = prevStem;
 							td.dataset.stem = prevStem;
-							td.classList.remove('ml-cell-saving');
 							td.title = (err && err.message) || labels.error || 'Network error';
-							flashCell(td, false);
 						});
 						return;
 					}
@@ -658,29 +687,35 @@
 						if (sendValue === '') { teardown(); return; }
 					}
 					teardown();
-					// Optimistic update — show the post-save value
-					// directly so the visual rhythm matches the single
-					// inline save. For Replace mode that's primaryValue
-					// verbatim; for Add mode it's the existing content
-					// plus the broadcast delta, which is what every
-					// selected row will end up holding.
-					var optimisticBulkValue = primaryValue;
-					if ((mode || 'replace') === 'add' && !isMultilang) {
-						if (td.dataset.subfield === 'tags') {
-							var origToks2 = original.split(/\s+/).filter(Boolean);
-							var addToks2  = sendValue.split(/\s+/).filter(Boolean);
-							var seen2 = Object.create(null);
-							var merged2 = [];
-							origToks2.concat(addToks2).forEach(function (t) {
-								if (!seen2[t]) { seen2[t] = true; merged2.push(t); }
-							});
-							optimisticBulkValue = merged2.join(' ');
-						} else if (sendValue !== '') {
-							optimisticBulkValue = (original ? original + ' ' : '') + sendValue;
+					// Optimistic update on EVERY selected row's matching
+					// cell — Replace mode broadcasts primaryValue, Add
+					// mode merges the delta into each row's own original.
+					// Saving / flash signals apply to the whole batch so
+					// the user sees what's being changed.
+					var bulkCells = batchCellsForSubfield(td.dataset.subfield);
+					var savedTexts = [];
+					var resolvedMode = mode || 'replace';
+					bulkCells.forEach(function (c) {
+						savedTexts.push(c.textContent);
+						var rowOriginal = c.textContent;
+						var optimistic = primaryValue;
+						if (resolvedMode === 'add' && !isMultilang) {
+							if (c.dataset.subfield === 'tags') {
+								var origToks = rowOriginal.split(/\s+/).filter(Boolean);
+								var addToks  = sendValue.split(/\s+/).filter(Boolean);
+								var seen = Object.create(null);
+								var merged = [];
+								origToks.concat(addToks).forEach(function (t) {
+									if (!seen[t]) { seen[t] = true; merged.push(t); }
+								});
+								optimistic = merged.join(' ');
+							} else if (sendValue !== '') {
+								optimistic = (rowOriginal ? rowOriginal + ' ' : '') + sendValue;
+							}
 						}
-					}
-					td.textContent = optimisticBulkValue;
-					td.classList.add('ml-cell-saving');
+						c.textContent = optimistic;
+						c.classList.add('ml-cell-saving');
+					});
 					var bulkExtra = {
 						subfield: td.dataset.subfield,
 						value:    sendValue,
@@ -689,25 +724,31 @@
 					if (langValuesJson) bulkExtra.langValues = langValuesJson;
 					runBulk('set', bulkExtra).then(function (result) {
 						var ok = reportBulk(result);
-						if (ok && td.isConnected) {
-							td.classList.remove('ml-cell-saving');
-							flashCell(td, true);
-						}
+						bulkCells.forEach(function (c, i) {
+							if (!c.isConnected) return;
+							c.classList.remove('ml-cell-saving');
+							if (ok) {
+								flashCell(c, true);
+							} else {
+								c.textContent = savedTexts[i];
+								flashCell(c, false);
+							}
+						});
 						// Defer re-render so the flash plays first,
 						// matching the single inline save's rhythm.
 						setTimeout(function () {
 							replaceFromQs(location.search, false);
 						}, ok ? 1400 : 0);
-						if (!ok && td.isConnected) {
-							td.textContent = original;
-							flashCell(td, false);
-						}
 					}).catch(function (err) {
-						if (!td.isConnected) return;
-						td.classList.remove('ml-cell-saving');
-						td.textContent = original;
-						td.title = (err && err.message) || labels.error || 'Network error';
-						flashCell(td, false);
+						bulkCells.forEach(function (c, i) {
+							if (!c.isConnected) return;
+							c.classList.remove('ml-cell-saving');
+							c.textContent = savedTexts[i];
+							flashCell(c, false);
+						});
+						if (td.isConnected) {
+							td.title = (err && err.message) || labels.error || 'Network error';
+						}
 					});
 					return;
 				}
