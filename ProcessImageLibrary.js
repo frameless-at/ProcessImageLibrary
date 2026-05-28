@@ -901,35 +901,13 @@
 		// spec: drop only fires if the preceding dragover wasn't the
 		// default-action one). Belt-and-suspenders: results gets its
 		// own dragover listener too so dropEffect can be set explicitly.
-		// Side effect: while a file drag is happening anywhere on the
-		// page, body.ml-file-dragging is set so the CSS can light up
-		// every editable row as a valid drop target. Cleared on drop
-		// or when no dragover fires for ~250 ms (cursor left the
-		// window without dropping).
-		var fileDragTimer = null;
-		function markFileDragging() {
-			if (!document.body.classList.contains('ml-file-dragging')) {
-				document.body.classList.add('ml-file-dragging');
-			}
-			clearTimeout(fileDragTimer);
-			fileDragTimer = setTimeout(function () {
-				document.body.classList.remove('ml-file-dragging');
-			}, 250);
-		}
-		function clearFileDragging() {
-			clearTimeout(fileDragTimer);
-			document.body.classList.remove('ml-file-dragging');
-		}
 		document.addEventListener('dragover', function (e) {
-			if (!dragHasFiles(e)) return;
-			e.preventDefault();
-			markFileDragging();
+			if (dragHasFiles(e)) e.preventDefault();
 		});
 		document.addEventListener('drop', function (e) {
 			// Catch anything that wasn't claimed by a row listener so the
 			// browser doesn't navigate to the dropped file.
 			if (dragHasFiles(e)) e.preventDefault();
-			clearFileDragging();
 		});
 		if (results) {
 			results.addEventListener('dragover', function (e) {

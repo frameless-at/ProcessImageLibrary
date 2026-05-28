@@ -145,11 +145,13 @@
 .ml-cell-thumb[data-file-hash] img:hover {
 	outline: 2px solid var(--pw-main-color, #5b8cd6);
 }
-/* Thumb cell becomes the anchor for the Replace button overlay; the
-   absolute positioning hangs the icon in the cell's top-right corner
-   without disturbing the image layout. */
+/* Thumb cell — pinned to the configured max thumb dimension so all
+   rows share the same column width regardless of each image's actual
+   orientation. position:relative makes it the anchor for the Replace
+   button overlay. */
 .ml-cell-thumb {
 	position: relative;
+	width: var(--ml-thumb-cell-width, 100px);
 }
 /* Replace icon: top-right of the thumb cell, fades in on row hover.
    Click opens the file picker (JS), the surrounding row also acts as
@@ -181,20 +183,11 @@
 .ml-replace-btn:hover {
 	color: var(--pw-main-color, #5b8cd6);
 }
-/* While a file drag is in progress anywhere on the page, dim-tint
-   every editable row so the user sees at a glance which rows are
-   valid Replace targets. Read-only rows (no data-page-id) stay
-   unchanged. The body class is toggled in JS from the document-level
-   dragover/drop listeners. */
-body.ml-file-dragging .ml-table tbody tr[data-page-id] > td {
-	background: var(--pw-table-row-hover-background, rgba(0, 0, 0, 0.04));
-}
-/* The row currently under the pointer gets a stronger accent on top,
-   so the user knows where the drop will land. Inset shadow instead of
-   outline so column widths stay stable. */
+/* Drop-target highlight: the single row currently under the file
+   drag pointer. Uses the same soft tint as inline-edit hover so the
+   visual language matches the rest of the editor. */
 .ml-row-drop-target > td {
-	background: var(--pw-table-row-hover-background, rgba(0, 0, 0, 0.08));
-	box-shadow: inset 0 0 0 1px var(--pw-main-color, #5b8cd6);
+	background: var(--pw-notes-background, #fffbe6);
 }
 /* While the replace request is in flight, dim the row so it's
    obviously busy. JS adds + removes the class around the fetch. */
@@ -484,21 +477,25 @@ textarea.ml-cell-input {
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, inherit);
 }
-/* No focus outline anywhere on module-owned UI — user preference,
-   per the doc-trail. Covers .ml-root (the admin page region) plus
-   every <dialog> the JS spawns into <body>. Browsers' default focus
-   ring otherwise leaks through wherever an explicit rule is absent. */
-.ml-root :focus,
-.ml-root :focus-visible,
-.ml-popup-editor :focus,
-.ml-popup-editor :focus-visible,
-.ml-image-modal :focus,
-.ml-image-modal :focus-visible,
-.ml-bulk-result-dialog :focus,
-.ml-bulk-result-dialog :focus-visible,
-.ml-columns-dialog :focus,
-.ml-columns-dialog :focus-visible {
-	outline: none;
+/* No focus indicator anywhere on module-owned UI — kills both
+   outline AND the box-shadow focus rings UIkit / PW apply to inputs
+   and buttons. !important is needed because UIkit's own focus rules
+   carry equal specificity but later cascade position; rather than
+   chase load order we just win unconditionally. Covers .ml-root
+   (the admin page region) plus every <dialog> the JS spawns into
+   <body>, and the elements themselves (not just descendants). */
+.ml-root:focus, .ml-root:focus-visible, .ml-root:focus-within,
+.ml-root *:focus, .ml-root *:focus-visible, .ml-root *:focus-within,
+.ml-popup-editor:focus, .ml-popup-editor:focus-visible, .ml-popup-editor:focus-within,
+.ml-popup-editor *:focus, .ml-popup-editor *:focus-visible, .ml-popup-editor *:focus-within,
+.ml-image-modal:focus, .ml-image-modal:focus-visible, .ml-image-modal:focus-within,
+.ml-image-modal *:focus, .ml-image-modal *:focus-visible, .ml-image-modal *:focus-within,
+.ml-bulk-result-dialog:focus, .ml-bulk-result-dialog:focus-visible, .ml-bulk-result-dialog:focus-within,
+.ml-bulk-result-dialog *:focus, .ml-bulk-result-dialog *:focus-visible, .ml-bulk-result-dialog *:focus-within,
+.ml-columns-dialog:focus, .ml-columns-dialog:focus-visible, .ml-columns-dialog:focus-within,
+.ml-columns-dialog *:focus, .ml-columns-dialog *:focus-visible, .ml-columns-dialog *:focus-within {
+	outline: none !important;
+	box-shadow: none !important;
 }
 .ml-popup-editor input[type="text"] {
 	display: block;

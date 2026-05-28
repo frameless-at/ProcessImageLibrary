@@ -425,10 +425,19 @@ class ProcessImageLibrary extends Process {
 		// / height per image. The "longer" variable drives keep-ratio
 		// display (proportional, capped to that side), the W / H pair
 		// drives the crop variant (exact box with object-fit: cover).
+		// --ml-thumb-cell-width pins the THUMB column width to the
+		// configured maximum so cells stay uniform regardless of
+		// each image's actual orientation. Keep-ratio mode caps both
+		// axes at longerSide (bounding square); crop mode is exactly
+		// width × height. Without this pin, the table's auto layout
+		// stretches the column to the widest single row.
+		$cellWidth = $thumbDims['keepRatio']
+			? (int) $thumbDims['longerSide']
+			: (int) $thumbDims['width'];
 		$rootStyle = sprintf(
-			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;',
+			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;--ml-thumb-cell-width:%dpx;',
 			(int) $thumbDims['width'], (int) $thumbDims['height'],
-			(int) $thumbDims['longerSide']
+			(int) $thumbDims['longerSide'], $cellWidth
 		);
 		$rootAttrs = sprintf(
 			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-csrf-name="%s" data-csrf-value="%s" style="%s"',
