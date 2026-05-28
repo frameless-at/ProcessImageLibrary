@@ -19,6 +19,8 @@ Ein ProcessWire-Modul, das **alle Bilder einer PW-Installation** in einer einzig
 - **Mehrsprachige Subfields**: per-Sprache-Tabs im Popup (pre-aktiviert auf der aktuellen Admin-Sprache des Editors), Roundtrip in JSON/CSV-Export-Import
 - **Bulk-Edit** via „Selection als Pinsel": markierte Rows werden gemeinsam mit der nächsten Cell-Save in Add- oder Replace-Mode aktualisiert
 - **Filename-Rename**: inline (Einzelbild) oder Batch (über die aktive Selektion) via desselben Popups; Platzhalter-Grammatik `(n)`, `(n2)..(n5)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)` greift in jedem prosenförmigen Editor (Filename, Description, Custom-Text/Textarea) — Tags ausgenommen
+- **Replace Image in place**: Click auf das Upload-Icon der Row ODER Drag-and-Drop einer Datei auf die Row. Bytes werden getauscht, Basename + URLs + Pagefile-Metadata bleiben. Extension-Match wird erzwungen (keine jpg → png-Überraschungen). Variations werden serverseitig neu generiert, die Zellen der Row (Thumb / Dimensions / Size / Modified / Variations) werden in-place gepatcht
+- **Delete Image (Einzel + Batch)**: Trash-Icon auf der Row, hinter einem Confirm-Dialog mit Count + Filename-Preview + „kein Undo"-Warnung. Selection-als-Pinsel gilt auch hier: bei N selektierten Rows löscht ein Klick auf das Trash-Icon einer selektierten Row die gesamte Selektion. Per-Row-Fehler landen im bestehenden Bulk-Result-Modal
 - **Datums-Spalten**: Uploaded (Pagefile `created`) und Modified, sortierbar, formatiert über `$config->dateFormat`
 - **Variations-Spalte**: pro Bild Zähler aus `$img->getVariations()`
 - **Export / Import**: JSON und CSV (mit multilang-aware Spalten-Suffixen `<subfield>_<langName>`)
@@ -29,11 +31,10 @@ Ein ProcessWire-Modul, das **alle Bilder einer PW-Installation** in einer einzig
 
 **Out-of-Scope (auch in der aktuellen Version):**
 
-- Bilder hochladen / löschen
+- Standalone-Upload neuer Bilder (Replace tauscht einen bestehenden Slot; ein eigenständiger Upload nicht)
 - Bilder zwischen Pages verschieben
 - Variations-Management (Crop / Focus / Re-Generate) — Modul zeigt den Variations-Zähler, regeneriert aber nicht
 - Re-Sort innerhalb eines Image-Felds (`$img->sort`)
-- Bulk-Delete / Replace-Image (mögliche Phase-2-Themen)
 
 ## Architektur
 
@@ -71,6 +72,8 @@ Die `src/`-Traits halten das Main-Modul-File auf AJAX-Endpoints + Rendering foku
 - `___executeSave()` — AJAX-POST, validiert + speichert eine Cell-Änderung, gibt JSON zurück. Multilang-aware: payload kann `langId` tragen, dann wird nur dieser Sprach-Slot geschrieben.
 - `___executeBulk()` — AJAX-POST: identische Cell-Save auf eine Selektion anwenden (Add- oder Replace-Mode).
 - `___executeRename()` — AJAX-POST, benennt das File eines einzelnen Bildes um (oder im Batch-Modus jedes selektierte Bild) via `Pagefile::rename()` nach Platzhalter-Expansion und Bereinigung alter Variations-Files.
+- `___executeReplace()` — AJAX-POST, ersetzt die File-Bytes eines Bildes via `move_uploaded_file()` auf den existierenden Pfad, droppt alte Variations, regeneriert das Thumb-Variation und gibt den aktualisierten Cell-Payload zurück (Thumb-URL, Dimensions, Filesize, Modified, Variations-Zähler). Extension-Match wird erzwungen, damit der Basename gültig bleibt.
+- `___executeDelete()` — AJAX-POST mit einem `items`-Array; Einzel + Batch teilen denselben Pfad. Pro Page `$page->editable()`, dann `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed-Listen, damit JS die Rows ausfaden lassen und Partial-Failures via Bulk-Result-Dialog reporten kann.
 - `___executeExport()` — Direct-Download von JSON oder CSV unter Berücksichtigung der aktiven Filter.
 - `___executeImport()` — AJAX-POST, akzeptiert eine vorher exportierte (und extern bearbeitete) JSON/CSV-Datei und schreibt zurück; idempotent (unverändert gebliebene Items werden geskippt).
 - `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size in `$user->meta('imageLibraryPrefs')` (debounced).
@@ -318,7 +321,7 @@ MIT (oder GPL, je nach Repo-Konvention). Modul sollte als Public-Module auf modu
 - **Spaltenkonfig-Scope** → `$user->meta('imageLibraryPrefs')`, cross-device.
 - **Edit-Modus** → Inline-Auto-Save bei Blur/Enter.
 - **Filter-URL-State** → URL-Params, bookmarkbar (Tags als komma-separierter `?tags=…`-Wert).
-- **Bulk-Operations** → Selection-als-Pinsel umgesetzt (Add/Replace-Modes); Einzel- + Batch-Filename-Rename umgesetzt mit Platzhalter-Grammatik (`(n)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)`). Bulk-Delete bleibt offen.
+- **Bulk-Operations** → Selection-als-Pinsel umgesetzt für Edit, Filename-Rename, Replace-in-place und Delete; Platzhalter-Grammatik (`(n)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)`) wird in allen prosenförmigen Editoren geteilt.
 - **Page-Size** → 50 Default, Picker mit konfigurierbarer Options-Liste, Auswahl in `$user->meta`.
 - **Permission-Granularität** → beides: `image-library-access` als Hard-Gate für die Admin-Page, `$page->editable()` pro Cell-Save.
 - **Variations-Spalte** → umgesetzt (read-only Zähler).
@@ -330,7 +333,7 @@ MIT (oder GPL, je nach Repo-Konvention). Modul sollte als Public-Module auf modu
 
 2. **Skalierung jenseits ~10k Bilder**: Aktueller Pfad `findRaw + WireCache::saveFor` ist linear in der Anzahl Image-Rows. Ab 30k+ wird der Cache-Re-build spürbar. Pfad zu `findMany` + per-Image-Index ist im Konzept dokumentiert, aber noch nicht beziffert.
 
-3. **Bulk-Delete / Replace-Image** als Phase-2-Feature-Set: Bedarfsabhängig vom Editor-Workflow (File-Rename ist umgesetzt).
+3. **Standalone-Upload** (ein komplett neuer Bild-Slot aus der Library heraus, kein Replace eines bestehenden) — würde das Row-als-`(page,field,basename)`-Modell aufbrechen, weil zuerst Ziel-Page + Feld gewählt werden müssten. Pages-Edit deckt das ohnehin gut ab; nur bei klarem Editor-Bedarf neu aufgreifen.
 
 4. **WebP / AVIF / SVG / animated GIF** als Original-Format: aktuell wird `$img->size()` blind aufgerufen. Funktioniert, aber SVG → PNG (Rasterisierung), animierte GIFs werden statisch. Hinweis im UI sinnvoll?
 

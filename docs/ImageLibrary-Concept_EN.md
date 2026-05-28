@@ -19,6 +19,8 @@ A ProcessWire module that shows **every image in a PW installation** in a single
 - **Multilingual subfields**: per-language tabs in the popup (pre-activated on the editor's current admin language), round-trip in JSON / CSV export-import
 - **Bulk edit** via "selection as paintbrush": ticked rows are updated alongside the next cell save in Add or Replace mode
 - **Filename rename**: inline (single image) or batch (across the active selection) via the same popup; placeholder grammar `(n)`, `(n2)..(n5)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)` works in every prose-shaped editor (filename, description, custom text/textarea) — tags excluded
+- **Replace image in place**: click the upload icon on a row OR drag a file onto the row. Bytes swap, basename + URLs + Pagefile metadata stay. Extension match enforced (no jpg → png surprises). Variations regenerate server-side, the table row's thumb / dimensions / size / modified / variations cells patch in place
+- **Delete image (single + batch)**: trash icon on the row, behind a confirm dialog with count + filename preview + "no undo" warning. Selection-as-paintbrush applies: with N rows ticked, deleting on any selected row deletes the whole selection. Per-row failures land in the existing bulk-result modal
 - **Date columns**: Uploaded (Pagefile `created`) and Modified, sortable, formatted in `$config->dateFormat`
 - **Variations column**: per-image counter from `$img->getVariations()`
 - **Export / Import**: JSON and CSV (with multilang-aware column suffixes `<subfield>_<langName>`)
@@ -29,11 +31,10 @@ A ProcessWire module that shows **every image in a PW installation** in a single
 
 **Out of scope (also in the current version):**
 
-- Uploading / deleting images
+- Uploading brand-new images (replace swaps an existing slot; standalone upload is not)
 - Moving images between pages
 - Variations management (crop / focus / regenerate) — module shows the variations counter but doesn't regenerate
 - Re-sorting within an image field (`$img->sort`)
-- Bulk delete / replace image (possible Phase-2 topics)
 
 ## Architecture
 
@@ -71,6 +72,8 @@ The `src/` traits keep the main module file focused on AJAX endpoints + renderin
 - `___executeSave()` — AJAX POST, validates + saves a cell change, returns JSON. Multilang-aware: the payload can carry `langId`, in which case only that language slot is written.
 - `___executeBulk()` — AJAX POST: apply an identical cell save to a selection (Add or Replace mode).
 - `___executeRename()` — AJAX POST, renames a single image's file (or every selected image in batch mode) via `Pagefile::rename()` after expanding placeholders and clearing old variation files.
+- `___executeReplace()` — AJAX POST, replaces an image's file bytes via `move_uploaded_file()` onto the existing path, drops old variations, re-generates the thumb variation, returns the refreshed cell payload (thumb URL, dimensions, filesize, modified, variations count). Extension match enforced so the basename stays valid.
+- `___executeDelete()` — AJAX POST with an `items` array; single + batch share the path. Per page `$page->editable()`, then `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed lists so the JS can fade rows out and surface partial failures through the bulk-result dialog.
 - `___executeExport()` — direct download of JSON or CSV honoring the active filters.
 - `___executeImport()` — AJAX POST, accepts a previously-exported (and externally edited) JSON / CSV file and writes it back; idempotent (unchanged items are skipped).
 - `___executeUserPrefs()` — AJAX POST, persists columns + page size into `$user->meta('imageLibraryPrefs')` (debounced).
@@ -318,7 +321,7 @@ MIT (or GPL depending on repo convention). The module should be submittable as a
 - **Column-config scope** → `$user->meta('imageLibraryPrefs')`, cross-device.
 - **Edit mode** → inline auto-save on blur/Enter.
 - **Filter URL state** → URL params, bookmarkable (tags as a comma-separated `?tags=…` value).
-- **Bulk operations** → selection-as-paintbrush implemented (Add/Replace modes); single + batch filename rename implemented with placeholder grammar (`(n)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)`). Bulk delete remains open.
+- **Bulk operations** → selection-as-paintbrush implemented for edit, filename rename, replace-in-place and delete; placeholder grammar (`(n)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)`) shared across every prose-shaped editor.
 - **Page size** → 50 default, picker with a configurable options list, selection in `$user->meta`.
 - **Permission granularity** → both: `image-library-access` as a hard gate for the admin page, `$page->editable()` per cell save.
 - **Variations column** → implemented (read-only counter).
@@ -330,7 +333,7 @@ MIT (or GPL depending on repo convention). The module should be submittable as a
 
 2. **Scaling beyond ~10 k images**: the current `findRaw + WireCache::saveFor` path is linear in the number of image rows. From 30 k+ the cache rebuild becomes noticeable. The path to `findMany` + per-image index is documented in this concept but not yet quantified.
 
-3. **Bulk delete / replace image** as a Phase-2 feature set: demand-driven by editor workflow (file rename has shipped).
+3. **Standalone upload** (creating a brand-new image slot from the library, not replacing one) — would break the row-as-`(page,field,basename)` model since the target page + field would have to be picked first. Pages-Edit already covers this well; revisit only if editor demand is high.
 
 4. **WebP / AVIF / SVG / animated GIF** as the source format: currently `$img->size()` is called blindly. Works, but SVG → PNG (rasterization), animated GIFs become static. UI hint worthwhile?
 
