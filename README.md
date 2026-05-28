@@ -155,6 +155,8 @@ Click any cell with a hover highlight. A modal popup opens with the widget appro
 
 Save commits via AJAX, the cell flashes green on success / red on failure. Screen readers pick the outcome up via a hidden live region.
 
+**Match-aware fade-out.** If the saved value pushes the row out of the active filter set — say, you assign a tag while looking at a "missing tags" bookmark — the row fades out and drops from the table after the success flash. Timing is deliberate: 1200 ms green flash → 200 ms breath so the user sees the new value applied → 250 ms fade → row removed, pagination summary count decremented. If that was the last row in the slice, the table swaps to the same "No images match the current filters." paragraph the server emits on a zero-result render; the pager stays.
+
 ### Editing as paintbrush (bulk)
 
 When one or more rows are ticked via the selection checkboxes, editing any cell on a selected row opens the same popup with an extra **Add / Replace** radio group. The chosen value broadcasts to every selected row.
