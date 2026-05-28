@@ -823,6 +823,15 @@
 								flashCell(c, false);
 							}
 						});
+						// A batch operation is a completion — clear the
+						// selection so every batch path (save + rename)
+						// ends with a fresh slate. Otherwise selection
+						// behaviour was inconsistent (rename cleared,
+						// inline save preserved) and users couldn't
+						// predict what would happen next.
+						selection.clear();
+						syncCheckboxes();
+						syncSelectAllHeader();
 						// Defer re-render so the flash plays first,
 						// matching the single inline save's rhythm.
 						setTimeout(function () {
