@@ -757,6 +757,21 @@
 			});
 			dialog.addEventListener('close', function () {
 				dialog.remove();
+				// Nested modals in the PW edit iframe (Variations →
+				// per-variation detail, etc.) sometimes leak
+				// overflow:hidden + a scrollbar-compensation padding
+				// onto the TOP-level <body> via parent.document
+				// targeting. Their close handlers clear the inner
+				// iframe's body but not ours, so the library page
+				// stays locked. Wipe both side effects here — safe
+				// because nothing on our admin page legitimately
+				// needs the body locked once our modal is gone.
+				if (document.body.style.overflow === 'hidden') {
+					document.body.style.overflow = '';
+				}
+				if (document.body.style.paddingRight) {
+					document.body.style.paddingRight = '';
+				}
 				// Always refresh — the user might have saved inside the
 				// iframe before closing. A no-op refresh is cheap.
 				replaceFromQs(location.search, false);
