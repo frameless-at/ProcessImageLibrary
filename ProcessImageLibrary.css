@@ -860,38 +860,46 @@ textarea.ml-langtabs-pane {
 	color: var(--pw-muted-color, #555);
 	margin: 0 0 0.75rem;
 }
-/* Export row — variant picker on the left, the two export buttons
-   beside it. Same flex / gap rhythm as the import form below for
-   visual symmetry. */
-.ml-export-row {
+/* Two-column layout: Export on the left, Import on the right. Each
+   column stacks its input(s) on top and the action button row below
+   so the two halves read as parallel mini-forms. Wraps to a single
+   column on narrow viewports. */
+.ml-ei-cols {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2rem;
+	margin: 0.5rem 0 0;
+}
+.ml-ei-col {
+	flex: 1 1 280px;
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+}
+/* Action button row inside a column — buttons sit side by side with
+   the same gap rhythm the modal footers use. */
+.ml-ei-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.5rem;
-	align-items: center;
-	margin: 0.5rem 0 0;
 }
-.ml-export-variant-wrap {
+/* Inputs (variant select on the left, file picker on the right) read
+   as muted-labelled fields so the columns balance visually. */
+.ml-export-variant-wrap,
+.ml-ei-file {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.4rem;
 	color: var(--pw-muted-color, #555);
-	margin-right: 0.5rem;
 }
 .ml-export-variant {
 	min-width: 18ch;
 }
 .ml-import-form {
 	display: flex;
-	flex-wrap: wrap;
-	gap: 0.5rem;
-	align-items: center;
-	margin: 0.5rem 0 0;
-}
-.ml-ei-file {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.4rem;
-	color: var(--pw-muted-color, #555);
+	flex-direction: column;
+	gap: 0.75rem;
+	margin: 0;
 }
 .ml-import-status {
 	margin-top: 0.75rem;

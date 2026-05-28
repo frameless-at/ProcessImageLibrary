@@ -81,17 +81,48 @@ trait ImageLibraryExportImport {
 		$variantMedium   = $this->_('Medium — 512 px shorter side');
 		$variantLarge    = $this->_('Large — 1024 px shorter side');
 
-		// JS reads the picker on click and appends ?urlVariant=<value>
-		// to the export URL before navigating. "original" omits the
-		// param so the default behaviour stays clean.
-		$variantPicker = '<label class="ml-export-variant-wrap">'
+		// Two-column layout: left column = Export (variant picker on
+		// top, two export buttons below); right column = Import (file
+		// picker on top, Import button below). Buttons match the
+		// dialog buttons (uk-button-primary / uk-button-secondary, no
+		// size modifier) so the same visual language carries through.
+		$csvHref = $exportUrl . (str_contains($exportUrl, '?') ? '&' : '?') . 'format=csv';
+
+		$leftCol = '<div class="ml-ei-col ml-ei-col-export">'
+			. '<label class="ml-export-variant-wrap">'
 			. '<span>' . $san->entities($variantLabel) . '</span> '
-			. '<select class="ml-export-variant uk-select uk-form-small" name="urlVariant">'
+			. '<select class="ml-export-variant uk-select" name="urlVariant">'
 			. '<option value="original">' . $san->entities($variantOriginal) . '</option>'
 			. '<option value="260">' . $san->entities($variantSmall) . '</option>'
 			. '<option value="512">' . $san->entities($variantMedium) . '</option>'
 			. '<option value="1024">' . $san->entities($variantLarge) . '</option>'
-			. '</select></label>';
+			. '</select></label>'
+			. '<div class="ml-ei-actions">'
+			. '<a class="uk-button uk-button-primary ml-export-link"'
+			. ' href="' . $san->entities($exportUrl) . '"'
+			. ' data-export-base="' . $san->entities($exportBase) . '"'
+			. ' data-format="json">'
+			. $san->entities($exportJsonLabel) . '</a>'
+			. '<a class="uk-button uk-button-secondary ml-export-link"'
+			. ' href="' . $san->entities($csvHref) . '"'
+			. ' data-export-base="' . $san->entities($exportBase) . '"'
+			. ' data-format="csv">'
+			. $san->entities($exportCsvLabel) . '</a>'
+			. '</div>'
+			. '</div>';
+
+		$rightCol = '<div class="ml-ei-col ml-ei-col-import">'
+			. '<form class="ml-import-form" enctype="multipart/form-data" method="post" action="'
+			. $san->entities($importUrl) . '">'
+			. '<input type="hidden" name="' . $san->entities($csrfName) . '" value="' . $san->entities($csrfValue) . '">'
+			. '<label class="ml-ei-file"><span>' . $san->entities($pickLabel) . '</span> '
+			. '<input type="file" name="file" accept="application/json,.json,text/csv,.csv" required></label>'
+			. '<div class="ml-ei-actions">'
+			. '<button type="submit" class="uk-button uk-button-primary">'
+			. $san->entities($importLabel) . '</button>'
+			. '</div>'
+			. '</form>'
+			. '</div>';
 
 		return '<div class="Inputfield InputfieldFieldset InputfieldStateCollapsed ml-export-import">'
 			. '<label class="InputfieldHeader InputfieldStateToggle">'
@@ -101,27 +132,10 @@ trait ImageLibraryExportImport {
 			. '<p class="ml-ei-help">' . $san->entities(
 				$this->_('Export the current filter set as JSON or CSV — image URL, page context, current values. Edit externally, re-upload to apply changes.')
 			) . '</p>'
-			. '<div class="ml-export-row">'
-			. $variantPicker
-			. '<a class="uk-button uk-button-primary uk-button-small ml-export-link"'
-			. ' href="' . $san->entities($exportUrl) . '"'
-			. ' data-export-base="' . $san->entities($exportBase) . '"'
-			. ' data-format="json">'
-			. $san->entities($exportJsonLabel) . '</a> '
-			. '<a class="uk-button uk-button-default uk-button-small ml-export-link"'
-			. ' href="' . $san->entities($exportUrl . (str_contains($exportUrl, '?') ? '&' : '?') . 'format=csv') . '"'
-			. ' data-export-base="' . $san->entities($exportBase) . '"'
-			. ' data-format="csv">'
-			. $san->entities($exportCsvLabel) . '</a>'
+			. '<div class="ml-ei-cols">'
+			. $leftCol
+			. $rightCol
 			. '</div>'
-			. '<form class="ml-import-form" enctype="multipart/form-data" method="post" action="'
-			. $san->entities($importUrl) . '">'
-			. '<input type="hidden" name="' . $san->entities($csrfName) . '" value="' . $san->entities($csrfValue) . '">'
-			. '<label class="ml-ei-file"><span>' . $san->entities($pickLabel) . '</span> '
-			. '<input type="file" name="file" accept="application/json,.json,text/csv,.csv" required></label> '
-			. '<button type="submit" class="uk-button uk-button-default uk-button-small">'
-			. $san->entities($importLabel) . '</button>'
-			. '</form>'
 			. '<div class="ml-import-status" role="status" aria-live="polite"></div>'
 			. '</div></div>';
 	}
