@@ -959,23 +959,34 @@ textarea.ml-langtabs-pane {
 }
 
 /* Bookmarks bar — chrome inherited from .WireTabs + .uk-tab classes
-   set by the admin theme. The per-tab delete button mirrors the
-   thumbnail's .ml-delete-btn: same boxed look (border, radius,
-   inputs background), same fa-trash-o icon, same red hover, same
-   hover-only reveal. */
+   set by the admin theme. Pull the strip 1 rem closer to the filter
+   bar (uk-tab leaves more breathing room than this layout needs). */
+.ml-bookmarks-tabs {
+	margin-bottom: -1rem;
+}
+/* Per-tab delete button — same physical dimensions as the thumbnail
+   trash icon (32 × 32, font-size 1 rem, fa-trash-o, red hover). Sits
+   absolutely positioned in the top-right of its parent <li> so it
+   overlays the tab label area without taking flex space (which is
+   what made it dangle below the strip before). */
+.ml-bookmarks-tabs > li {
+	position: relative;
+}
 .ml-bookmark-del {
+	position: absolute;
+	top: 2px;
+	right: 2px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 22px;
-	height: 22px;
-	margin: 0 0 0 0.4rem;
+	width: 32px;
+	height: 32px;
 	padding: 0;
 	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 3px;
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, #333);
-	font-size: 0.8rem;
+	font-size: 1rem;
 	line-height: 1;
 	cursor: pointer;
 	opacity: 0;
