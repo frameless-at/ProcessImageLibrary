@@ -26,7 +26,7 @@ require_once __DIR__ . '/src/ImageLibraryExportImport.php';
  * renders, the row-cache pipeline, install / uninstall, and the small
  * primitives (resolvePageimage, splitTags, blacklist parsers).
  *
- * See ImageLibrary-Konzept.md for the architecture overview.
+ * See docs/ImageLibrary-Concept_EN.md for the architecture overview.
  */
 class ProcessImageLibrary extends Process {
 
@@ -89,6 +89,68 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Pick (and lazily generate) the thumbnail variation for a single
+	 * Pageimage following the same rules used by the row hydrator:
+	 *
+	 *  - svg / gif → original (no resize)
+	 *  - keep-ratio + longerSide ≤ 260 → PW admin variation (0×260 or 260×0)
+	 *  - keep-ratio + longerSide  > 260 → dedicated longer-axis variation
+	 *  - crop + box fits admin variation → reuse admin variation
+	 *  - crop + box doesn't fit          → dedicated cropping=true variation
+	 *
+	 * Both hydrateSlice and ___executeReplace call this — the replace
+	 * endpoint needs it to materialise the variation file on disk right
+	 * after removeVariations() wiped the old one, so the cache-busted
+	 * thumb URL the client gets back actually resolves.
+	 *
+	 * @param array $thumb Output of getThumbDims().
+	 * @return array{url:string,width:int,height:int}
+	 */
+	protected function resolveThumbForImage(Pageimage $img, array $thumb): array {
+		$ext = strtolower((string) $img->ext);
+		$skipResize = $ext === 'svg' || $ext === 'gif';
+		$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
+
+		if ($skipResize) {
+			$thumbImg = $img;
+		} elseif ($thumb['keepRatio']) {
+			$longer = (int) $thumb['longerSide'];
+			if ($longer <= 260) {
+				if ($img->width >= $img->height) {
+					$thumbImg = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
+				} else {
+					$thumbImg = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
+				}
+			} else {
+				if ($img->width >= $img->height) {
+					$thumbImg = ($img->width > $longer) ? $img->size($longer, 0, $opts) : $img;
+				} else {
+					$thumbImg = ($img->height > $longer) ? $img->size(0, $longer, $opts) : $img;
+				}
+			}
+		} else {
+			$tW = (int) $thumb['width'];
+			$tH = (int) $thumb['height'];
+			if ($img->width >= $img->height) {
+				$adminVar = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
+			} else {
+				$adminVar = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
+			}
+			if ($tW <= (int) $adminVar->width && $tH <= (int) $adminVar->height) {
+				$thumbImg = $adminVar;
+			} else {
+				$thumbImg = $img->size($tW, $tH, $opts + ['cropping' => true]);
+			}
+		}
+
+		return [
+			'url'    => (string) $thumbImg->url,
+			'width'  => (int) $thumbImg->width,
+			'height' => (int) $thumbImg->height,
+		];
+	}
+
+	/**
 	 * Admin-configurable per-page options (comma- or whitespace-
 	 * separated list in the config). Falls back to PAGE_SIZE_OPTIONS
 	 * when nothing's set; always sorted, deduped, positive ints.
@@ -147,6 +209,7 @@ class ProcessImageLibrary extends Process {
 		$visible = [];
 		$order   = [];
 		$pageSize = null;
+		$bookmarks = [];
 		if (is_array($raw)) {
 			$cols = isset($raw['columns']) && is_array($raw['columns']) ? $raw['columns'] : [];
 			if (isset($cols['visible']) && is_array($cols['visible'])) {
@@ -165,10 +228,20 @@ class ProcessImageLibrary extends Process {
 					$pageSize = $ps;
 				}
 			}
+			if (isset($raw['bookmarks']) && is_array($raw['bookmarks'])) {
+				foreach ($raw['bookmarks'] as $b) {
+					if (!is_array($b)) continue;
+					$name = (string) ($b['name'] ?? '');
+					$qs   = (string) ($b['qs']   ?? '');
+					if ($name === '') continue;
+					$bookmarks[] = ['name' => $name, 'qs' => $qs];
+				}
+			}
 		}
 		return [
-			'columns'  => ['visible' => $visible, 'order' => $order],
-			'pageSize' => $pageSize,
+			'columns'   => ['visible' => $visible, 'order' => $order],
+			'pageSize'  => $pageSize,
+			'bookmarks' => $bookmarks,
 		];
 	}
 
@@ -191,6 +264,10 @@ class ProcessImageLibrary extends Process {
 		'tags'        => 'string',
 		'width'       => 'int',
 		'filesize'    => 'int',
+		// PW stores Pagefile created / modified as MySQL DATETIME
+		// strings; ISO-shaped, so string sort = chronological sort.
+		'created'     => 'string',
+		'modified'    => 'string',
 	];
 
 	const DEFAULT_SORT = 'pageTitle';
@@ -212,6 +289,8 @@ class ProcessImageLibrary extends Process {
 		'filesize',
 		'width',
 		'height',
+		'created',
+		'modified',
 	];
 
 	/**
@@ -341,8 +420,10 @@ class ProcessImageLibrary extends Process {
 		$dir          = $sortState['dir'];
 		$requestedPg  = max(1, (int) $this->wire('input')->get('p'));
 		// Tag pool for the filter bar: union across the entire (cached)
-		// flat-row set, not scoped to other filters, so the picker shows
-		// every tag the user can possibly choose from.
+		// flat-row set. Field-specific visibility is handled by JS via
+		// config.fieldCaps (applyFieldCapabilityFilter) — the picker DOM
+		// is rendered unconditionally so JS can toggle .hidden as the
+		// user changes the field filter, same shape as template→field.
 		$tagFilterPool = $this->flatUsedTags($this->loadRows($filters));
 		$resultsHtml  = $this->renderResultsHtml($filters, $sort, $dir, $requestedPg, $customCols);
 
@@ -355,10 +436,19 @@ class ProcessImageLibrary extends Process {
 		// / height per image. The "longer" variable drives keep-ratio
 		// display (proportional, capped to that side), the W / H pair
 		// drives the crop variant (exact box with object-fit: cover).
+		// --ml-thumb-cell-width pins the THUMB column width to the
+		// configured maximum so cells stay uniform regardless of
+		// each image's actual orientation. Keep-ratio mode caps both
+		// axes at longerSide (bounding square); crop mode is exactly
+		// width × height. Without this pin, the table's auto layout
+		// stretches the column to the widest single row.
+		$cellWidth = $thumbDims['keepRatio']
+			? (int) $thumbDims['longerSide']
+			: (int) $thumbDims['width'];
 		$rootStyle = sprintf(
-			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;',
+			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;--ml-thumb-cell-width:%dpx;',
 			(int) $thumbDims['width'], (int) $thumbDims['height'],
-			(int) $thumbDims['longerSide']
+			(int) $thumbDims['longerSide'], $cellWidth
 		);
 		$rootAttrs = sprintf(
 			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-csrf-name="%s" data-csrf-value="%s" style="%s"',
@@ -389,6 +479,12 @@ class ProcessImageLibrary extends Process {
 			. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
 			. $sanitizer->entities($cfgLabel)
 			. '</a>';
+		// Load PW's native tab module — same one Page Edit etc. use,
+		// so the WireTabs uk-tab markup picks up the admin's tab
+		// styling without us shipping new CSS.
+		$this->wire('modules')->get('JqueryWireTabs');
+		$prefs = $this->getUserPrefs();
+		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		// Column picker lives in a sibling <dialog> so it survives
@@ -425,6 +521,8 @@ class ProcessImageLibrary extends Process {
 			'tags'        => $this->_('Tags'),
 			'dimensions'  => $this->_('Dimensions'),
 			'size'        => $this->_('Size'),
+			'created'     => $this->_('Uploaded'),
+			'modified'    => $this->_('Modified'),
 			'variations'  => $this->_('Variations'),
 		];
 		foreach ($customCols as $name) {
@@ -466,7 +564,7 @@ class ProcessImageLibrary extends Process {
 			$checked = $isVisible ? ' checked' : '';
 			$colKey = $san->entities($key);
 			$items .= '<li class="ml-col-item" draggable="true">'
-				. '<label><input type="checkbox" class="ml-col-toggle" data-col="'
+				. '<label><input type="checkbox" class="uk-checkbox ml-col-toggle" data-col="'
 				. $colKey . '"' . $checked . '> '
 				. $san->entities($label) . '</label>'
 				// Up / Down buttons for keyboard users — same effect as
@@ -501,7 +599,7 @@ class ProcessImageLibrary extends Process {
 		$out .= '<p class="ml-columns-hint">' . $hint . '</p>';
 		$out .= $this->renderColumnsListMarkup($customCols);
 		$out .= '<footer>';
-		$out .= '<button type="button" class="ml-columns-close">' . $close . '</button>';
+		$out .= '<button type="button" class="ml-columns-close uk-button uk-button-secondary">' . $close . '</button>';
 		$out .= '</footer>';
 		$out .= '</dialog>';
 		return $out;
@@ -833,6 +931,34 @@ class ProcessImageLibrary extends Process {
 		$img = $this->resolvePageimage($page, $fieldName, $basename);
 		if (!$img) return $this->jsonError('Image not found in field', 404);
 
+		// Output formatting off before mutating: setters work on the raw value
+		// and avoid double-encoding for fields like description.
+		$page->of(false);
+
+		// Multilang popup ships a per-language map alongside the
+		// primary value. When that's present, write each language
+		// directly instead of letting writeLangValue() pick one.
+		$langValuesJson = (string) $this->wire('input')->post('langValues');
+		$langValues = null;
+		if ($langValuesJson !== '') {
+			$decoded = json_decode($langValuesJson, true);
+			if (is_array($decoded)) $langValues = $decoded;
+		}
+
+		// Placeholder resolution — same token grammar as filename.
+		// Single-cell save → n = 1, total = 1. Skipped for tags
+		// (any mode): tags are token sets where "(d)" → date would
+		// land as a literal tag, which is editorial noise.
+		if ($subfield !== 'tags') {
+			$ctx = $this->buildPlaceholderCtx($page, $fieldName, 1, 1);
+			$value = $this->resolveRenamePattern($value, $ctx);
+			if ($langValues !== null) {
+				foreach ($langValues as $lk => $lv) {
+					$langValues[$lk] = $this->resolveRenamePattern((string) $lv, $ctx);
+				}
+			}
+		}
+
 		// useTags=2 (whitelist): reject any token that isn't in the configured
 		// tagsList. Splits on whitespace + commas to match PW's own parsing.
 		if ($subfield === 'tags') {
@@ -848,20 +974,6 @@ class ProcessImageLibrary extends Process {
 				// Normalize separator to single space for consistency.
 				$value = implode(' ', $tokens);
 			}
-		}
-
-		// Output formatting off before mutating: setters work on the raw value
-		// and avoid double-encoding for fields like description.
-		$page->of(false);
-
-		// Multilang popup ships a per-language map alongside the
-		// primary value. When that's present, write each language
-		// directly instead of letting writeLangValue() pick one.
-		$langValuesJson = (string) $this->wire('input')->post('langValues');
-		$langValues = null;
-		if ($langValuesJson !== '') {
-			$decoded = json_decode($langValuesJson, true);
-			if (is_array($decoded)) $langValues = $decoded;
 		}
 
 		try {
@@ -899,6 +1011,18 @@ class ProcessImageLibrary extends Process {
 		if ($langValues !== null) {
 			$response['langValues'] = $langValues;
 		}
+		// Match-aware UX: tell the client whether the saved row still
+		// passes the active filter set, so it can fade rows out that
+		// dropped out of scope (e.g. "missing tags" → user adds a tag).
+		$imageFields       = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		$customCols        = $this->collectCustomNames();
+		$filterQs          = (string) $this->wire('input')->post('filterQs');
+		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
+		$key               = sprintf('%d:%s:%s', $pageId, $fieldName, $basename);
+		$match             = $this->evaluateFilterTouchedRows([$key], $filters);
+		$response['stillMatches'] = !in_array($key, $match['vanished'], true);
+		$response['newTotal']     = $match['newTotal'];
 		return $this->jsonResponse($response);
 	}
 
@@ -911,9 +1035,13 @@ class ProcessImageLibrary extends Process {
 	 * names embed the OLD basename and would otherwise become orphan
 	 * disk junk after the rename.
 	 *
-	 * Placeholder syntax (resolveRenamePattern):
-	 *   (n)         counter (integer)
-	 *   (n2)…(n5)   zero-padded counter, N digits
+	 * Placeholder syntax (see resolveRenamePattern for the full
+	 * grammar — same tokens work in description / tags / customs):
+	 *   (n)         counter
+	 *   (n2)…(n5)   zero-padded counter
+	 *   (N)         total
+	 *   (t)         page title
+	 *   (d)         date YYYY-MM-DD
 	 *   (p)         page name (PW URL slug)
 	 *   (f)         image field name
 	 *
@@ -963,7 +1091,10 @@ class ProcessImageLibrary extends Process {
 		if (!$img) return $this->jsonError('Image not found in field', 404);
 
 		$page->of(false);
-		$result = $this->performRename($img, $page, $fieldName, $newStemRaw, ['n' => 1]);
+		$result = $this->performRename(
+			$img, $page, $fieldName, $newStemRaw,
+			$this->buildPlaceholderCtx($page, $fieldName, 1, 1)
+		);
 		if (!$result['ok']) {
 			return $this->jsonError((string) $result['error']);
 		}
@@ -983,12 +1114,286 @@ class ProcessImageLibrary extends Process {
 
 		$finalBasename = (string) $result['basename'];
 		$finalDot      = strrpos($finalBasename, '.');
+
+		// Same match-aware UX as ___executeSave: report whether the
+		// renamed row still belongs in the active filter view. Match
+		// against the NEW basename — the row key follows the new
+		// filename, which is what the client's DOM also uses now.
+		$imageFields       = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		$customCols        = $this->collectCustomNames();
+		$filterQs          = (string) $this->wire('input')->post('filterQs');
+		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
+		$key               = sprintf('%d:%s:%s', $pageId, $fieldName, $finalBasename);
+		$match             = $this->evaluateFilterTouchedRows([$key], $filters);
+
+		return $this->jsonResponse([
+			'ok'           => true,
+			'basename'     => $finalBasename,
+			'stem'         => $finalDot === false ? $finalBasename : substr($finalBasename, 0, $finalDot),
+			'ext'          => $finalDot === false ? '' : substr($finalBasename, $finalDot),
+			'unchanged'    => false,
+			'stillMatches' => !in_array($key, $match['vanished'], true),
+			'newTotal'     => $match['newTotal'],
+		]);
+	}
+
+	/**
+	 * AJAX endpoint: swap an image's file bytes while keeping basename,
+	 * Pagefile metadata (description, tags, customs, multilang) and every
+	 * URL pointing at it intact. Triggered by the in-row Replace icon AND
+	 * by drag-and-drop of a file onto the row.
+	 *
+	 * Expects POST + CSRF + file upload "file" and string fields pageId,
+	 * fieldName, basename. Extension of the uploaded file MUST match the
+	 * existing image's extension — Replace explicitly does not allow
+	 * format changes (jpg → png would break references). Editors who
+	 * want a different format should delete + upload instead.
+	 *
+	 * Process: validate → move tmp upload onto the image's filename →
+	 * removeVariations() so cached renders get regenerated → save the
+	 * page (Pages::saved hook drops the row cache). Returns the new
+	 * filemtime so JS can cache-bust the thumbnail.
+	 */
+	public function ___executeReplace() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+
+		$pageId    = (int) $input->post('pageId');
+		$fieldName = $sanitizer->fieldName((string) $input->post('fieldName'));
+		$basename  = basename((string) $input->post('basename'));
+
+		if (!$pageId || !$fieldName || !$basename) {
+			return $this->jsonError('Missing required parameter');
+		}
+		if (!in_array($fieldName, $this->discoverImageFields(), true)) {
+			return $this->jsonError('Field is not a managed image field');
+		}
+
+		if (empty($_FILES['file']['tmp_name']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+			return $this->jsonError('No file uploaded');
+		}
+		$tmpPath = (string) $_FILES['file']['tmp_name'];
+		$uploadName = (string) ($_FILES['file']['name'] ?? '');
+
+		$page = $this->wire('pages')->get($pageId);
+		if (!$page->id) return $this->jsonError('Page not found', 404);
+		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+
+		$img = $this->resolvePageimage($page, $fieldName, $basename);
+		if (!$img) return $this->jsonError('Image not found in field', 404);
+
+		// Extension match enforcement — Replace preserves the basename
+		// (and therefore the URL); changing the extension would break
+		// every reference that points at the old URL.
+		$oldExt = strtolower(pathinfo($basename, PATHINFO_EXTENSION));
+		$newExt = strtolower(pathinfo($uploadName, PATHINFO_EXTENSION));
+		if ($newExt === '' || $oldExt === '') {
+			return $this->jsonError('Both files must have an extension');
+		}
+		if ($oldExt !== $newExt) {
+			return $this->jsonError(sprintf(
+				'Extension mismatch: existing is .%s, upload is .%s. Replace keeps the original format.',
+				$oldExt, $newExt
+			));
+		}
+
+		$targetPath = (string) $img->filename;
+		if ($targetPath === '' || !is_file($targetPath)) {
+			return $this->jsonError('Original file not found on disk');
+		}
+
+		// move_uploaded_file (vs rename) keeps PHP's safe-upload check
+		// intact — refuses tmp paths that aren't from a real upload.
+		if (!@move_uploaded_file($tmpPath, $targetPath)) {
+			return $this->jsonError('Could not write replacement file');
+		}
+
+		$page->of(false);
+		try {
+			// Old variations were rendered from the old bytes — they
+			// have to go regardless of whether anyone re-requests them
+			// immediately.
+			$img->removeVariations();
+			if (!$page->save($fieldName)) {
+				return $this->jsonError('Save failed after replace');
+			}
+			$this->wire('cache')->deleteFor($this);
+		} catch (\Exception $e) {
+			return $this->jsonError('Replace error: ' . $e->getMessage());
+		}
+
+		// Pre-generate the same thumbnail variation hydrateSlice would
+		// produce, so the cache-busted URL the JS swaps in actually
+		// resolves immediately — without this the browser would 404
+		// against the just-removed variation file until the next page
+		// render lazily recreates it.
+		$img2 = $this->resolvePageimage($page, $fieldName, $basename) ?: $img;
+		$thumbInfo = $this->resolveThumbForImage($img2, $this->getThumbDims());
+
+		clearstatcache(true, $targetPath);
+		$mtime    = @filemtime($targetPath);
+		$filesize = (int) @filesize($targetPath);
+		$cacheBust = $mtime ? (string) $mtime : (string) time();
+
+		// Re-derive the row's metadata fields so the table can patch
+		// them in place. Width / height come from the fresh Pageimage
+		// (which lazy-reads getimagesize off the new file). The
+		// variations counter is 1 — removeVariations() wiped the lot
+		// and we just generated one fresh thumb.
+		$dims = ($img2->width && $img2->height)
+			? ((int) $img2->width) . '×' . ((int) $img2->height)
+			: '';
+
+		// Modified column comes from MySQL DATETIME on the file row;
+		// PW's $page->save() writes NOW() to that column for every
+		// Pagefile in the saved field, so the value is already fresh.
+		// We pass it back through the same formatTimestamp the table
+		// uses so the patched cell matches a server-rendered one.
+		$modifiedRaw = (string) ($img2->modified ?? '');
+		if ($modifiedRaw === '' || strtotime($modifiedRaw) === false) {
+			// Defensive — if PW didn't bump it (older PW versions,
+			// missing column), fall back to the filesystem mtime.
+			$modifiedRaw = $mtime ? date('Y-m-d H:i:s', $mtime) : '';
+		}
+
+		return $this->jsonResponse([
+			'ok'          => true,
+			'basename'    => $basename,
+			'cacheBust'   => $cacheBust,
+			'thumbUrl'    => $thumbInfo['url'] . '?v=' . $cacheBust,
+			'thumbWidth'  => $thumbInfo['width'],
+			'thumbHeight' => $thumbInfo['height'],
+			// Cell-level updates for the JS to patch in place — these
+			// are pre-formatted on the server so the patched cells
+			// look identical to a freshly-rendered row.
+			'dimensions'       => $dims,
+			'filesize'         => $filesize,
+			'filesizeFormatted'=> $this->formatFilesize($filesize),
+			'modifiedFormatted'=> $modifiedRaw ? $this->formatTimestamp($modifiedRaw) : '',
+			'variationsCount'  => 1,
+		]);
+	}
+
+	/**
+	 * AJAX endpoint: delete one or more images (single + batch share
+	 * the same code path — JS always sends an `items` JSON array).
+	 *
+	 * Items: [{pageId, fieldName, basename}, ...]. Per-page editable()
+	 * is enforced; failures land in the result list so the UI can
+	 * report them via the existing bulk-result dialog pattern.
+	 *
+	 * Process per page: $pageimages->delete($img) removes the file
+	 * and its row, $page->save($field) persists. removeVariations()
+	 * happens implicitly through PW's file delete. Cache is dropped
+	 * via Pages::saved hook + an explicit deleteFor for symmetry
+	 * with the other endpoints.
+	 */
+	public function ___executeDelete() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+		$itemsJson = (string) $input->post('items');
+		$items     = json_decode($itemsJson, true);
+		if (!is_array($items) || !$items) {
+			return $this->jsonError('No items provided');
+		}
+
+		// Group by pageId so each page is saved once.
+		$byPage = [];
+		foreach ($items as $item) {
+			if (!is_array($item)) continue;
+			$pid = (int) ($item['pageId'] ?? 0);
+			$fn  = $sanitizer->fieldName((string) ($item['fieldName'] ?? ''));
+			$bn  = basename((string) ($item['basename'] ?? ''));
+			if (!$pid || !$fn || !$bn) continue;
+			$byPage[$pid][] = ['fieldName' => $fn, 'basename' => $bn];
+		}
+		if (!$byPage) return $this->jsonError('No valid items');
+
+		$imageFields = $this->discoverImageFields();
+		$succeeded   = [];
+		$failed      = [];
+
+		foreach ($byPage as $pid => $pageItems) {
+			$page = $this->wire('pages')->get($pid);
+			if (!$page->id) {
+				foreach ($pageItems as $i) $failed[] = sprintf('Page %d not found', $pid);
+				continue;
+			}
+			if (!$page->editable()) {
+				foreach ($pageItems as $i) $failed[] = sprintf('Page %d not editable', $pid);
+				continue;
+			}
+			$page->of(false);
+			$fieldsTouched = [];
+			foreach ($pageItems as $i) {
+				$fn = $i['fieldName'];
+				$bn = $i['basename'];
+				if (!in_array($fn, $imageFields, true)) {
+					$failed[] = sprintf('%s on page %d is not a managed image field', $fn, $pid);
+					continue;
+				}
+				$pageimages = $page->getUnformatted($fn);
+				if (!($pageimages instanceof Pagefiles)) {
+					$failed[] = sprintf('%s on page %d has no files', $fn, $pid);
+					continue;
+				}
+				$img = $pageimages->getFile($bn);
+				if (!$img) {
+					$failed[] = sprintf('%s/%s on page %d not found', $fn, $bn, $pid);
+					continue;
+				}
+				try {
+					$pageimages->delete($img);
+					$fieldsTouched[$fn] = true;
+					$succeeded[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+				} catch (\Throwable $e) {
+					$failed[] = sprintf('%s/%s on page %d: %s', $fn, $bn, $pid, $e->getMessage());
+				}
+			}
+			if ($fieldsTouched) {
+				try {
+					foreach (array_keys($fieldsTouched) as $fn) {
+						$page->save($fn);
+					}
+				} catch (\Throwable $e) {
+					$failed[] = sprintf('Save on page %d failed: %s', $pid, $e->getMessage());
+				}
+			}
+		}
+
+		$this->wire('cache')->deleteFor($this);
+
 		return $this->jsonResponse([
 			'ok'        => true,
-			'basename'  => $finalBasename,
-			'stem'      => $finalDot === false ? $finalBasename : substr($finalBasename, 0, $finalDot),
-			'ext'       => $finalDot === false ? '' : substr($finalBasename, $finalDot),
-			'unchanged' => false,
+			'succeeded' => $succeeded,
+			'failed'    => $failed,
 		]);
 	}
 
@@ -1064,36 +1469,80 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Expand the rename pattern into a concrete stem for a given
-	 * image's context. Used by performRename() so a pattern like
-	 * "(p)-(n2)" produces e.g. "summer-festival-03" on the third
-	 * row of a batch.
+	 * Standard context bag for resolveRenamePattern. Centralizes the
+	 * date lookup (server timezone, Y-m-d) so every Save / Bulk /
+	 * Rename path shares the same value within one request — even
+	 * across multiple items in a batch, the (d) token expands to the
+	 * same string for every row, which is what users expect.
+	 */
+	protected function buildPlaceholderCtx(Page $page, string $fieldName, int $n, int $total): array {
+		static $date = null;
+		if ($date === null) $date = date('Y-m-d');
+		return [
+			'n'     => $n,
+			'total' => $total,
+			'page'  => $page,
+			'field' => $fieldName,
+			'date'  => $date,
+		];
+	}
+
+	/**
+	 * Expand a placeholder pattern into a concrete string for the
+	 * given image's context. Used by every Save / Bulk / Rename
+	 * path — same token grammar applies whether the user is typing
+	 * a filename stem, a description, a custom textarea, or a
+	 * free-form tag string.
 	 *
 	 * Supported tokens:
 	 *   (n)              counter — $ctx['n']
 	 *   (n2) … (n5)      zero-padded counter, N digits
-	 *   (p)              page name (PW URL slug) — $ctx['page']->name
+	 *   (N)              total — $ctx['total']
+	 *   (t)              page title in the editor's admin language;
+	 *                    follows repeater rows up to the owner page
+	 *                    so the stored title is meaningful even for
+	 *                    repeater-hosted images
+	 *   (d)              current date YYYY-MM-DD (server timezone)
+	 *   (p)              page name (PW URL slug); same repeater-
+	 *                    owner resolution as (t)
 	 *   (f)              image field name — $ctx['field']
 	 *
-	 * Unknown tokens are passed through verbatim; the sanitiser
-	 * downstream usually strips the parens. The helper itself does
-	 * NOT sanitise — that's the caller's job, so future paths can
-	 * apply additional rules (uniqueness, collision suffix, …)
-	 * before the sanitiser runs.
+	 * Unknown tokens are passed through verbatim; downstream
+	 * sanitisers (filename path) strip the parens, prose paths
+	 * leave them alone. The helper itself does NOT sanitise —
+	 * that's the caller's job.
 	 *
-	 * @param array{n?:int,page?:Page,field?:string} $ctx
+	 * @param array{n?:int,total?:int,page?:Page,field?:string,date?:string} $ctx
 	 */
 	protected function resolveRenamePattern(string $pattern, array $ctx): string {
 		$n     = (int) ($ctx['n']     ?? 0);
+		$total = (int) ($ctx['total'] ?? 0);
 		$page  = $ctx['page']  ?? null;
 		$field = (string) ($ctx['field'] ?? '');
+		$date  = (string) ($ctx['date']  ?? '');
+
+		// Owner-page resolution for (t) and (p): for repeater /
+		// RepeaterMatrix images the bare $page is the hidden
+		// repeater_<field> page whose title / name are admin-internal
+		// noise. Walk up to the user-facing owner so placeholders
+		// expand to something meaningful.
+		$ownerPage = $page;
+		if ($page instanceof Page && $page->id && method_exists($page, 'getForPageRoot')) {
+			$owner = $page->getForPageRoot();
+			if ($owner && $owner->id && $owner->id !== $page->id) {
+				$ownerPage = $owner;
+			}
+		}
 
 		return preg_replace_callback(
-			'/\((n[2-5]?|p|f)\)/',
-			function ($m) use ($n, $page, $field) {
+			'/\((n[2-5]?|N|t|d|p|f)\)/',
+			function ($m) use ($n, $total, $ownerPage, $field, $date) {
 				$key = $m[1];
 				if ($key === 'n') return (string) $n;
-				if ($key === 'p') return ($page instanceof Page && $page->id) ? (string) $page->name : '';
+				if ($key === 'N') return (string) $total;
+				if ($key === 't') return ($ownerPage instanceof Page && $ownerPage->id) ? (string) $ownerPage->title : '';
+				if ($key === 'd') return $date;
+				if ($key === 'p') return ($ownerPage instanceof Page && $ownerPage->id) ? (string) $ownerPage->name : '';
 				if ($key === 'f') return $field;
 				// n2 … n5 — zero-padded counter
 				$digits = (int) substr($key, 1);
@@ -1221,9 +1670,18 @@ class ProcessImageLibrary extends Process {
 		if (!$byPage) return $this->jsonError('No valid items');
 
 		$succeeded   = 0;
+		// Track every successful row so the match-aware check at the
+		// end can ask "which of these now fall out of the filter?".
+		// Renamed rows record the NEW basename (the key the client
+		// holds in its DOM after re-render).
+		$succeededKeys = [];
 		$failed      = [];
 		$tagsCfg     = $this->getTagsConfig();
 		$imageFields = $this->discoverImageFields();
+		// Total used by the (N) placeholder. Matches $counter from
+		// the byPage build above — i.e. the number of items the
+		// client sent that resolved to a valid pageId/field/basename.
+		$totalItems  = $counter;
 
 		foreach ($byPage as $pid => $pageItems) {
 			$page = $this->wire('pages')->get($pid);
@@ -1247,6 +1705,11 @@ class ProcessImageLibrary extends Process {
 					continue;
 				}
 
+				// Same context bag for every write path in this batch
+				// — counter + total are per-item, page + field + date
+				// shared. Cheap to build (date is memoized).
+				$ctx = $this->buildPlaceholderCtx($page, $fn, (int) $it['n'], $totalItems);
+
 				// basename is the identity, not an editable subfield —
 				// editableSubfields() rightly excludes it. Branch the
 				// rename path before that gate.
@@ -1256,7 +1719,7 @@ class ProcessImageLibrary extends Process {
 						$failed[] = sprintf('Image %s not found in %d.%s', $bn, $pid, $fn);
 						continue;
 					}
-					$renameResult = $this->performRename($img, $page, $fn, $value, ['n' => (int) $it['n']]);
+					$renameResult = $this->performRename($img, $page, $fn, $value, $ctx);
 					if (!$renameResult['ok']) {
 						$failed[] = sprintf('Rename %s in %s: %s', $bn, $fn, $renameResult['error']);
 						continue;
@@ -1265,6 +1728,7 @@ class ProcessImageLibrary extends Process {
 						$fieldsTouched[$fn] = true;
 					}
 					$succeeded++;
+					$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, (string) $renameResult['basename']);
 					continue;
 				}
 
@@ -1279,7 +1743,15 @@ class ProcessImageLibrary extends Process {
 					continue;
 				}
 
-				$itemValue = $value;
+				// Placeholder resolution runs BEFORE any Add-merging —
+				// (d) / (t) / (n) etc. become part of the literal value
+				// before the pipeline treats it as a single string.
+				// Skipped for tags (any mode): tags are token sets,
+				// not prose; placeholder expansion would land as a
+				// literal "2026-05-27"-style tag, not useful metadata.
+				$itemValue = $subfield === 'tags'
+					? (string) $value
+					: $this->resolveRenamePattern((string) $value, $ctx);
 
 				if ($subfield === 'tags') {
 					$tokens = $this->splitTags($itemValue);
@@ -1305,6 +1777,7 @@ class ProcessImageLibrary extends Process {
 					// trailing space to every selected row.
 					if ($itemValue === '') {
 						$succeeded++;
+						$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
 						continue;
 					}
 					// Description / custom text: append with a single space
@@ -1317,12 +1790,23 @@ class ProcessImageLibrary extends Process {
 				}
 
 				if ($langValues !== null) {
-					$this->applyLangValues($img, $subfield, $langValues);
+					// Per-language placeholder resolution (skipped for
+					// tags — same reasoning as the scalar branch).
+					if ($subfield === 'tags') {
+						$this->applyLangValues($img, $subfield, $langValues);
+					} else {
+						$resolvedLangValues = [];
+						foreach ($langValues as $lk => $lv) {
+							$resolvedLangValues[$lk] = $this->resolveRenamePattern((string) $lv, $ctx);
+						}
+						$this->applyLangValues($img, $subfield, $resolvedLangValues);
+					}
 				} else {
 					$this->writeLangValue($img, $subfield, $itemValue);
 				}
 				$fieldsTouched[$fn] = true;
 				$succeeded++;
+				$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
 			}
 
 			foreach (array_keys($fieldsTouched) as $fn) {
@@ -1340,10 +1824,20 @@ class ProcessImageLibrary extends Process {
 			$this->wire('cache')->deleteFor($this);
 		}
 
+		// Match-aware UX: report which of the just-saved rows no
+		// longer pass the active filter so the client can fade them.
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		$customCols        = $this->collectCustomNames();
+		$filterQs          = (string) $this->wire('input')->post('filterQs');
+		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
+		$match             = $this->evaluateFilterTouchedRows($succeededKeys, $filters);
+
 		return $this->jsonResponse([
 			'ok'        => true,
 			'succeeded' => $succeeded,
 			'failed'    => $failed,
+			'vanished'  => $match['vanished'],
+			'newTotal'  => $match['newTotal'],
 		]);
 	}
 
@@ -1385,9 +1879,11 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Invalid payload');
 		}
 
+		$sanitizer = $this->wire('sanitizer');
 		$clean = [
-			'columns'  => ['visible' => [], 'order' => []],
-			'pageSize' => null,
+			'columns'   => ['visible' => [], 'order' => []],
+			'pageSize'  => null,
+			'bookmarks' => [],
 		];
 		if (isset($data['columns']) && is_array($data['columns'])) {
 			$cols = $data['columns'];
@@ -1409,9 +1905,49 @@ class ProcessImageLibrary extends Process {
 				$clean['pageSize'] = $ps;
 			}
 		}
+		if (isset($data['bookmarks']) && is_array($data['bookmarks'])) {
+			foreach ($data['bookmarks'] as $b) {
+				if (!is_array($b)) continue;
+				$name = $sanitizer->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
+				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
+				if ($name === '') continue;
+				$clean['bookmarks'][] = ['name' => $name, 'qs' => $qs];
+			}
+		}
 
 		$this->wire('user')->meta('imageLibraryPrefs', $clean);
 		return $this->jsonResponse(['ok' => true]);
+	}
+
+	/**
+	 * Canonical bookmark query string: only filter-shaped params
+	 * (q, template, field, tags, no_desc, no_tags, no_custom_*),
+	 * empty values dropped, keys alphabetically sorted. Same shape
+	 * the JS emits, so server-side bookmark matching ("which tab is
+	 * active for the current URL?") is a straight string compare.
+	 *
+	 * @param string $qs Full query string (with or without leading "?").
+	 */
+	protected function canonicalizeBookmarkQs(string $qs): string {
+		$qs = ltrim($qs, '?');
+		if ($qs === '') return '';
+		parse_str($qs, $params);
+		$keep = [];
+		foreach ($params as $k => $v) {
+			$k = (string) $k;
+			$ok = in_array($k, ['q', 'template', 'field', 'tags', 'no_desc', 'no_tags'], true)
+				|| strncmp($k, 'no_custom_', 10) === 0;
+			if (!$ok) continue;
+			if (is_array($v)) {
+				$v = implode(',', array_values($v));
+			}
+			$v = (string) $v;
+			if ($v === '') continue;
+			$keep[$k] = $v;
+		}
+		if (!$keep) return '';
+		ksort($keep);
+		return '?' . http_build_query($keep);
 	}
 
 	/**
@@ -1445,6 +1981,15 @@ class ProcessImageLibrary extends Process {
 			$selector  = $this->buildSelector($eligibleTemplates);
 			$rawData   = $this->wire('pages')->findRaw($selector, $rawFields);
 			$rows      = $this->flattenRows($rawData, $imageFields);
+			// Repeater / RepeaterMatrix integration: an image inside a
+			// repeater field lives on a hidden repeater_<field> page,
+			// not on the editor's mental "host" page. Resolve those
+			// rows to their owner page BEFORE we cache, so sort by
+			// pageTitle, the template filter, and the table's Page
+			// link all operate on the owner. The original pageId stays
+			// on the row — that's the storage truth the save / rename
+			// endpoints need to write to.
+			$rows = $this->resolveRepeaterRows($rows);
 			// Selector-based invalidation: PW expires this entry whenever a
 			// page matching the eligible templates is saved — including our
 			// own inline-edit endpoint that wraps $page->save().
@@ -1486,12 +2031,105 @@ class ProcessImageLibrary extends Process {
 			'imgs'  => $imageFields,
 			'cust'  => $this->getCustomByField(),
 		];
-		// Bump suffix when the cached row shape changes — older
-		// entries stored multilang values as JSON-encoded strings;
-		// the v2 path keeps them as raw {langId: value} arrays so
-		// normalizeDescription() can pick the editor's language at
-		// display time.
-		return 'rows-v3-' . substr(md5((string) json_encode($keyData)), 0, 16);
+		// Bump suffix when the cached row shape changes:
+		//   v2: multilang values as raw {langId: value} arrays (was JSON)
+		//   v3: multilang round-trip in export / import
+		//   v4: repeater pages resolved to owner (pageTitle / templateId
+		//       overridden; ownerPageId + repeaterField added)
+		//   v5: cached pageTitle for repeater rows is default-language
+		//       (was leaking the cache-populator's user language across
+		//       editors); hydrateSlice sets the per-request user-
+		//       language title on top.
+		//   v6: created + modified Pagefile timestamps added to every
+		//       row (sortable, filterable, displayable as date columns).
+		//   v7: created + modified stored as DATETIME strings, not
+		//       Unix-int casts (PW's DB schema is DATETIME; v6 cast
+		//       lost everything past the year).
+		return 'rows-v7-' . substr(md5((string) json_encode($keyData)), 0, 16);
+	}
+
+	/**
+	 * Resolve repeater / RepeaterMatrix rows to their owning user-
+	 * facing page. Walked once over the freshly-flattened row list:
+	 *
+	 *   1. Gather pageIds of rows whose templateId is in the
+	 *      repeater-template set.
+	 *   2. Batch-load those repeater pages via getById().
+	 *   3. For each, walk getForPageRoot() up through any nested
+	 *      repeater containers until a non-repeater owner shows up.
+	 *   4. Override pageTitle + templateId on the row with the
+	 *      owner's, and record ownerPageId + repeaterField so the
+	 *      hydrate step can build display URLs and the table can
+	 *      annotate the Field column with the repeater context.
+	 *
+	 * pageId itself stays put — the image lives on the repeater
+	 * page in PW's data model, so save / rename endpoints continue
+	 * to target the right slot.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function resolveRepeaterRows(array $rows): array {
+		if (!$rows) return $rows;
+		$repeaterIds = $this->repeaterTemplateIds();
+		if (!$repeaterIds) return $rows;
+
+		$repeaterPageIds = [];
+		foreach ($rows as $r) {
+			if (isset($repeaterIds[(int) $r['templateId']])) {
+				$repeaterPageIds[(int) $r['pageId']] = true;
+			}
+		}
+		if (!$repeaterPageIds) return $rows;
+
+		$ownerByRepeaterId = [];
+		$repeaterPages = $this->wire('pages')->getById(array_keys($repeaterPageIds));
+		// Title cached in the default language so the row cache stays
+		// language-neutral (one cache entry for all editors). The
+		// editor's own-language title is set in hydrateSlice() per
+		// request — that path is what the user actually sees.
+		$defaultLang = $this->wire('languages') ? $this->wire('languages')->getDefault() : null;
+		foreach ($repeaterPages as $rp) {
+			$owner = method_exists($rp, 'getForPageRoot') ? $rp->getForPageRoot() : null;
+			if (!$owner || !$owner->id || $owner->id === $rp->id) continue;
+			$field = method_exists($rp, 'getForField') ? $rp->getForField() : null;
+			$ownerByRepeaterId[(int) $rp->id] = [
+				'ownerPageId'    => (int) $owner->id,
+				'ownerTitle'     => $this->defaultLangTitle($owner, $defaultLang),
+				'ownerTemplate'  => (int) $owner->template->id,
+				'repeaterField'  => $field ? (string) $field->name : '',
+			];
+		}
+		if (!$ownerByRepeaterId) return $rows;
+
+		foreach ($rows as &$r) {
+			$pid = (int) $r['pageId'];
+			if (!isset($ownerByRepeaterId[$pid])) continue;
+			$info = $ownerByRepeaterId[$pid];
+			$r['ownerPageId']   = $info['ownerPageId'];
+			$r['repeaterField'] = $info['repeaterField'];
+			// Override pageTitle + templateId so sort / filter / search
+			// operate on the owner. Original pageId stays.
+			$r['pageTitle']     = $info['ownerTitle'];
+			$r['templateId']    = $info['ownerTemplate'];
+		}
+		unset($r);
+		return $rows;
+	}
+
+	/**
+	 * Pull a page's title in the default language, regardless of the
+	 * current user's admin language. Used when writing language-
+	 * neutral values into the row cache; hydrateSlice() later
+	 * overrides for display with the editor's own language.
+	 */
+	protected function defaultLangTitle(Page $page, ?Language $defaultLang): string {
+		$title = $page->title;
+		if ($defaultLang && is_object($title) && method_exists($title, 'getLanguageValue')) {
+			$val = (string) $title->getLanguageValue($defaultLang);
+			if ($val !== '') return $val;
+		}
+		return (string) $title;
 	}
 
 	/**
@@ -1578,6 +2216,17 @@ class ProcessImageLibrary extends Process {
 						'filesize'    => (int) ($img['filesize'] ?? 0),
 						'width'       => (int) ($img['width'] ?? 0),
 						'height'      => (int) ($img['height'] ?? 0),
+						// Pagefile timestamps — created = upload,
+						// modified = last metadata change. PW stores
+						// both as MySQL DATETIME strings (e.g.
+						// "2026-05-27 17:00:45"), NOT Unix seconds —
+						// (int) casting would lose everything past
+						// the year. Keep them as strings: lex sort
+						// matches chronological sort for ISO-style
+						// datetime, and the format helper parses on
+						// render.
+						'created'     => (string) ($img['created']  ?? ''),
+						'modified'    => (string) ($img['modified'] ?? ''),
 						'ext'         => pathinfo($basename, PATHINFO_EXTENSION),
 						'custom'      => array_diff_key($img, $standardKeys),
 					];
@@ -1595,6 +2244,107 @@ class ProcessImageLibrary extends Process {
 	 * @param array<int,string> $customCols custom-field column names (whitelist for no_custom_*)
 	 * @return array<string,mixed>
 	 */
+	/**
+	 * Parse a raw querystring (typically the client's location.search
+	 * round-tripped via a hidden filterQs POST field) into the same
+	 * filter array shape readFilterInput emits. Used by the save /
+	 * bulk / rename AJAX endpoints to ask "does this row still match
+	 * the user's currently-applied filters after the change?" so the
+	 * client can fade rows out that fall out of scope.
+	 *
+	 * @param array<int,string> $imageFields
+	 * @param array<int,string> $eligibleTemplates
+	 * @param array<int,string> $customCols
+	 * @return array<string,mixed>
+	 */
+	protected function parseFilterQs(string $qs, array $imageFields, array $eligibleTemplates, array $customCols = []): array {
+		$qs = ltrim($qs, '?');
+		$params = [];
+		if ($qs !== '') parse_str($qs, $params);
+
+		$template = (string) ($params['template'] ?? '');
+		$field    = (string) ($params['field'] ?? '');
+
+		$noCustom = [];
+		foreach ($customCols as $name) {
+			if (!empty($params['no_custom_' . $name])) $noCustom[$name] = true;
+		}
+
+		$tags = [];
+		$rawTags = $params['tags'] ?? '';
+		if (is_array($rawTags)) {
+			foreach ($rawTags as $t) {
+				$t = trim((string) $t);
+				if ($t !== '') $tags[] = $t;
+			}
+		} elseif (is_string($rawTags) && $rawTags !== '') {
+			foreach ($this->splitTags($rawTags) as $t) $tags[] = $t;
+		}
+		$tags = array_values(array_unique($tags));
+
+		return [
+			'q'         => trim((string) ($params['q'] ?? '')),
+			'template'  => in_array($template, $eligibleTemplates, true) ? $template : '',
+			'field'     => in_array($field, $imageFields, true) ? $field : '',
+			'no_desc'   => !empty($params['no_desc']),
+			'no_tags'   => !empty($params['no_tags']),
+			'no_custom' => $noCustom,
+			'tags'      => $tags,
+		];
+	}
+
+	/**
+	 * Match-check after a write: for the just-touched rows, work out
+	 * which of them no longer belong in the current filtered view, and
+	 * return the new total visible count.
+	 *
+	 * Returns {vanished: ["pageId:fieldName:basename", …], newTotal: N}.
+	 * An empty filter set short-circuits — nothing can vanish from an
+	 * unfiltered view, so we skip the loadRows + apply pass.
+	 *
+	 * @param array<int,string> $touchedKeys
+	 * @param array<string,mixed> $filters
+	 * @return array{vanished:array<int,string>,newTotal:int}
+	 */
+	protected function evaluateFilterTouchedRows(array $touchedKeys, array $filters): array {
+		// No filters → nothing can vanish; skip the full reload.
+		// (newTotal stays unknown; client doesn't need it in this case.)
+		$anyFilter = ($filters['q'] ?? '') !== ''
+			|| ($filters['template'] ?? '') !== ''
+			|| ($filters['field'] ?? '') !== ''
+			|| !empty($filters['no_desc'])
+			|| !empty($filters['no_tags'])
+			|| !empty($filters['no_custom'])
+			|| !empty($filters['tags']);
+		if (!$anyFilter) {
+			return ['vanished' => [], 'newTotal' => -1];
+		}
+
+		$rows = $this->loadRows($filters);
+		$rows = $this->applyRowFilters($rows, $filters);
+		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
+
+		$present = [];
+		foreach ($rows as $r) {
+			$k = sprintf('%d:%s:%s',
+				(int) $r['pageId'],
+				(string) $r['fieldName'],
+				(string) $r['basename']
+			);
+			$present[$k] = true;
+		}
+
+		$vanished = [];
+		foreach ($touchedKeys as $k) {
+			if (!isset($present[$k])) $vanished[] = $k;
+		}
+
+		return [
+			'vanished' => $vanished,
+			'newTotal' => count($rows),
+		];
+	}
+
 	protected function readFilterInput(array $imageFields, array $eligibleTemplates, array $customCols = []): array {
 		$input    = $this->wire('input');
 		$template = (string) $input->get('template');
@@ -1652,10 +2402,22 @@ class ProcessImageLibrary extends Process {
 		$whitelist = array_keys(self::SORTABLE_COLUMNS);
 		foreach ($customCols as $name) $whitelist[] = 'custom:' . $name;
 
-		if (!in_array($sort, $whitelist, true)) {
+		if ($sort === '') {
+			// Empty sort = "use the configured default sort". Don't
+			// touch $dir — buildUrl omits sort+dir individually when
+			// each matches its own default, so a URL like ?dir=desc
+			// (default sort, flipped direction) must survive. Old
+			// code blanket-reset both whenever sort was empty, which
+			// killed the toggle-direction round-trip on the default
+			// sort column.
+			$sort = $this->getDefaultSort();
+		} elseif (!in_array($sort, $whitelist, true)) {
+			// Unknown sort key — fall back wholesale so an injected
+			// $_GET can't smuggle arbitrary keys into the row lookup.
 			$sort = $this->getDefaultSort();
 			$dir  = $this->getDefaultSortDir();
 		}
+		if ($dir === '') $dir = $this->getDefaultSortDir();
 		if ($dir !== 'desc') $dir = 'asc';
 
 		return ['sort' => $sort, 'dir' => $dir];
@@ -1817,12 +2579,20 @@ class ProcessImageLibrary extends Process {
 	protected function hydrateSlice(array $slice): array {
 		if (!$slice) return [];
 
-		$pageIds = array_values(array_unique(array_column($slice, 'pageId')));
+		// Load the storage page (for image resolution) AND the owner
+		// page (for display URLs). For non-repeater rows ownerPageId is
+		// unset and we just reuse the storage page. Both lookups share
+		// one batched getById call.
+		$idSet = [];
+		foreach ($slice as $r) {
+			if (!empty($r['pageId']))      $idSet[(int) $r['pageId']]      = true;
+			if (!empty($r['ownerPageId'])) $idSet[(int) $r['ownerPageId']] = true;
+		}
 		// Build an explicit id => Page map. PageArray inherits WireArray::get(),
 		// which treats integer keys as array indexes (0, 1, 2…), not page IDs,
 		// so $pages->get($pageId) would silently return the wrong page.
 		$pagesById = [];
-		foreach ($this->wire('pages')->getById($pageIds) as $p) {
+		foreach ($this->wire('pages')->getById(array_keys($idSet)) as $p) {
 			$pagesById[$p->id] = $p;
 		}
 		$customByField = $this->getCustomByField();
@@ -1837,80 +2607,27 @@ class ProcessImageLibrary extends Process {
 			$page = $pagesById[$row['pageId']] ?? null;
 			if (!$page || !$page->id) continue;
 
-			$row['pageUrl']     = $page->url;
-			$row['pageEditUrl'] = $page->editUrl;
+			// Display URLs point at the owner page when the image lives
+			// in a repeater field; storage stays on $page.
+			$displayPage = $page;
+			if (!empty($row['ownerPageId']) && isset($pagesById[(int) $row['ownerPageId']])) {
+				$displayPage = $pagesById[(int) $row['ownerPageId']];
+			}
+			$row['pageUrl']     = $displayPage->url;
+			$row['pageEditUrl'] = $displayPage->editUrl;
+			// Title rendered in the editor's own admin language —
+			// the cached pageTitle is intentionally default-language
+			// (so sort / filter / search stay consistent across
+			// editors); this override flips display to user-language.
+			$row['pageTitle']   = (string) $displayPage->title;
 
 			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
 			if (!$img) continue;
 
-			// Non-rasterisable / animation-preserving formats: serve
-			// the original instead of running it through ImageSizer.
-			// SVG loses its vector nature on size(); GIF loses its
-			// animation when re-encoded — and browsers render
-			// animated GIFs in <img> tags natively, so the original
-			// played at CSS-constrained size is exactly what the user
-			// wants to see. CSS still keeps the cell compact via
-			// max-width / object-fit.
-			$ext = strtolower((string) $img->ext);
-			$skipResize = $ext === 'svg' || $ext === 'gif';
-
-			// Source-file decision: try to ride PW's lazily-generated
-			// admin variation (260 px on the shorter axis — same call
-			// signature InputfieldImage::getAdminThumb uses) whenever
-			// the configured display target fits inside it. The admin
-			// variation has shorter axis = 260 and longer axis ≥ 260,
-			// so display targets ≤ 260 on every relevant axis are
-			// safely covered. Above the threshold we generate a
-			// dedicated variation so the requested pixels actually
-			// exist on disk.
-			$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
-
-			if ($skipResize) {
-				$thumbImg = $img;
-			} elseif ($thumb['keepRatio']) {
-				// Keep-ratio mode — single "longer-side" cap from
-				// the user's config drives display. ≤ 260 ⇒ admin
-				// variation (the longer axis is always ≥ 260, so
-				// it's never the binding constraint at this point).
-				// > 260 ⇒ produce a matching size($longer, 0) /
-				// size(0, $longer) variation so the longer-axis
-				// display target is met without browser upscaling.
-				$longer = (int) $thumb['longerSide'];
-				if ($longer <= 260) {
-					if ($img->width >= $img->height) {
-						$thumbImg = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
-					} else {
-						$thumbImg = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
-					}
-				} else {
-					if ($img->width >= $img->height) {
-						$thumbImg = ($img->width > $longer) ? $img->size($longer, 0, $opts) : $img;
-					} else {
-						$thumbImg = ($img->height > $longer) ? $img->size(0, $longer, $opts) : $img;
-					}
-				}
-			} else {
-				// Crop mode — compare W × H against what the admin
-				// variation can carry. Fits ⇒ reuse it and let CSS
-				// object-fit: cover handle the visible crop. Doesn't
-				// fit (e.g. 500 × 500 super-thumb) ⇒ produce a
-				// dedicated cropping=true variation.
-				$tW = (int) $thumb['width'];
-				$tH = (int) $thumb['height'];
-				if ($img->width >= $img->height) {
-					$adminVar = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
-				} else {
-					$adminVar = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
-				}
-				if ($tW <= (int) $adminVar->width && $tH <= (int) $adminVar->height) {
-					$thumbImg = $adminVar;
-				} else {
-					$thumbImg = $img->size($tW, $tH, $opts + ['cropping' => true]);
-				}
-			}
-			$row['thumbUrl']    = $thumbImg->url;
-			$row['thumbWidth']  = (int) $thumbImg->width;
-			$row['thumbHeight'] = (int) $thumbImg->height;
+			$thumbInfo = $this->resolveThumbForImage($img, $thumb);
+			$row['thumbUrl']    = $thumbInfo['url'];
+			$row['thumbWidth']  = $thumbInfo['width'];
+			$row['thumbHeight'] = $thumbInfo['height'];
 			// Variations count — Phase 2 column from the concept,
 			// useful for pre-warm diagnosis and cleanup. getVariations()
 			// does a filesystem scan per image, but only for the 50-ish
@@ -1994,6 +2711,26 @@ class ProcessImageLibrary extends Process {
 		return $rounded . ' ' . $units[$i];
 	}
 
+	/**
+	 * Format a stored Pagefile datetime for display. PW writes both
+	 * created and modified as MySQL DATETIME strings (e.g.
+	 * "2026-05-27 17:00:45"); accept either that or a Unix-timestamp
+	 * fallback so the helper stays robust. Uses $config->dateFormat
+	 * when set, otherwise a sensible "Y-m-d H:i" default. Empty /
+	 * zero / unparseable values render as the empty string so the
+	 * cell looks blank for files with no recorded date.
+	 *
+	 * @param int|string|null $val
+	 */
+	protected function formatTimestamp($val): string {
+		if ($val === null || $val === '' || $val === '0000-00-00 00:00:00') return '';
+		$ts = is_numeric($val) ? (int) $val : strtotime((string) $val);
+		if (!$ts || $ts <= 0) return '';
+		$fmt = (string) $this->wire('config')->dateFormat;
+		if ($fmt === '') $fmt = 'Y-m-d H:i';
+		return date($fmt, $ts);
+	}
+
 	protected function loadAssets(): void {
 		$config = $this->wire('config');
 		$session = $this->wire('session');
@@ -2009,11 +2746,18 @@ class ProcessImageLibrary extends Process {
 			'saveUrl'   => $this->wire('page')->url . 'save/',
 			'renderUrl' => $this->wire('page')->url . 'data/',
 			'bulkUrl'   => $this->wire('page')->url . 'bulk/',
-			'renameUrl' => $this->wire('page')->url . 'rename/',
+			'renameUrl'  => $this->wire('page')->url . 'rename/',
+			'replaceUrl' => $this->wire('page')->url . 'replace/',
+			'deleteUrl'  => $this->wire('page')->url . 'delete/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
 			'tplFields' => $this->getTemplateFieldsMap($imageFields, $eligibleTemplates),
+			// Per-image-field capabilities. JS uses this to hide / show
+			// the Tags filter fieldset + the Missing-X checkboxes when
+			// the field filter changes, mirroring the server-side gate
+			// in renderFilterBar so AJAX result swaps stay consistent.
+			'fieldCaps' => $this->buildFieldCapsPayload($imageFields),
 			'defaultPageSize'      => $this->getDefaultPageSize(),
 			'defaultHiddenColumns' => $this->getDefaultHiddenColumns(),
 			// Languages list for the popup's multilang tabs. Each
@@ -2049,7 +2793,7 @@ class ProcessImageLibrary extends Process {
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
 				'rename'           => $this->_('New filename'),
-				'renameHint'       => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (p) page name, (f) field name.'),
+				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
 				'importSaved'      => $this->_('Saved'),
@@ -2058,6 +2802,28 @@ class ProcessImageLibrary extends Process {
 				'importError'      => $this->_('Import failed'),
 				'batching'         => $this->_('Applying to %d selected…'),
 				'bulkResult'       => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
+				// Bookmark labels — the +tab dialog + delete/save toasts.
+				// Shown by the client when a match-aware save removes
+				// the last row from the visible filter view; same
+				// string the server-rendered empty state uses.
+				'emptyResult'      => $this->_('No images match the current filters.'),
+				'bookmarkSave'     => $this->_('Save bookmark'),
+				'bookmarkHint'     => $this->_('Saves the active filter combination under a name.'),
+				'bookmarkSaved'    => $this->_('Bookmark saved'),
+				'bookmarkDeleted'  => $this->_('Bookmark deleted'),
+				'bookmarkDelete'   => $this->_('Delete bookmark'),
+				'bookmarkEmpty'    => $this->_('Apply some filters first.'),
+				// Delete confirm + result labels. The JS substitutes %d
+				// for the count; the %d placeholder stays literal in the
+				// translatable strings.
+				'deleteOne'        => $this->_('Delete this image?'),
+				'deleteMany'       => $this->_('Delete %d images?'),
+				'deleteOneIntro'   => $this->_('The following file will be permanently removed:'),
+				'deleteManyIntro'  => $this->_('The following files will be permanently removed:'),
+				'deleteWarn'       => $this->_('This cannot be undone.'),
+				'deleteOk'         => $this->_('Delete'),
+				'deleted'          => $this->_('Deleted %d'),
+				'deletePartial'    => $this->_('Deleted %d, %d failed'),
 				// Field-dropdown label when a template is active — %s is
 				// the template name. The JS swaps "All image fields" for
 				// this so the user isn't told "all" while non-template
@@ -2109,6 +2875,98 @@ class ProcessImageLibrary extends Process {
 		return '<p class="ml-empty">' . $san->entities(
 			$this->_('You don\'t have edit access to any page with an image field. Ask an admin to grant the relevant page-edit permission.')
 		) . '</p>';
+	}
+
+	/**
+	 * Bookmarks bar: tab strip above the filter bar, listing the
+	 * user's saved filter combinations + a baseline "All" tab + an
+	 * Add button at the leftmost position. WireTabs + uk-tab classes
+	 * piggyback on the admin theme's native tab styling — no module
+	 * CSS for the chrome. Click handling is taken over by the module
+	 * JS so the tab navigates via the existing AJAX filter swap
+	 * pipeline (replaceFromQs).
+	 *
+	 * @param array<int,array{name:string,qs:string}> $bookmarks
+	 */
+	protected function renderBookmarksBar(array $filters, array $bookmarks): string {
+		$san  = $this->wire('sanitizer');
+		$page = $this->wire('page');
+
+		$currentCanon = $this->canonicalizeBookmarkQs(http_build_query($this->bookmarkFilterPayload($filters)));
+		$addTitle = $san->entities($this->_('Save current filter as bookmark'));
+		$addLabel = $san->entities($this->_('Add bookmark'));
+		$allLabel = $san->entities($this->_('Show all'));
+		$delTitle = $san->entities($this->_('Delete bookmark'));
+
+		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
+
+		// Baseline "Show all" tab first — empty querystring, active
+		// iff nothing filter-shaped is currently set.
+		$allActive = $currentCanon === '' ? ' class="uk-active"' : '';
+		$out .= '<li' . $allActive . '>'
+			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
+			. $allLabel . '</a></li>';
+
+		$bookmarkMatched = false;
+		foreach ($bookmarks as $idx => $b) {
+			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
+			$href  = $page->url . $canon;
+			$isActive = ($canon !== '' && $canon === $currentCanon);
+			if ($isActive) $bookmarkMatched = true;
+			$active = $isActive ? ' class="uk-active"' : '';
+			$out .= '<li' . $active . ' data-bookmark-idx="' . (int) $idx . '">'
+				. '<a class="ml-bookmark"'
+				. ' href="' . $san->entities($href) . '"'
+				. ' data-qs="' . $san->entities($canon) . '">'
+				. $san->entities((string) $b['name'])
+				. '</a>'
+				. '<button type="button" class="ml-bookmark-del"'
+				. ' aria-label="' . $delTitle . '"'
+				. ' title="' . $delTitle . '">'
+				. '<i class="fa fa-times" aria-hidden="true"></i>'
+				. '</button>'
+				. '</li>';
+		}
+
+		// Add button rightmost — opens the name-dialog. Hidden unless
+		// the current filter is BOTH non-empty AND not already saved
+		// as a bookmark; JS mirrors the same logic on every URL change
+		// so the toggle stays live.
+		$addHidden = ($currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
+		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
+			. ' title="' . $addTitle . '">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
+			. '</a></li>';
+
+		$out .= '</ul>';
+		return $out;
+	}
+
+	/**
+	 * Reduce a filter array to the params that participate in a
+	 * bookmark — same param shape canonicalizeBookmarkQs filters
+	 * through, so the two stay in lockstep.
+	 *
+	 * @param array<string,mixed> $filters
+	 * @return array<string,string>
+	 */
+	protected function bookmarkFilterPayload(array $filters): array {
+		$out = [];
+		foreach (['q', 'template', 'field'] as $k) {
+			if (!empty($filters[$k])) $out[$k] = (string) $filters[$k];
+		}
+		if (!empty($filters['tags']) && is_array($filters['tags'])) {
+			$out['tags'] = implode(',', $filters['tags']);
+		}
+		foreach (['no_desc', 'no_tags'] as $k) {
+			if (!empty($filters[$k])) $out[$k] = '1';
+		}
+		if (!empty($filters['no_custom']) && is_array($filters['no_custom'])) {
+			foreach ($filters['no_custom'] as $name => $v) {
+				if ($v) $out['no_custom_' . $name] = '1';
+			}
+		}
+		return $out;
 	}
 
 	protected function renderFilterBar(array $filters, array $imageFields, array $eligibleTemplates, array $customCols = [], string $sort = '', string $dir = '', array $tagFilterPool = []): string {
@@ -2175,11 +3033,17 @@ class ProcessImageLibrary extends Process {
 		$q->columnWidth = 33;
 		$outer->add($q);
 
+		// Template dropdown lists only user-facing templates — the
+		// auto-generated repeater_<field> templates are excluded
+		// because rows from repeater fields have their templateId
+		// rewritten to the owner page's template at flatten time.
+		// Picking the owner template here naturally captures those
+		// rows too.
 		$tpl = $modules->get('InputfieldSelect');
 		$tpl->name        = 'template';
 		$tpl->label       = $this->_('Template');
 		$tpl->addOption('', $this->_('All templates'));
-		foreach ($eligibleTemplates as $t) $tpl->addOption($t, $t);
+		foreach ($this->userFacingTemplates($eligibleTemplates) as $t) $tpl->addOption($t, $t);
 		$tpl->value       = $filters['template'];
 		$tpl->columnWidth = 33;
 		$outer->add($tpl);
@@ -2193,13 +3057,22 @@ class ProcessImageLibrary extends Process {
 		$fld->columnWidth = 34;
 		$outer->add($fld);
 
-		// Tags fieldset (full width, always open when present so the
-		// available tag set is visible alongside the rest of the
-		// filter UI).
-		if ($tagFilterPool) {
-			$selectedTags = $filters['tags'] ?? [];
+		// Tags fieldset (full width, always open when present). Rendered
+		// unconditionally so the JS field-capability filter has DOM to
+		// toggle — same pattern as the template→field narrowing: PHP
+		// emits everything, JS hides what doesn't apply to the current
+		// selection and resets invalidated values.
+		$selectedTags = $filters['tags'] ?? [];
+		if ($tagFilterPool || $selectedTags) {
+			$displayPool = $tagFilterPool;
+			foreach ($selectedTags as $t) {
+				if (!in_array($t, $displayPool, true)) $displayPool[] = $t;
+			}
+			sort($displayPool, SORT_NATURAL | SORT_FLAG_CASE);
+
 			/** @var \ProcessWire\InputfieldFieldset $tagsFs */
 			$tagsFs = $modules->get('InputfieldFieldset');
+			$tagsFs->name  = 'mlTagsFs';
 			$tagsFs->label = $selectedTags
 				? sprintf($this->_('Tags (%d)'), count($selectedTags))
 				: $this->_('Tags');
@@ -2211,7 +3084,7 @@ class ProcessImageLibrary extends Process {
 			$cbs->label       = $this->_('Active tags');
 			$cbs->skipLabel   = Inputfield::skipLabelHeader;
 			$cbs->optionColumns = 4;
-			foreach ($tagFilterPool as $t) $cbs->addOption($t, $t);
+			foreach ($displayPool as $t) $cbs->addOption($t, $t);
 			$cbs->value = $selectedTags;
 			$tagsFs->add($cbs);
 
@@ -2219,7 +3092,9 @@ class ProcessImageLibrary extends Process {
 		}
 
 		// Missing-X checkboxes inline, each 25% wide — fixed
-		// description/tags first, then one per custom field.
+		// description / tags first, then one per custom field. All
+		// rendered; JS hides / unchecks the ones that don't apply to
+		// the selected field, same as template→field.
 		$missingDef = [
 			'no_desc' => $this->_('Missing description'),
 			'no_tags' => $this->_('Missing tags'),
@@ -2376,6 +3251,8 @@ class ProcessImageLibrary extends Process {
 			['tags',        $this->_('Tags'),        'tags'],
 			['dimensions',  $this->_('Dimensions'),  'width'],
 			['size',        $this->_('Size'),        'filesize'],
+			['created',     $this->_('Uploaded'),    'created'],
+			['modified',    $this->_('Modified'),    'modified'],
 			['variations',  $this->_('Variations'),  null],
 		];
 		if (!$showTagsCol) {
@@ -2384,17 +3261,34 @@ class ProcessImageLibrary extends Process {
 
 		// Outer scroller so the wide table can overflow horizontally
 		// on narrow viewports without breaking the table layout.
-		$out  = '<div class="ml-table-scroll">';
-		$out .= '<table class="ml-table uk-table uk-table-divider uk-table-small">';
-		$out .= '<thead><tr>';
+		// pw-table-responsive + uk-overflow-auto handle horizontal
+		// scroll on narrow viewports the same way every other PW
+		// data table does. pw-table-sortable is included because
+		// the inner table carries .AdminDataTableSortable; the
+		// wrapper class is what some PW-side JS hooks check.
+		$out  = '<div class="ml-table-scroll pw-table-responsive uk-overflow-auto pw-table-sortable">';
+		// Class set is intentional, every entry carries weight:
+		//   ml-table         — module-side hooks
+		//   AdminDataTable   — non-Uikit themes (Reno, Default) pick
+		//                      up their own admin-table chrome here
+		//   AdminDataTableSortable — paired with tablesorter-* classes
+		//                      below to inherit the theme's sort
+		//                      styling (active-asc / desc colour,
+		//                      FontAwesome arrow glyphs) without
+		//                      re-implementing it module-side
+		//   uk-table*        — active styling under AdminThemeUikit
+		$out .= '<table class="ml-table AdminDataTable AdminDataTableSortable uk-table uk-table-divider uk-table-small">';
+		// tablesorter-headerRow matches AdminThemeUikit's compound
+		// selector for the sort-state visuals.
+		$out .= '<thead><tr class="tablesorter-headerRow">';
 		$out .= '<th class="ml-cell-select">'
-			. '<input type="checkbox" class="ml-select-all" title="'
+			. '<input type="checkbox" class="uk-checkbox ml-select-all" title="'
 			. $san->entities($this->_('Select all on page')) . '"></th>';
 		foreach ($headers as [$colKey, $label, $sortKey]) {
-			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters, false);
+			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters);
 		}
 		foreach ($customCols as $name) {
-			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters, true);
+			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters);
 		}
 		$out .= '</tr></thead><tbody>';
 
@@ -2426,10 +3320,22 @@ class ProcessImageLibrary extends Process {
 				(string) $row['basename']
 			);
 
-			$out .= '<tr>';
+			// Row identity attrs (only when editable) so the JS
+			// drag-and-drop / click-replace handlers can resolve the
+			// target without walking into individual cells.
+			$rowAttrs = '';
+			if (!empty($row['pageEditUrl'])) {
+				$rowAttrs = sprintf(
+					' data-page-id="%d" data-field="%s" data-basename="%s"',
+					(int) $row['pageId'],
+					$san->entities((string) $row['fieldName']),
+					$san->entities((string) $row['basename'])
+				);
+			}
+			$out .= '<tr' . $rowAttrs . '>';
 
 			$out .= '<td class="ml-cell-select">'
-				. '<input type="checkbox" class="ml-select-row" data-key="'
+				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
 				. $san->entities($selKey) . '"></td>';
 
 			// Thumbnail cell becomes clickable when the host page is
@@ -2489,6 +3395,31 @@ class ProcessImageLibrary extends Process {
 					. ' width="' . $dispW . '"'
 					. ' height="' . $dispH . '">';
 			}
+			// Per-row actions — both icons hang in the top-right of the
+			// thumb cell and are visible only on row hover. Replace
+			// triggers the file picker / accepts a row DnD; Delete
+			// opens a confirm dialog. Batch semantics for Delete
+			// follow the existing paintbrush: when N rows are
+			// selected, clicking Delete on any selected row's icon
+			// deletes the whole selection.
+			if (!empty($row['pageEditUrl'])) {
+				$replaceLabel = $san->entities(sprintf(
+					$this->_('Replace %s'), (string) $row['basename']
+				));
+				$deleteLabel = $san->entities(sprintf(
+					$this->_('Delete %s'), (string) $row['basename']
+				));
+				$out .= '<button type="button" class="ml-replace-btn"'
+					. ' title="' . $replaceLabel . '"'
+					. ' aria-label="' . $replaceLabel . '">'
+					. '<i class="fa fa-upload" aria-hidden="true"></i>'
+					. '</button>';
+				$out .= '<button type="button" class="ml-delete-btn"'
+					. ' title="' . $deleteLabel . '"'
+					. ' aria-label="' . $deleteLabel . '">'
+					. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
+					. '</button>';
+			}
 			$out .= '</td>';
 
 			$pageTitle = $this->normalizeDescription($row['pageTitle']);
@@ -2501,7 +3432,14 @@ class ProcessImageLibrary extends Process {
 			}
 			$out .= '</td>';
 
-			$out .= '<td data-col="field"><code>' . $san->entities((string) $row['fieldName']) . '</code></td>';
+			// Field cell — for repeater-hosted rows, prefix the
+			// containing repeater field so editors can tell at a glance
+			// that the image lives inside (e.g.) "gallery.images" rather
+			// than a top-level field "images".
+			$fieldLabel = !empty($row['repeaterField'])
+				? $san->entities((string) $row['repeaterField']) . '.' . $san->entities((string) $row['fieldName'])
+				: $san->entities((string) $row['fieldName']);
+			$out .= '<td data-col="field"><code>' . $fieldLabel . '</code></td>';
 			// Filename cell — inline-editable, but only the stem; the
 			// extension stays locked and rides along with the rename
 			// on the server. Stem + ext are split server-side so the JS
@@ -2557,19 +3495,31 @@ class ProcessImageLibrary extends Process {
 			}
 			$out .= '<td class="ml-cell-nowrap" data-col="dimensions">' . $san->entities($dims) . '</td>';
 			$out .= '<td class="ml-cell-nowrap" data-col="size">' . $san->entities($size) . '</td>';
+			$out .= '<td class="ml-cell-nowrap" data-col="created">'
+				. $san->entities($this->formatTimestamp($row['created']  ?? '')) . '</td>';
+			$out .= '<td class="ml-cell-nowrap" data-col="modified">'
+				. $san->entities($this->formatTimestamp($row['modified'] ?? '')) . '</td>';
 			$out .= '<td class="ml-cell-nowrap ml-cell-variations" data-col="variations">'
 				. (int) ($row['variationsCount'] ?? 0) . '</td>';
 
 			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
 				$colAttr = ' data-col="custom:' . $san->entities($name) . '"';
+				// Type-class lives on every custom cell (NA + editable
+				// alike) so column-level width rules apply uniformly
+				// regardless of whether a given row has that subfield.
+				// Keyed by Inputfield type, not by field name, so the
+				// CSS scales to new custom subfields without per-name
+				// rules.
+				$inputType = $customInputTypes[$name] ?? 'text';
+				$typeClass = 'ml-cell-' . $san->entities($inputType);
 				// When the customCols list is the union across image
 				// fields (no field filter), some rows won't host every
 				// listed subfield — render those as visually disabled
 				// instead of editable so a click can't trigger an editor
 				// for a field the server would reject anyway.
 				if (!in_array($name, $rowCustoms, true)) {
-					$out .= '<td class="ml-cell-na"' . $colAttr . ' title="'
+					$out .= '<td class="ml-cell-na ' . $typeClass . '"' . $colAttr . ' title="'
 						. $san->entities(sprintf(
 							$this->_('%1$s is not configured on %2$s'),
 							$name,
@@ -2579,11 +3529,10 @@ class ProcessImageLibrary extends Process {
 				}
 				$raw = $row['custom'][$name] ?? '';
 				$val = $this->normalizeDescription($raw);
-				$inputType = $customInputTypes[$name] ?? 'text';
 				$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 					$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
 				)));
-				$out .= '<td class="ml-cell-editable"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+				$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
 					. ' data-subfield="' . $san->entities($name) . '"'
 					. ' data-input="' . $san->entities($inputType) . '"'
 					. $this->buildLangAttrs($raw) . '>'
@@ -2598,17 +3547,15 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Render one <th>. If $sortKey is null the header is plain text; otherwise
-	 * it becomes a link that, when clicked, sets sort=$sortKey and toggles dir
-	 * (asc → desc → asc) while preserving the current filters. Custom-column
-	 * headers wrap the label in <code> like before.
+	 * Render one <th>. If $sortKey is null the header is plain text;
+	 * otherwise it becomes a link that, when clicked, sets sort=$sortKey
+	 * and toggles dir (asc → desc → asc) while preserving the current
+	 * filters.
 	 */
-	protected function renderSortableHeader(string $colKey, string $label, ?string $sortKey, string $currentSort, string $currentDir, array $filters, bool $codeLabel): string {
+	protected function renderSortableHeader(string $colKey, string $label, ?string $sortKey, string $currentSort, string $currentDir, array $filters): string {
 		$san = $this->wire('sanitizer');
 		$colAttr = ' data-col="' . $san->entities($colKey) . '"';
-		$labelHtml = $codeLabel
-			? '<code>' . $san->entities($label) . '</code>'
-			: $san->entities($label);
+		$labelHtml = $san->entities($label);
 
 		if ($sortKey === null) {
 			return '<th' . $colAttr . '>' . $labelHtml . '</th>';
@@ -2618,8 +3565,20 @@ class ProcessImageLibrary extends Process {
 		$nextDir  = ($isActive && $currentDir === 'asc') ? 'desc' : 'asc';
 		// Reset to page 1 — page numbers don't map across sort changes.
 		$href     = $this->buildUrl($filters, 1, $sortKey, $nextDir);
-		$arrow    = $isActive ? ($currentDir === 'asc' ? '▲' : '▼') : '';
-		$cls      = 'ml-th-sortable' . ($isActive ? ' ml-th-sort-active' : '');
+
+		// Use the same class names AdminThemeUikit's sort styles
+		// target, so its compound selector
+		// `.uk-table.AdminDataTableSortable tr.tablesorter-headerRow
+		// th.tablesorter-headerAsc` (etc.) matches and we inherit the
+		// active-colour, hover, FontAwesome arrow rules for free. The
+		// .tablesorter-header-inner wrapper inside the <th> is the
+		// hook the theme's ::after glyph attaches to.
+		if ($isActive) {
+			$thCls = $currentDir === 'asc' ? 'tablesorter-headerAsc' : 'tablesorter-headerDesc';
+		} else {
+			$thCls = 'tablesorter-headerUnSorted';
+		}
+		$thCls .= ' ml-th-sortable';
 
 		// A11y: aria-sort on the <th> tells assistive tech which
 		// column is sorted and in which direction; aria-label on the
@@ -2637,15 +3596,17 @@ class ProcessImageLibrary extends Process {
 			$labelText
 		);
 
-		$inner = $labelHtml;
-		if ($arrow !== '') {
-			$inner .= ' <span class="ml-sort-arrow" aria-hidden="true">' . $arrow . '</span>';
-		}
-
-		return '<th class="' . $cls . '"' . $colAttr . $ariaSort . '>'
+		// Native PW tablesorter renders the inner as a <div>; the
+		// theme's ::after arrow glyph + colour rules assume a
+		// block-level element with default inline-flow children.
+		// Keep our server-side <a> as a click wrapper *around* a
+		// <div class="tablesorter-header-inner"> so the styled
+		// element matches the original element type 1:1.
+		return '<th class="' . $thCls . '"' . $colAttr . $ariaSort . '>'
 			. '<a href="' . $san->entities($href) . '" aria-label="'
-			. $san->entities($linkAria) . '">' . $inner . '</a>'
-			. '</th>';
+			. $san->entities($linkAria) . '">'
+			. '<div class="tablesorter-header-inner">' . $labelHtml . '</div>'
+			. '</a></th>';
 	}
 
 	protected function renderPagination(int $total, int $page, int $totalPages, array $filters, string $sort = '', string $dir = '', ?int $pageSize = null): string {
@@ -2691,16 +3652,16 @@ class ProcessImageLibrary extends Process {
 		$out .= '</select></label>';
 
 		// Icon-only opener for the column-visibility dialog (rendered
-		// as a sibling of .ml-results). <button> since there's no
-		// fallback URL — without JS the picker is unavailable. The
-		// visible <i> stays decorative; the button itself carries
-		// the accessible name via aria-label / title.
+		// as a sibling of .ml-results). The <i> stays decorative;
+		// the anchor itself carries the accessible name via
+		// aria-label / title. Without JS the picker is unavailable —
+		// no href, the JS click handler runs the open.
 		$colsLabel = $san->entities($this->_('Columns'));
-		$out .= '<button type="button" class="ml-columns-toggle"'
+		$out .= '<a class="ml-columns-toggle"'
 			. ' title="' . $colsLabel . '"'
 			. ' aria-label="' . $colsLabel . '">'
 			. '<i class="fa fa-columns" aria-hidden="true"></i>'
-			. '</button>';
+			. '</a>';
 		$out .= '</div>';
 
 		$out .= '</div>';

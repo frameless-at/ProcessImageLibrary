@@ -1,4 +1,9 @@
-/* ProcessImageLibrary — admin styles. */
+/* ProcessImageLibrary — admin styles.
+ *
+ * Colors flow through AdminThemeUikit's --pw-* custom properties
+ * so light / dark mode follows the theme automatically. Hard-coded
+ * fallbacks (light-theme values) are kept in each var() so legacy
+ * themes (Reno, Default) still render readable. */
 
 .ml-root {
 	margin: 0 0 1rem;
@@ -55,13 +60,6 @@
 	top: -3rem;
 	right: 0;
 	z-index: 5;
-	color: #888;
-	text-decoration: none;
-	padding: 0.25rem 0.4rem;
-	font-size: 0.9rem;
-}
-.ml-config-link:hover {
-	color: #333;
 }
 
 /* Horizontal-scroll wrapper so the wide table degrades to a swipe
@@ -72,38 +70,47 @@
 	margin-top: 1rem;
 }
 
-/* Table */
+/* Table. The wrapper .ml-table also carries the .AdminDataTable
+   class server-side so the admin theme's table chrome (font sizing,
+   responsive helper, etc.) applies. Module-side rules below tighten
+   the rest. */
 .ml-table {
 	width: 100%;
 	border-collapse: collapse;
+	color: var(--pw-text-color, inherit);
 }
 .ml-table thead th {
 	white-space: nowrap;
-	background: #f5f5f5;
+	color: var(--pw-muted-color, #6c8dae);
+	border-bottom: 1px solid var(--pw-border-color, #ddd);
 }
-.ml-th-sortable a {
+/* Sortable-header colours and arrows come from AdminThemeUikit's
+   own .tablesorter-* rules — we just emit the class names it
+   targets (see renderSortableHeader). Markup mirrors the native
+   PW shape: <th class="tablesorter-headerAsc/Desc/UnSorted"> →
+   <a href> (our click wrapper) → <div class="tablesorter-header-
+   inner"> (the theme-styled element).
+   The anchor is neutralised so AdminThemeUikit's global
+   "a { color: var(--pw-main-color) }" doesn't paint the header in
+   the accent. The div inside picks up colour + arrow from the
+   theme via the tablesorter-header* state classes on the <th>. */
+.ml-th-sortable a,
+.ml-th-sortable a:link,
+.ml-th-sortable a:visited,
+.ml-th-sortable a:hover,
+.ml-th-sortable a:focus,
+.ml-th-sortable a:active {
 	color: inherit;
 	text-decoration: none;
 	display: block;
 }
-.ml-th-sortable:hover {
-	background: #ebebeb;
+.ml-table tbody tr {
+	border-bottom: 1px solid var(--pw-border-color, #eee);
 }
-.ml-th-sort-active {
-	background: #e3edf9 !important;
-}
-.ml-sort-arrow {
-	margin-left: 4px;
-	font-size: 0.85em;
-}
-.ml-table th,
-.ml-table td {
-	padding: 0.5rem 0.75rem;
-	vertical-align: top;
-}
-.ml-table tbody tr:hover {
-	background: #fafafa;
-}
+/* Row-level hover suppressed on purpose — cell-level hover for
+   editable cells (.ml-cell-editable:hover, further down) is the
+   only highlight we want, so the user's eye lands on the click
+   target, not the whole row. */
 /* Thumb cell — dimensions driven by --ml-thumb-longer (keep-ratio
    path) and --ml-thumb-w / --ml-thumb-h (crop path), set on
    .ml-root from the module config. Keep-ratio variant caps BOTH
@@ -119,8 +126,8 @@
 	max-height: var(--ml-thumb-longer, 100px);
 	width: auto;
 	height: auto;
-	border: 1px solid #e5e5e5;
-	background: #fafafa;
+	border: 1px solid var(--pw-border-color, #e5e5e5);
+	background: var(--pw-inputs-background, #fafafa);
 }
 .ml-cell-thumb img.ml-thumb-crop {
 	width: var(--ml-thumb-w, 120px);
@@ -136,7 +143,149 @@
 	cursor: pointer;
 }
 .ml-cell-thumb[data-file-hash] img:hover {
-	outline: 2px solid #5b8cd6;
+	outline: 2px solid var(--pw-main-color, #5b8cd6);
+}
+/* Thumb cell — pinned to the configured max thumb dimension so all
+   rows share the same column width regardless of each image's actual
+   orientation. position:relative makes it the anchor for the Replace
+   button overlay. */
+.ml-cell-thumb {
+	position: relative;
+	width: var(--ml-thumb-cell-width, 100px);
+}
+/* Per-row action icons (Replace + Delete): pinned to opposite top
+   corners of the thumb cell so finger-tap on mobile doesn't risk
+   hitting the wrong action — Delete sits on the LEFT, Replace on
+   the RIGHT, the thumb itself between them. Both fade in on row
+   hover, sized at 32 px for a comfortable touch target without
+   eating the thumbnail. */
+.ml-replace-btn,
+.ml-delete-btn {
+	position: absolute;
+	top: 4px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	padding: 0;
+	border: 1px solid var(--pw-border-color, #ccc);
+	border-radius: 3px;
+	background: var(--pw-inputs-background, #fff);
+	color: var(--pw-text-color, #333);
+	font-size: 1rem;
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.12s ease-out;
+}
+.ml-delete-btn  { left: 4px; }
+.ml-replace-btn { right: 4px; }
+.ml-table tbody tr:hover .ml-replace-btn,
+.ml-table tbody tr:hover .ml-delete-btn,
+.ml-replace-btn:focus-visible,
+.ml-delete-btn:focus-visible {
+	opacity: 1;
+}
+.ml-replace-btn:hover { color: var(--pw-main-color, #5b8cd6); }
+.ml-delete-btn:hover  { color: #c33; }
+/* Fade-out animation for rows being deleted — JS adds the class
+   right before the row is removed from the DOM so the disappear is
+   visible instead of jarring. */
+.ml-row-deleting {
+	transition: opacity 0.2s ease-out;
+	opacity: 0;
+}
+/* ------------------------------------------------------------------
+   SHARED DIALOG CHROME
+   ------------------------------------------------------------------
+   Four "panel" dialogs share the exact same outer styling: native
+   <dialog>, same border, padding, background, shadow and backdrop;
+   same <header> / <footer> rhythm. Per-dialog rules below only set
+   the WIDTH (each dialog has a different content density). The
+   image-modal is intentionally not in here — it's a near-fullscreen
+   iframe shell with its own bar instead of a header / footer pair —
+   but it shares the backdrop colour so the overlay matches. */
+.ml-popup-editor,
+.ml-columns-dialog,
+.ml-bulk-result-dialog,
+.ml-delete-confirm,
+.ml-bookmark-dialog {
+	border: 1px solid var(--pw-border-color, #ccc);
+	border-radius: 4px;
+	padding: 1.25rem;
+	max-height: 90vh;
+	overflow: auto;
+	background: var(--pw-blocks-background, #fff);
+	color: var(--pw-text-color, inherit);
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ml-popup-editor::backdrop,
+.ml-columns-dialog::backdrop,
+.ml-bulk-result-dialog::backdrop,
+.ml-delete-confirm::backdrop,
+.ml-bookmark-dialog::backdrop,
+.ml-image-modal::backdrop {
+	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
+}
+.ml-popup-editor > header,
+.ml-columns-dialog > header,
+.ml-bulk-result-dialog > header,
+.ml-delete-confirm > header,
+.ml-bookmark-dialog > header {
+	font-weight: 600;
+	font-size: 1.05em;
+	margin: 0 0 0.75rem;
+	padding: 0;
+	border: 0;
+}
+.ml-popup-editor > footer,
+.ml-columns-dialog > footer,
+.ml-bulk-result-dialog > footer,
+.ml-delete-confirm > footer,
+.ml-bookmark-dialog > footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	margin-top: 1rem;
+	padding: 0;
+	border: 0;
+}
+/* Per-dialog widths — each dialog's content density gets its own
+   target. min(_, 92vw) keeps things sane on narrow viewports. */
+.ml-popup-editor       { width: min(720px, 92vw); }
+.ml-bulk-result-dialog { width: min(640px, 92vw); }
+.ml-delete-confirm     { width: min(480px, 92vw); }
+.ml-columns-dialog     { width: min(420px, 92vw); }
+.ml-bookmark-dialog    { width: min(420px, 92vw); }
+
+/* Delete-confirm content bits (preview list + warning line) — the
+   structural chrome is inherited from the shared block above. */
+.ml-delete-confirm-list {
+	margin: 0.5rem 0 0;
+	padding: 0 0 0 1.1rem;
+	max-height: 180px;
+	overflow: auto;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 0.85em;
+	color: var(--pw-muted-color, #666);
+}
+.ml-delete-confirm-warn {
+	margin-top: 0.5rem;
+	font-size: 0.85em;
+	color: var(--pw-error-inline-text-color, #c33);
+}
+/* Drop-target highlight: the single row currently under the file
+   drag pointer. Uses the same soft tint as inline-edit hover so the
+   visual language matches the rest of the editor. */
+.ml-row-drop-target > td {
+	background: var(--pw-notes-background, #fffbe6);
+}
+/* While the replace request is in flight, dim the row so it's
+   obviously busy. JS adds + removes the class around the fetch. */
+.ml-row-uploading > td {
+	opacity: 0.55;
+	pointer-events: none;
 }
 .ml-cell-page a {
 	font-weight: 500;
@@ -144,11 +293,20 @@
 .ml-table code {
 	font-size: 0.85em;
 	word-break: break-all;
+	color: var(--pw-code-color, inherit);
 }
 .ml-cell-desc,
-.ml-cell-tags {
+.ml-cell-tags,
+.ml-cell-textarea {
 	min-width: 14rem;
 	max-width: 28rem;
+}
+/* Text-typed custom subfields — short prose. Narrower than textarea
+   so columns don't sprawl, but wide enough that "credit" / "summary"
+   one-liners stay readable instead of wrapping every word. */
+.ml-cell-text {
+	min-width: 8rem;
+	max-width: 18rem;
 }
 .ml-cell-nowrap {
 	white-space: nowrap;
@@ -158,7 +316,7 @@
    host this custom, so the cell can't be edited. Muted + not-allowed
    cursor signal that visually; a title attribute names the reason. */
 .ml-cell-na {
-	color: #c4c4c4;
+	color: var(--pw-muted-color, #c4c4c4);
 	cursor: not-allowed;
 	text-align: center;
 	user-select: none;
@@ -174,24 +332,25 @@
 	touch-action: manipulation;
 }
 .ml-cell-editable:hover {
-	background: #fffbe6;
+	background: var(--pw-notes-background, #fffbe6);
 }
 .ml-cell-editable:empty::before {
 	content: "—";
-	color: #ccc;
+	color: var(--pw-muted-color, #ccc);
 }
 .ml-editing {
-	background: #fffce8;
+	background: var(--pw-notes-background, #fffce8);
 	padding: 4px;
 }
 .ml-cell-input {
 	width: 100%;
 	box-sizing: border-box;
 	font: inherit;
-	border: 1px solid #888;
+	border: 1px solid var(--pw-border-color, #888);
 	border-radius: 2px;
 	padding: 4px 6px;
-	background: #fff;
+	background: var(--pw-inputs-background, #fff);
+	color: var(--pw-text-color, inherit);
 }
 textarea.ml-cell-input {
 	resize: vertical;
@@ -201,11 +360,11 @@ textarea.ml-cell-input {
 	opacity: 0.6;
 }
 .ml-cell-saved {
-	background: #e6f7e1 !important;
+	background: var(--pw-alert-success, #e6f7e1) !important;
 	transition: background 0.3s ease-out;
 }
 .ml-cell-error {
-	background: #fde2e2 !important;
+	background: var(--pw-alert-danger, #fde2e2) !important;
 	transition: background 0.3s ease-out;
 }
 
@@ -225,7 +384,6 @@ textarea.ml-cell-input {
 	cursor: default;
 }
 .ml-cell-select input[type="checkbox"] {
-	margin: 0;
 	cursor: pointer;
 }
 
@@ -234,11 +392,12 @@ textarea.ml-cell-input {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
-	background: #fff;
-	border: 1px solid #888;
+	background: var(--pw-blocks-background, #fff);
+	border: 1px solid var(--pw-border-color, #888);
 	border-radius: 2px;
 	padding: 6px;
 	min-width: 12rem;
+	color: var(--pw-text-color, inherit);
 }
 .ml-tag-editor-list {
 	display: flex;
@@ -268,14 +427,16 @@ textarea.ml-cell-input {
 	display: flex;
 	gap: 12px;
 	margin-top: 6px;
-	font-size: 0.9em;
 }
 .ml-batch-mode label {
 	display: inline-flex;
 	align-items: center;
-	gap: 4px;
+	gap: 6px;
 	cursor: pointer;
 	font-weight: normal;
+}
+.ml-batch-mode input[type="radio"] {
+	margin-top: -2px;
 }
 
 /* Pagination row — flex with two groups: left (summary + prev/next),
@@ -300,28 +461,33 @@ textarea.ml-cell-input {
 	margin-left: auto;
 }
 .ml-pagination-summary {
-	color: #555;
+	color: var(--pw-muted-color, #555);
 }
 .ml-pagination-link {
 	text-decoration: none;
 }
 .ml-columns-toggle {
-	font-size: 1.05rem;
+	font-size: 1.15rem;
 	line-height: 1;
-	color: #555;
+	color: var(--pw-muted-color, #555);
 	background: transparent;
 	border: 0;
-	padding: 0.25rem 0.4rem;
+	/* padding: 0.25rem 0.4rem; */
 	cursor: pointer;
 }
-.ml-columns-toggle:hover {
-	color: #111;
+.ml-columns-toggle:hover,
+.ml-columns-toggle:focus {
+	color: var(--pw-text-color, #111);
+	/* Beat AdminThemeUikit's "a:hover { text-decoration: underline }"
+	   — class+pseudo (0,2,0) outweighs type+pseudo (0,1,1), so no
+	   !important needed. */
+	text-decoration: none;
 }
 .ml-columns-toggle .fa {
 	display: block;
 }
 .ml-page-size {
-	color: #555;
+	color: var(--pw-muted-color, #555);
 	display: inline-flex;
 	align-items: center;
 	gap: 0.4rem;
@@ -335,7 +501,7 @@ textarea.ml-cell-input {
    numeric cells for quick at-a-glance scanning. */
 .ml-cell-variations {
 	text-align: right;
-	color: #555;
+	color: var(--pw-muted-color, #555);
 }
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
@@ -370,31 +536,16 @@ textarea.ml-cell-input {
 
 /* Popup editor for textarea-typed subfields (description, custom
    FieldtypeTextarea customs like "summary"). Native <dialog>, so
-   the browser handles the backdrop + Esc + focus trap for us. */
-.ml-popup-editor {
-	border: 1px solid #ccc;
-	border-radius: 4px;
-	padding: 1.25rem;
-	width: min(720px, 92vw);
-	max-height: 90vh;
-	overflow: auto;
-	background: #fff;
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-}
-.ml-popup-editor::backdrop {
-	background: rgba(0, 0, 0, 0.4);
-}
-.ml-popup-editor header {
-	font-weight: 600;
-	font-size: 1.05em;
-	margin-bottom: 0.75rem;
-}
+   the browser handles the backdrop + Esc + focus trap for us.
+   Outer chrome (border / padding / background / shadow / backdrop /
+   header / footer / width) is set in the shared dialog block. */
+
 /* Secondary help text inside a popup (e.g. rename placeholder
    syntax). Muted so it sits below the title without competing
    with the input itself. */
 .ml-popup-hint {
 	margin: -0.25rem 0 0.75rem;
-	color: #777;
+	color: var(--pw-muted-color, #777);
 	font-size: 0.85em;
 }
 .ml-popup-editor textarea {
@@ -404,14 +555,36 @@ textarea.ml-cell-input {
 	box-sizing: border-box;
 	font: inherit;
 	padding: 0.5rem;
-	border: 1px solid #c0c0c0;
+	border: 1px solid var(--pw-border-color, #c0c0c0);
 	border-radius: 3px;
 	resize: vertical;
+	background: var(--pw-inputs-background, #fff);
+	color: var(--pw-text-color, inherit);
 }
-.ml-popup-editor textarea:focus,
-.ml-popup-editor input[type="text"]:focus {
-	outline: 2px solid #5b8cd6;
-	outline-offset: -1px;
+/* No focus indicator anywhere on module-owned UI — kills both
+   outline AND the box-shadow focus rings UIkit / PW apply to inputs
+   and buttons. !important is needed because UIkit's own focus rules
+   carry equal specificity but later cascade position; rather than
+   chase load order we just win unconditionally. Covers .ml-root
+   (the admin page region) plus every <dialog> the JS spawns into
+   <body>, and the elements themselves (not just descendants).
+   :focus-within is intentionally NOT included — it matches every
+   ancestor of the focused element, and PW uses box-shadow for the
+   structural outline on InputfieldHeader / wrapper rows. Killing it
+   on ancestors would erase those structural shadows whenever any
+   child got focused. */
+.ml-root:focus, .ml-root:focus-visible,
+.ml-root *:focus, .ml-root *:focus-visible,
+.ml-popup-editor:focus, .ml-popup-editor:focus-visible,
+.ml-popup-editor *:focus, .ml-popup-editor *:focus-visible,
+.ml-image-modal:focus, .ml-image-modal:focus-visible,
+.ml-image-modal *:focus, .ml-image-modal *:focus-visible,
+.ml-bulk-result-dialog:focus, .ml-bulk-result-dialog:focus-visible,
+.ml-bulk-result-dialog *:focus, .ml-bulk-result-dialog *:focus-visible,
+.ml-columns-dialog:focus, .ml-columns-dialog:focus-visible,
+.ml-columns-dialog *:focus, .ml-columns-dialog *:focus-visible {
+	outline: none !important;
+	box-shadow: none !important;
 }
 .ml-popup-editor input[type="text"] {
 	display: block;
@@ -419,8 +592,10 @@ textarea.ml-cell-input {
 	box-sizing: border-box;
 	font: inherit;
 	padding: 0.5rem;
-	border: 1px solid #c0c0c0;
+	border: 1px solid var(--pw-border-color, #c0c0c0);
 	border-radius: 3px;
+	background: var(--pw-inputs-background, #fff);
+	color: var(--pw-text-color, inherit);
 }
 
 /* Rename popup: stem input + locked extension chip side by side.
@@ -443,9 +618,9 @@ textarea.ml-cell-input {
 	padding: 0 0.5rem;
 	font: inherit;
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-	color: #777;
-	background: #f5f5f5;
-	border: 1px solid #c0c0c0;
+	color: var(--pw-muted-color, #777);
+	background: var(--pw-main-background, #f5f5f5);
+	border: 1px solid var(--pw-border-color, #c0c0c0);
 	border-top-right-radius: 3px;
 	border-bottom-right-radius: 3px;
 	user-select: none;
@@ -458,7 +633,7 @@ textarea.ml-cell-input {
 	display: inline;
 }
 .ml-cell-filename .ml-fn-ext {
-	color: #999;
+	color: var(--pw-muted-color, #999);
 }
 /* Multilang tabs inside the popup — minimal styling that matches
    the rest of the popup (tab bar above a single visible pane). */
@@ -469,26 +644,26 @@ textarea.ml-cell-input {
 .ml-langtabs-bar {
 	display: flex;
 	gap: 0.25rem;
-	border-bottom: 1px solid #d0d0d0;
+	border-bottom: 1px solid var(--pw-border-color, #d0d0d0);
 	margin-bottom: 0.5rem;
 }
 .ml-langtabs-tab {
-	background: #f5f5f5;
-	border: 1px solid #d0d0d0;
+	background: var(--pw-main-background, #f5f5f5);
+	border: 1px solid var(--pw-border-color, #d0d0d0);
 	border-bottom: 0;
 	border-radius: 3px 3px 0 0;
 	padding: 0.35rem 0.75rem;
 	font: inherit;
 	cursor: pointer;
-	color: #555;
+	color: var(--pw-muted-color, #555);
 }
 .ml-langtabs-tab:hover {
-	background: #e5e5e5;
+	background: color-mix(in srgb, var(--pw-main-background, #e5e5e5) 60%, var(--pw-text-color, #000) 8%);
 }
 .ml-langtabs-tab.ml-langtabs-tab-active {
-	background: #fff;
-	border-color: #c0c0c0;
-	color: #111;
+	background: var(--pw-blocks-background, #fff);
+	border-color: var(--pw-border-color, #c0c0c0);
+	color: var(--pw-text-color, #111);
 	font-weight: 600;
 	margin-bottom: -1px;
 }
@@ -498,13 +673,11 @@ textarea.ml-cell-input {
 	box-sizing: border-box;
 	font: inherit;
 	padding: 0.5rem;
-	border: 1px solid #c0c0c0;
+	border: 1px solid var(--pw-border-color, #c0c0c0);
 	border-radius: 3px;
 	resize: vertical;
-}
-.ml-langtabs-pane:focus {
-	outline: 2px solid #5b8cd6;
-	outline-offset: -1px;
+	background: var(--pw-inputs-background, #fff);
+	color: var(--pw-text-color, inherit);
 }
 textarea.ml-langtabs-pane {
 	min-height: 12em;
@@ -520,7 +693,7 @@ textarea.ml-langtabs-pane {
 	max-height: 50vh;
 	overflow-y: auto;
 	padding: 0.25rem;
-	border: 1px solid #e5e5e5;
+	border: 1px solid var(--pw-border-color, #e5e5e5);
 	border-radius: 3px;
 }
 .ml-popup-tag-list label {
@@ -532,7 +705,7 @@ textarea.ml-langtabs-pane {
 	border-radius: 2px;
 }
 .ml-popup-tag-list label:hover {
-	background: #f5f5f5;
+	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
 }
 
 /* Column visibility — picker lives inside .ml-columns-dialog,
@@ -542,72 +715,27 @@ textarea.ml-langtabs-pane {
 .ml-col-hidden {
 	display: none !important;
 }
-.ml-columns-dialog {
-	border: 1px solid #ccc;
-	border-radius: 4px;
-	padding: 1.25rem;
-	width: min(420px, 92vw);
-	max-height: 85vh;
-	overflow: auto;
-	background: #fff;
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-}
-.ml-columns-dialog::backdrop {
-	background: rgba(0, 0, 0, 0.4);
-}
-.ml-columns-dialog header {
-	font-weight: 600;
-	font-size: 1.05em;
-	margin-bottom: 0.5rem;
-}
+/* Columns dialog — outer chrome inherited from the shared dialog
+   block; only the hint paragraph is unique here. */
 .ml-columns-hint {
 	margin: 0 0 0.75rem;
-	color: #777;
+	color: var(--pw-muted-color, #777);
 	font-size: 0.9em;
-}
-.ml-columns-dialog footer {
-	display: flex;
-	justify-content: flex-end;
-	margin-top: 1rem;
-}
-.ml-columns-close {
-	font: inherit;
-	padding: 0.3rem 0.9rem;
-	cursor: pointer;
 }
 
 /* Bulk-result modal — replaces the old alert() for the
-   selection-as-paintbrush save report. Same chrome as the columns
-   dialog (border, padding, backdrop), but a touch wider to keep
-   long failure messages readable, and the inner list scrolls
-   when the report runs long. */
-.ml-bulk-result-dialog {
-	border: 1px solid #ccc;
-	border-radius: 4px;
-	padding: 1.25rem;
-	width: min(640px, 92vw);
-	max-height: 85vh;
-	overflow: auto;
-	background: #fff;
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-}
-.ml-bulk-result-dialog::backdrop {
-	background: rgba(0, 0, 0, 0.4);
-}
-.ml-bulk-result-header {
-	font-weight: 600;
-	font-size: 1.05em;
-	margin-bottom: 0.75rem;
-}
+   selection-as-paintbrush save report. Outer chrome inherited from
+   the shared dialog block; the inner list (which scrolls when the
+   failure report runs long) is unique. */
 .ml-bulk-result-list {
 	list-style: none;
 	padding: 0;
 	margin: 0;
 	max-height: 50vh;
 	overflow-y: auto;
-	border: 1px solid #e5e5e5;
+	border: 1px solid var(--pw-border-color, #e5e5e5);
 	border-radius: 3px;
-	background: #fafafa;
+	background: var(--pw-inputs-background, #fafafa);
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	font-size: 0.85em;
 }
@@ -616,22 +744,12 @@ textarea.ml-langtabs-pane {
 }
 .ml-bulk-result-list li {
 	padding: 0.35rem 0.6rem;
-	border-bottom: 1px solid #eee;
+	border-bottom: 1px solid var(--pw-border-color, #eee);
 	word-break: break-word;
-	color: #c0392b;
+	color: var(--pw-error-inline-text-color, #c0392b);
 }
 .ml-bulk-result-list li:last-child {
 	border-bottom: 0;
-}
-.ml-bulk-result-dialog footer {
-	display: flex;
-	justify-content: flex-end;
-	margin-top: 1rem;
-}
-.ml-bulk-result-close {
-	font: inherit;
-	padding: 0.3rem 0.9rem;
-	cursor: pointer;
 }
 /* Single-column stack so the dialog's top-to-bottom reading order
    matches the table's left-to-right column order. Each <li> is a
@@ -669,13 +787,13 @@ textarea.ml-langtabs-pane {
 	min-width: 0;
 }
 .ml-columns-list label:hover {
-	background: #f5f5f5;
+	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
 }
 .ml-col-move {
 	flex: 0 0 auto;
 	background: transparent;
 	border: 0;
-	color: #888;
+	color: var(--pw-muted-color, #888);
 	cursor: pointer;
 	padding: 0.2rem 0.35rem;
 	line-height: 1;
@@ -683,12 +801,8 @@ textarea.ml-langtabs-pane {
 	border-radius: 2px;
 }
 .ml-col-move:hover {
-	background: #f0f0f0;
-	color: #333;
-}
-.ml-col-move:focus-visible {
-	outline: 2px solid #5b8cd6;
-	outline-offset: -1px;
+	background: color-mix(in srgb, var(--pw-main-background, #f0f0f0) 60%, var(--pw-text-color, #000) 8%);
+	color: var(--pw-text-color, #333);
 }
 
 /* Visually-hidden live region — kept in the DOM and announced by
@@ -708,11 +822,6 @@ textarea.ml-langtabs-pane {
 
 /* Editable cells advertise themselves as buttons for keyboard
    users — show a focus ring so the active cell is obvious. */
-.ml-cell-editable:focus-visible,
-.ml-cell-thumb[role="button"]:focus-visible {
-	outline: 2px solid #5b8cd6;
-	outline-offset: -2px;
-}
 
 /* Image-editor modal — wraps PW's ProcessPageEdit in an iframe so
    the user gets the native crop / focus / variations UI plus all
@@ -724,15 +833,12 @@ textarea.ml-langtabs-pane {
 	max-width: none;
 	max-height: none;
 	padding: 0;
-	border: 1px solid #ccc;
+	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 4px;
 	overflow: hidden;
 	display: flex;
 	flex-direction: column;
-	background: #fff;
-}
-.ml-image-modal::backdrop {
-	background: rgba(0, 0, 0, 0.5);
+	background: var(--pw-blocks-background, #fff);
 }
 .ml-image-modal-bar {
 	flex: 0 0 auto;
@@ -740,8 +846,8 @@ textarea.ml-langtabs-pane {
 	align-items: center;
 	justify-content: space-between;
 	padding: 0.5rem 1rem;
-	border-bottom: 1px solid #e5e5e5;
-	background: #f5f5f5;
+	border-bottom: 1px solid var(--pw-border-color, #e5e5e5);
+	background: var(--pw-main-background, #f5f5f5);
 	gap: 1rem;
 }
 .ml-image-modal-title {
@@ -754,13 +860,7 @@ textarea.ml-langtabs-pane {
 	flex: 1 1 auto;
 	width: 100%;
 	border: 0;
-	background: #fff;
-}
-.ml-popup-editor footer {
-	display: flex;
-	justify-content: flex-end;
-	gap: 0.5rem;
-	margin-top: 1rem;
+	background: var(--pw-blocks-background, #fff);
 }
 .ml-popup-editor .ml-batch-mode {
 	margin: 0.75rem 0 0;
@@ -773,44 +873,150 @@ textarea.ml-langtabs-pane {
 	margin-top: 1.5rem;
 }
 .ml-ei-help {
-	color: #555;
+	color: var(--pw-muted-color, #555);
 	margin: 0 0 0.75rem;
 }
-.ml-import-form {
+/* Two-column layout: Export on the left, Import on the right. Each
+   column is a real <fieldset> with a <legend>; equal flex sizing
+   keeps them side by side at the same height. Wraps to a single
+   stack on narrow viewports. align-items:stretch is the flex default
+   so the two fieldsets fill the same vertical space, which combined
+   with margin-top:auto on .ml-ei-actions pushes the buttons to the
+   bottom of each column — so the action rows always line up
+   horizontally regardless of how much the inputs above consume. */
+.ml-ei-cols {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+	margin: 0.5rem 0 0;
+}
+.ml-ei-fieldset {
+	position: relative;
+	flex: 1 1 280px;
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	margin: 1rem 0 0;
+	padding: 1.6rem 1.3rem;
+	border: 1px solid var(--pw-border-color, #ddd);
+	background: var(--pw-blocks-background, #fff);
+}
+/* Legend sits on the top border, breaking it only where the text
+   sits. Absolute positioning + translateY(-50%) puts it centred on
+   the border line; the background matches the surrounding so the
+   border is hidden behind the text width and only there. UIkit
+   normalises legend to display:table by default which suppresses
+   the native overlay behaviour, hence the manual positioning. */
+.ml-ei-fieldset > legend {
+	position: absolute;
+	top: 0;
+	left: 0.75rem;
+	transform: translateY(-50%);
+	margin: 0;
+	padding: 0 0.6rem;
+	background: var(--pw-blocks-background, #fff);
+	font-weight: 600;
+	font-size: 0.9em;
+	color: var(--pw-text-color, #333);
+}
+/* Action button row pinned to the bottom of its fieldset so all
+   columns' buttons sit at the same vertical position. */
+.ml-ei-actions {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 0.5rem;
-	align-items: center;
-	margin: 0.5rem 0 0;
+	margin-top: auto;
 }
+/* Inputs (variant select on the left, file picker on the right) read
+   as muted-labelled fields so the columns balance visually. */
+.ml-export-variant-wrap,
 .ml-ei-file {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.4rem;
-	color: #555;
+	margin: 0 0 0.6rem;
+	color: var(--pw-muted-color, #555);
+}
+.ml-export-variant {
+	min-width: 18ch;
+}
+/* Import form fills the right fieldset so its inner action row can
+   still margin-top:auto to the bottom (the form is the level the
+   actions live at, not the fieldset). */
+.ml-import-form {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	margin: 0;
 }
 .ml-import-status {
 	margin-top: 0.75rem;
 	white-space: pre-wrap;
-	color: #444;
+	color: var(--pw-text-color, #444);
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	font-size: 0.85em;
+}
+
+/* Bookmarks bar — chrome inherited from .WireTabs + .uk-tab classes
+   set by the admin theme. */
+.ml-bookmarks-tabs {
+	margin-bottom: 0;
+}
+/* Uniform 30 px gap between every tab so the bookmark trash button
+   has room to sit in the gap rather than overlapping a neighbour. */
+.ml-bookmarks-tabs > li > a {
+	margin-right: 30px;
+}
+/* Per-tab delete button — round 32 × 32 chip with an X icon, sits in
+   the right gap of each user bookmark tab. Hover-only reveal; same
+   red-on-hover the thumbnail trash uses. */
+.ml-bookmarks-tabs > li[data-bookmark-idx] {
+	position: relative;
+}
+.ml-bookmark-del {
+	position: absolute;
+	top: 10%;
+	right: 0.25rem;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: 1px solid var(--pw-border-color, #ccc);
+	border-radius: 50%;
+	background: var(--pw-inputs-background, #fff);
+	color: var(--pw-text-color, #333);
+	font-size: 0.8rem;
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0;
+	transition: opacity 0.12s ease-out;
+}
+.ml-bookmarks-tabs > li:hover .ml-bookmark-del,
+.ml-bookmark-del:focus-visible {
+	opacity: 1;
+}
+.ml-bookmark-del:hover {
+	color: #c33;
 }
 
 /* Empty / debug */
 .ml-empty {
 	padding: 2rem;
 	text-align: center;
-	color: #888;
+	color: var(--pw-muted-color, #888);
 }
 .ml-debug dt {
 	font-weight: 600;
 	margin-top: 0.5rem;
 }
 .ml-debug pre {
-	background: #f5f5f5;
+	background: var(--pw-inputs-background, #f5f5f5);
+	color: var(--pw-text-color, inherit);
 	padding: 0.75rem;
-	border: 1px solid #e5e5e5;
+	border: 1px solid var(--pw-border-color, #e5e5e5);
 	border-radius: 3px;
 	overflow-x: auto;
 	max-height: 24rem;

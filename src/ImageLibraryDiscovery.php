@@ -95,6 +95,45 @@ trait ImageLibraryDiscovery {
 	}
 
 	/**
+	 * Subset of eligibleTemplates that excludes internal repeater /
+	 * RepeaterMatrix templates. Used to populate the template-filter
+	 * dropdown so editors see their content templates (blog_post,
+	 * project, …) and not the auto-generated repeater_<field>
+	 * templates that store repeater items. The full eligibleTemplates
+	 * list still drives the findRaw selector + cache key — we just
+	 * narrow what we OFFER as a filter.
+	 *
+	 * @param array<int,string> $eligibleTemplates
+	 * @return array<int,string>
+	 */
+	protected function userFacingTemplates(array $eligibleTemplates): array {
+		$out = [];
+		foreach ($eligibleTemplates as $name) {
+			if (strncmp($name, 'repeater_', 9) === 0) continue;
+			$out[] = $name;
+		}
+		return $out;
+	}
+
+	/**
+	 * Template IDs whose pages store repeater / RepeaterMatrix items.
+	 * Used at flatten time to detect rows that need owner-page
+	 * resolution. Built once per request — repeater template counts
+	 * are tiny so the iteration cost is negligible.
+	 *
+	 * @return array<int,int> templateId => templateId (set-shape)
+	 */
+	protected function repeaterTemplateIds(): array {
+		$ids = [];
+		foreach ($this->wire('templates') as $tpl) {
+			if (strncmp((string) $tpl->name, 'repeater_', 9) === 0) {
+				$ids[(int) $tpl->id] = (int) $tpl->id;
+			}
+		}
+		return $ids;
+	}
+
+	/**
 	 * For each eligible template, which managed image fields it actually
 	 * contains. The filter-bar JS uses this to narrow the field dropdown
 	 * live when the user picks a template — without a server round-trip.
@@ -107,15 +146,46 @@ trait ImageLibraryDiscovery {
 		$fieldSet = array_flip($imageFields);
 		$map = [];
 		foreach ($eligibleTemplates as $tname) {
+			// Skip the auto-generated repeater templates — their image
+			// fields surface under the OWNER template's entry below
+			// thanks to collectImageFieldsRecursive, which recurses
+			// through any FieldtypeRepeater / RepeaterMatrix fields it
+			// finds in a template's fieldgroup.
+			if (strncmp((string) $tname, 'repeater_', 9) === 0) continue;
 			$tpl = $this->wire('templates')->get($tname);
 			if (!$tpl) continue;
 			$fields = [];
-			foreach ($tpl->fieldgroup as $f) {
-				if (isset($fieldSet[$f->name])) $fields[] = $f->name;
-			}
-			$map[$tname] = $fields;
+			$this->collectImageFieldsRecursive($tpl, $fieldSet, $fields, []);
+			$map[$tname] = array_values(array_unique($fields));
 		}
 		return $map;
+	}
+
+	/**
+	 * Walk a template's fieldgroup collecting image-field names that
+	 * the editor can reach from that template — directly OR through
+	 * repeater / RepeaterMatrix fields nested inside it. The $seen
+	 * array breaks circular reference loops in case of perverse
+	 * repeater-inside-its-own-repeater schema.
+	 *
+	 * @param array<string,int> $fieldSet      image-field names as a set
+	 * @param array<int,string> $out           collected names, by reference
+	 * @param array<string,bool> $seen         template names already walked
+	 */
+	protected function collectImageFieldsRecursive(\ProcessWire\Template $tpl, array $fieldSet, array &$out, array $seen): void {
+		if (isset($seen[$tpl->name])) return;
+		$seen[$tpl->name] = true;
+		foreach ($tpl->fieldgroup as $f) {
+			if (isset($fieldSet[$f->name])) {
+				$out[] = $f->name;
+			}
+			if ($f->type instanceof \ProcessWire\FieldtypeRepeater) {
+				$innerTpl = $this->wire('templates')->get('repeater_' . $f->name);
+				if ($innerTpl) {
+					$this->collectImageFieldsRecursive($innerTpl, $fieldSet, $out, $seen);
+				}
+			}
+		}
 	}
 
 	/**
@@ -191,6 +261,29 @@ trait ImageLibraryDiscovery {
 			if (!empty($list)) return true;
 		}
 		return false;
+	}
+
+	/**
+	 * Per-image-field capability payload for the JS filter-bar narrowing:
+	 * `{ field: { useTags: bool, customs: [name, …] } }`. Consumed by
+	 * applyFieldCapabilityFilter() in the JS to hide / show the Tags
+	 * fieldset + Missing-X checkboxes as the user changes the field
+	 * filter, mirroring the server-side gate in renderFilterBar.
+	 *
+	 * @param array<int,string> $imageFields
+	 * @return array<string,array{useTags:bool,customs:array<int,string>}>
+	 */
+	protected function buildFieldCapsPayload(array $imageFields): array {
+		$tagsCfg = $this->getTagsConfig();
+		$cByF    = $this->getCustomByField();
+		$out = [];
+		foreach ($imageFields as $f) {
+			$out[$f] = [
+				'useTags' => ($tagsCfg[$f]['mode'] ?? 0) > 0,
+				'customs' => array_values($cByF[$f] ?? []),
+			];
+		}
+		return $out;
 	}
 
 	/**

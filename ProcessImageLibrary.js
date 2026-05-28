@@ -58,6 +58,9 @@
 		function postSave(payload) {
 			var fd = new FormData();
 			Object.keys(payload).forEach(function (k) { fd.append(k, payload[k]); });
+			// Send the current filter URL state so the server can
+			// tell us whether the saved row still belongs in this view.
+			fd.append('filterQs', location.search || '');
 			if (config.csrf && config.csrf.name) {
 				fd.append(config.csrf.name, config.csrf.value);
 			}
@@ -75,6 +78,56 @@
 			td.classList.add(cls);
 			setTimeout(function () { td.classList.remove(cls); }, 1200);
 			announce((ok ? (labels.saved || 'Saved') : (labels.error || 'Save failed')));
+		}
+
+		// Visible "Page X of Y — Z images" string — patch the count
+		// after a row falls out of the filtered view so the summary
+		// reflects DOM state without a full re-render.
+		function updatePaginationTotal(newTotal) {
+			if (typeof newTotal !== 'number' || newTotal < 0) return;
+			document.querySelectorAll('.ml-pagination-summary').forEach(function (el) {
+				el.textContent = el.textContent.replace(/\b\d+\s+image/, newTotal + ' image');
+			});
+		}
+
+		// Sequence after a successful save: flash green for 1200 ms so
+		// the user SEES the value applied, brief 200 ms breath so the
+		// post-flash state registers, then fade the row out over 250 ms,
+		// then drop from DOM + bump the pagination total. Used by the
+		// inline-edit success branch when the server says the row no
+		// longer matches the active filter set.
+		function fadeRowIfMismatched(td, data) {
+			if (!td || !data || data.stillMatches !== false) return;
+			setTimeout(function () {
+				var tr = td.closest('tr');
+				if (!tr || !tr.isConnected) return;
+				tr.classList.add('ml-row-deleting');
+				setTimeout(function () {
+					var cb = tr.querySelector('.ml-select-row');
+					if (cb && cb.dataset && cb.dataset.key) {
+						selection.delete(cb.dataset.key);
+					}
+					var tbody = tr.parentNode;
+					tr.remove();
+					updatePaginationTotal(data.newTotal);
+					syncSelectAllHeader();
+					// Last row gone? Replace just the table wrapper
+					// with the empty-state paragraph, matching what
+					// the server emits for a zero-result filter URL.
+					// The pagination above/below stays — it's still
+					// shown on the no-results server render too.
+					if (tbody && tbody.children.length === 0) {
+						var tableWrap = root.querySelector('.ml-results .ml-table-scroll');
+						if (tableWrap) {
+							var msg = labels.emptyResult || 'No images match the current filters.';
+							var p = document.createElement('p');
+							p.className = 'ml-empty';
+							p.textContent = msg;
+							tableWrap.replaceWith(p);
+						}
+					}
+				}, 250);
+			}, 1400);
 		}
 
 		// Push a short message into the visually-hidden live region so
@@ -194,7 +247,7 @@
 				var pane;
 				if (isTextarea) {
 					pane = document.createElement('textarea');
-					pane.rows = 10;
+					pane.rows = 6;
 				} else {
 					pane = document.createElement('input');
 					pane.type = 'text';
@@ -258,7 +311,7 @@
 		function buildPopupTextarea(original) {
 			var ta = document.createElement('textarea');
 			ta.value = original;
-			ta.rows = 12;
+			ta.rows = 6;
 			return {
 				element: ta,
 				getValue: function () { return ta.value; },
@@ -322,6 +375,7 @@
 				var label = document.createElement('label');
 				var cb = document.createElement('input');
 				cb.type = 'checkbox';
+				cb.className = 'uk-checkbox';
 				cb.value = tag;
 				cb.checked = !!currentSet[tag];
 				label.appendChild(cb);
@@ -362,15 +416,22 @@
 			header.textContent = columnLabelFor(td);
 			dialog.appendChild(header);
 
-			// Filename rename: surface the placeholder syntax so users
-			// don't have to know it's there. Shown in single-row context
-			// too because the same tokens work for "(slug)-cover" etc.;
-			// the counter just stays 1.
-			if (td.dataset.input === 'filename') {
+			// Placeholder hint — shown for every prose-shaped editor:
+			// filename rename + description + text / textarea customs.
+			// NOT for tags (any mode): tags are token sets where
+			// "(d)" → "2026-05-27" would land as a literal tag, which
+			// is editorial noise rather than useful metadata.
+			var hasPlaceholders =
+				td.dataset.subfield !== 'tags' && (
+					td.dataset.input === 'filename' ||
+					td.dataset.input === 'textarea' ||
+					td.dataset.input === 'text'
+				);
+			if (hasPlaceholders) {
 				var hint = document.createElement('p');
 				hint.className = 'ml-popup-hint';
-				hint.textContent = labels.renameHint
-					|| 'Placeholders: (n) counter, (n2)…(n5) padded, (p) page name, (f) field name.';
+				hint.textContent = labels.placeholderHint
+					|| 'Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.';
 				dialog.appendChild(hint);
 			}
 
@@ -394,6 +455,7 @@
 					var lbl = document.createElement('label');
 					var rb = document.createElement('input');
 					rb.type = 'radio';
+					rb.className = 'uk-radio';
 					rb.name = radioName;
 					rb.value = mode;
 					if (mode === 'add') rb.checked = true;
@@ -410,11 +472,11 @@
 			var cancelBtn = document.createElement('button');
 			cancelBtn.type = 'button';
 			// Match the rest of the admin chrome — PW admin is UIkit.
-			cancelBtn.className = 'ml-popup-cancel uk-button uk-button-default uk-button-small';
+			cancelBtn.className = 'ml-popup-cancel uk-button uk-button-secondary';
 			cancelBtn.textContent = labels.cancel || 'Cancel';
 			var saveBtn = document.createElement('button');
 			saveBtn.type = 'button';
-			saveBtn.className = 'ml-popup-save uk-button uk-button-primary uk-button-small';
+			saveBtn.className = 'ml-popup-save uk-button uk-button-primary';
 			saveBtn.textContent = labels.save || 'Save';
 			footer.appendChild(cancelBtn);
 			footer.appendChild(saveBtn);
@@ -613,6 +675,7 @@
 						}
 						td.title = '';
 						flashCell(td, true);
+						fadeRowIfMismatched(td, result.data);
 					} else {
 						td.textContent = original;
 						var reason = (result && result.data && result.data.error)
@@ -704,7 +767,7 @@
 			title.textContent = titleTpl.replace('%s', basename);
 			var closeBtn = document.createElement('button');
 			closeBtn.type = 'button';
-			closeBtn.className = 'ml-image-modal-close uk-button uk-button-default uk-button-small';
+			closeBtn.className = 'ml-image-modal-close uk-button uk-button-secondary';
 			closeBtn.textContent = labels.close || 'Close';
 			bar.appendChild(title);
 			bar.appendChild(closeBtn);
@@ -748,6 +811,21 @@
 			});
 			dialog.addEventListener('close', function () {
 				dialog.remove();
+				// Nested modals in the PW edit iframe (Variations →
+				// per-variation detail, etc.) sometimes leak
+				// overflow:hidden + a scrollbar-compensation padding
+				// onto the TOP-level <body> via parent.document
+				// targeting. Their close handlers clear the inner
+				// iframe's body but not ours, so the library page
+				// stays locked. Wipe both side effects here — safe
+				// because nothing on our admin page legitimately
+				// needs the body locked once our modal is gone.
+				if (document.body.style.overflow === 'hidden') {
+					document.body.style.overflow = '';
+				}
+				if (document.body.style.paddingRight) {
+					document.body.style.paddingRight = '';
+				}
 				// Always refresh — the user might have saved inside the
 				// iframe before closing. A no-op refresh is cheap.
 				replaceFromQs(location.search, false);
@@ -755,6 +833,390 @@
 
 			dialog.showModal();
 		}
+
+		// -- Replace image (click icon + drag-and-drop) ----------------
+		// Two entry paths share the same /replace/ endpoint:
+		//   1) The per-row Replace icon opens a hidden file picker.
+		//   2) Dragging a file from the OS onto a row drops it onto
+		//      that row's (pageId, field, basename) target.
+		// Constraints: single file per drop, extension must match the
+		// existing image's (server enforces too; client guards for a
+		// nicer error). Editable rows only — non-editable rows have
+		// no data-page-id, so the handlers never resolve a target.
+
+		function isEditableRow(tr) {
+			return tr && tr.matches && tr.matches('.ml-table tbody tr[data-page-id]');
+		}
+
+		function rowExt(tr) {
+			var bn = tr.getAttribute('data-basename') || '';
+			var dot = bn.lastIndexOf('.');
+			return dot === -1 ? '' : bn.slice(dot + 1).toLowerCase();
+		}
+
+		function fileExt(f) {
+			var name = (f && f.name) || '';
+			var dot = name.lastIndexOf('.');
+			return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+		}
+
+		function replaceImage(tr, file) {
+			if (!config.replaceUrl || !tr || !file) return;
+			var pageId = tr.getAttribute('data-page-id');
+			var field  = tr.getAttribute('data-field');
+			var basename = tr.getAttribute('data-basename');
+			if (!pageId || !field || !basename) return;
+
+			// Client-side extension guard — server enforces too, but
+			// failing fast saves an upload round trip.
+			if (rowExt(tr) !== fileExt(file)) {
+				announce(
+					(labels.error || 'Replace failed') + ': '
+					+ 'Extension mismatch (' + rowExt(tr) + ' vs ' + fileExt(file) + ')'
+				);
+				return;
+			}
+
+			tr.classList.add('ml-row-uploading');
+
+			var fd = new FormData();
+			fd.append('pageId', pageId);
+			fd.append('fieldName', field);
+			fd.append('basename', basename);
+			fd.append('file', file);
+			if (config.csrf && config.csrf.name) {
+				fd.append(config.csrf.name, config.csrf.value);
+			}
+
+			fetch(config.replaceUrl, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' },
+				body: fd
+			}).then(function (res) {
+				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
+			}).then(function (data) {
+				if (!data || !data.ok) {
+					announce((labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''));
+					return;
+				}
+				// Use the server-resolved thumb URL directly — it points
+				// at the freshly-regenerated variation (the old one was
+				// wiped by removeVariations) and carries the cache-bust
+				// parameter so the browser doesn't reuse the old bytes.
+				var img = tr.querySelector('.ml-cell-thumb img');
+				if (img && data.thumbUrl) {
+					img.src = data.thumbUrl;
+				}
+				// Patch the read-only metadata cells in place so the
+				// row reflects the new file without a full table reload.
+				// Description / tags / customs stay because the Pagefile
+				// metadata is preserved across a replace.
+				function patch(col, val) {
+					if (val === undefined || val === null) return;
+					var cell = tr.querySelector('[data-col="' + col + '"]');
+					if (cell) cell.textContent = String(val);
+				}
+				patch('dimensions', data.dimensions);
+				patch('size',       data.filesizeFormatted);
+				patch('modified',   data.modifiedFormatted);
+				patch('variations', data.variationsCount);
+				announce(labels.saved || 'Saved');
+			}).catch(function (err) {
+				announce((labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'));
+			}).finally(function () {
+				tr.classList.remove('ml-row-uploading');
+			});
+		}
+
+		// Hidden file input — created once, reused for every click on
+		// .ml-replace-btn. We re-target it (data-current-row) right
+		// before opening so the change handler knows which row asked.
+		var replaceFileInput = document.createElement('input');
+		replaceFileInput.type = 'file';
+		replaceFileInput.style.display = 'none';
+		replaceFileInput.addEventListener('change', function () {
+			var tr = replaceFileInput._mlRow;
+			replaceFileInput._mlRow = null;
+			if (tr && replaceFileInput.files && replaceFileInput.files[0]) {
+				replaceImage(tr, replaceFileInput.files[0]);
+			}
+			replaceFileInput.value = '';
+		});
+		root.appendChild(replaceFileInput);
+
+		// Click delegation on the results region — survives AJAX
+		// swaps that replace .ml-results innerHTML.
+		results && results.addEventListener('click', function (e) {
+			var btn = e.target.closest && e.target.closest('.ml-replace-btn');
+			if (!btn) return;
+			// stopImmediatePropagation so the sibling delegated click
+			// handler (below in this file) doesn't ALSO interpret this
+			// click as a thumb activation and open the image editor.
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			var tr = btn.closest('tr');
+			if (!isEditableRow(tr)) return;
+			// Hint to the OS picker: filter to extensions matching the
+			// row's existing file. The user can still override but it
+			// reduces accidental wrong-format picks.
+			var ext = rowExt(tr);
+			replaceFileInput.accept = ext ? '.' + ext : '';
+			replaceFileInput._mlRow = tr;
+			replaceFileInput.click();
+		});
+
+		// Drag-and-drop on rows. dataTransfer.types is a DOMStringList in
+		// some engines (no Array methods), so we iterate by index.
+		function dragHasFiles(e) {
+			if (!e.dataTransfer) return false;
+			var types = e.dataTransfer.types;
+			if (!types) return false;
+			for (var i = 0; i < types.length; i++) {
+				if (types[i] === 'Files') return true;
+			}
+			return false;
+		}
+		// Global dragover preventDefault keeps the browser from opening
+		// the file when the user drops outside a drop zone, AND is the
+		// signal that lets `drop` events fire on descendants (HTML5
+		// spec: drop only fires if the preceding dragover wasn't the
+		// default-action one). Belt-and-suspenders: results gets its
+		// own dragover listener too so dropEffect can be set explicitly.
+		document.addEventListener('dragover', function (e) {
+			if (dragHasFiles(e)) e.preventDefault();
+		});
+		document.addEventListener('drop', function (e) {
+			// Catch anything that wasn't claimed by a row listener so the
+			// browser doesn't navigate to the dropped file.
+			if (dragHasFiles(e)) e.preventDefault();
+		});
+		if (results) {
+			results.addEventListener('dragover', function (e) {
+				if (!dragHasFiles(e)) return;
+				e.preventDefault();
+				var tr = e.target.closest && e.target.closest('tr');
+				if (e.dataTransfer) {
+					e.dataTransfer.dropEffect = isEditableRow(tr) ? 'copy' : 'none';
+				}
+			});
+			results.addEventListener('dragenter', function (e) {
+				if (!dragHasFiles(e)) return;
+				var tr = e.target.closest && e.target.closest('tr');
+				if (!isEditableRow(tr)) return;
+				tr.classList.add('ml-row-drop-target');
+			});
+			results.addEventListener('dragleave', function (e) {
+				var tr = e.target.closest && e.target.closest('tr');
+				if (!tr) return;
+				// dragleave fires when crossing child boundaries too —
+				// only drop the highlight when the pointer actually
+				// exits the row.
+				if (e.relatedTarget && tr.contains(e.relatedTarget)) return;
+				tr.classList.remove('ml-row-drop-target');
+			});
+			results.addEventListener('drop', function (e) {
+				if (!dragHasFiles(e)) return;
+				e.preventDefault();
+				e.stopPropagation();
+				var tr = e.target.closest && e.target.closest('tr');
+				if (!isEditableRow(tr)) return;
+				tr.classList.remove('ml-row-drop-target');
+				if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+				if (e.dataTransfer.files.length > 1) {
+					announce((labels.error || 'Replace failed') + ': only one file at a time');
+					return;
+				}
+				replaceImage(tr, e.dataTransfer.files[0]);
+			});
+		}
+
+		// -- Delete image (click icon + paintbrush on selection) -------
+		// Single-row: click the per-row trash icon → confirm dialog
+		// listing the one filename → POST.
+		// Batch (paintbrush): when N rows are selected AND the click
+		// landed on a selected row's trash icon, ALL selected items
+		// are deleted (across pages too, since selection persists).
+		// Always behind a confirm dialog — destructive, no undo.
+
+		function rowItem(tr) {
+			return tr ? {
+				pageId:    tr.getAttribute('data-page-id'),
+				fieldName: tr.getAttribute('data-field'),
+				basename:  tr.getAttribute('data-basename')
+			} : null;
+		}
+
+		function itemKey(item) {
+			return item.pageId + ':' + item.fieldName + ':' + item.basename;
+		}
+
+		function openDeleteConfirm(items, onConfirm) {
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-delete-confirm';
+
+			var header = document.createElement('header');
+			header.textContent = items.length === 1
+				? (labels.deleteOne || 'Delete this image?')
+				: (labels.deleteMany || 'Delete %d images?').replace('%d', items.length);
+			dialog.appendChild(header);
+
+			var intro = document.createElement('p');
+			intro.textContent = items.length === 1
+				? (labels.deleteOneIntro || 'The following file will be permanently removed:')
+				: (labels.deleteManyIntro || 'The following files will be permanently removed:');
+			dialog.appendChild(intro);
+
+			var list = document.createElement('ul');
+			list.className = 'ml-delete-confirm-list';
+			var show = Math.min(items.length, 8);
+			for (var i = 0; i < show; i++) {
+				var li = document.createElement('li');
+				li.textContent = items[i].basename;
+				list.appendChild(li);
+			}
+			if (items.length > show) {
+				var more = document.createElement('li');
+				more.textContent = '… +' + (items.length - show) + ' more';
+				list.appendChild(more);
+			}
+			dialog.appendChild(list);
+
+			var warn = document.createElement('p');
+			warn.className = 'ml-delete-confirm-warn';
+			warn.textContent = labels.deleteWarn || 'This cannot be undone.';
+			dialog.appendChild(warn);
+
+			var footer = document.createElement('footer');
+			var cancelBtn = document.createElement('button');
+			cancelBtn.type = 'button';
+			cancelBtn.className = 'uk-button uk-button-secondary';
+			cancelBtn.textContent = labels.cancel || 'Cancel';
+			var okBtn = document.createElement('button');
+			okBtn.type = 'button';
+			okBtn.className = 'uk-button uk-button-primary';
+			okBtn.textContent = labels.deleteOk || 'Delete';
+			footer.appendChild(cancelBtn);
+			footer.appendChild(okBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+
+			function cleanup() {
+				if (dialog.open) dialog.close();
+				dialog.remove();
+			}
+			cancelBtn.addEventListener('click', cleanup);
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			okBtn.addEventListener('click', function () {
+				cleanup();
+				onConfirm();
+			});
+
+			dialog.showModal();
+			okBtn.focus();
+		}
+
+		// Build a (data-key → <tr>) map once so we don't have to escape
+		// arbitrary basenames into CSS attribute selectors. Refreshed
+		// per call since AJAX swaps can replace .ml-results contents.
+		function rowsByKey() {
+			var map = {};
+			if (!results) return map;
+			results.querySelectorAll('.ml-select-row').forEach(function (cb) {
+				var tr = cb.closest('tr');
+				if (cb.dataset.key && tr) map[cb.dataset.key] = tr;
+			});
+			return map;
+		}
+
+		function deleteItems(items) {
+			if (!config.deleteUrl || !items.length) return;
+			var fd = new FormData();
+			fd.append('items', JSON.stringify(items));
+			if (config.csrf && config.csrf.name) {
+				fd.append(config.csrf.name, config.csrf.value);
+			}
+			// Mark rows about to be deleted so they fade out — the
+			// actual removal happens once the server reports back
+			// which ones succeeded.
+			var keys = items.map(itemKey);
+			var map  = rowsByKey();
+			keys.forEach(function (k) {
+				if (map[k]) map[k].classList.add('ml-row-uploading');
+			});
+
+			fetch(config.deleteUrl, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' },
+				body: fd
+			}).then(function (res) {
+				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
+			}).then(function (data) {
+				// Drop the uploading state regardless — the rows we
+				// actually keep should look normal again.
+				keys.forEach(function (k) {
+					if (map[k]) map[k].classList.remove('ml-row-uploading');
+				});
+				if (!data || !data.ok) {
+					announce((labels.error || 'Delete failed') + (data && data.error ? ': ' + data.error : ''));
+					return;
+				}
+				var succeeded = Array.isArray(data.succeeded) ? data.succeeded : [];
+				var failed    = Array.isArray(data.failed)    ? data.failed    : [];
+				// Fade-out + remove for every server-confirmed row,
+				// drop from the persistent selection set as we go.
+				succeeded.forEach(function (k) {
+					selection.delete(k);
+					var tr = map[k];
+					if (!tr) return;
+					tr.classList.add('ml-row-deleting');
+					setTimeout(function () { tr.remove(); syncSelectAllHeader(); }, 220);
+				});
+				syncSelectAllHeader();
+				if (failed.length) {
+					// Reuse the bulk-result dialog for failure detail.
+					showBulkResult(
+						(labels.deletePartial || 'Deleted %d, %d failed')
+							.replace('%d', succeeded.length).replace('%d', failed.length),
+						failed
+					);
+				} else {
+					announce(
+						(labels.deleted || 'Deleted %d').replace('%d', succeeded.length)
+					);
+				}
+			}).catch(function (err) {
+				keys.forEach(function (k) {
+					if (map[k]) map[k].classList.remove('ml-row-uploading');
+				});
+				announce((labels.error || 'Delete failed') + ': ' + (err && err.message ? err.message : 'network error'));
+			});
+		}
+
+		results && results.addEventListener('click', function (e) {
+			var btn = e.target.closest && e.target.closest('.ml-delete-btn');
+			if (!btn) return;
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			var tr = btn.closest('tr');
+			if (!isEditableRow(tr)) return;
+			var rowItm = rowItem(tr);
+			if (!rowItm || !rowItm.pageId) return;
+
+			// Paintbrush: if N rows are selected AND this row is in the
+			// selection, treat the click as a batch on the selection.
+			// Otherwise it's a single-row delete.
+			var thisKey = itemKey(rowItm);
+			var items;
+			if (selection.size > 0 && selection.has(thisKey)) {
+				items = selectionItems();
+			} else {
+				items = [rowItm];
+			}
+			openDeleteConfirm(items, function () { deleteItems(items); });
+		});
 
 		// -- AJAX re-render --------------------------------------------
 
@@ -791,6 +1253,7 @@
 				if (push) {
 					history.pushState({ ml: qs }, '', location.pathname + qs);
 				}
+				if (root._mlSyncBookmarkActive) root._mlSyncBookmarkActive();
 			}).catch(function (err) {
 				// On network/server error, fall back to a full reload so the
 				// user still gets the navigation they asked for.
@@ -875,7 +1338,8 @@
 			bulkDialog.innerHTML =
 				'<header class="ml-bulk-result-header"></header>'
 				+ '<ul class="ml-bulk-result-list"></ul>'
-				+ '<footer><button type="button" class="ml-bulk-result-close">'
+				+ '<footer><button type="button" class="ml-bulk-result-close'
+				+ ' uk-button uk-button-secondary">'
 				+ ((labels && labels.close) ? labels.close : 'Close')
 				+ '</button></footer>';
 			root.appendChild(bulkDialog);
@@ -1148,18 +1612,122 @@
 			);
 		}
 
+		// Field-capability narrowing: with a specific image field
+		// selected, hide and uncheck any filter UI that doesn't apply
+		// to that field — Tags fieldset, "Missing tags", "Missing
+		// <custom>". Exact parallel of applyTemplateFieldFilter: PHP
+		// emits the full DOM, JS toggles .hidden + .disabled per
+		// element, and invalidated values are cleared so submission
+		// reflects what the user actually sees.
+		function applyFieldCapabilityFilter() {
+			if (!filterForm) return;
+			var caps      = (config.fieldCaps && typeof config.fieldCaps === 'object') ? config.fieldCaps : {};
+			var tplFields = (config.tplFields && typeof config.tplFields === 'object') ? config.tplFields : {};
+			var tplSel    = filterForm.querySelector('select[name="template"]');
+			var fldSel    = filterForm.querySelector('select[name="field"]');
+			var template  = tplSel ? tplSel.value : '';
+			var field     = fldSel ? fldSel.value : '';
+
+			// Effective capability set:
+			//  - specific field → that field's caps
+			//  - empty field + template → UNION of caps across the
+			//    template's image fields (so a template whose only
+			//    field has no tags / no customs collapses those
+			//    filters too)
+			//  - nothing selected → full universe (null = show all)
+			var hasTags, customs;
+			if (field && caps[field]) {
+				hasTags = caps[field].useTags === true;
+				customs = caps[field].customs || [];
+			} else if (template && tplFields[template]) {
+				var allowed = tplFields[template] || [];
+				hasTags = allowed.some(function (f) {
+					return caps[f] && caps[f].useTags === true;
+				});
+				var customsSet = {};
+				allowed.forEach(function (f) {
+					((caps[f] && caps[f].customs) || []).forEach(function (c) {
+						customsSet[c] = true;
+					});
+				});
+				customs = Object.keys(customsSet);
+			} else {
+				hasTags = true;
+				customs = null;
+			}
+			var changed = false;
+
+			// Tags filter fieldset (.Inputfield_mlTagsFs).
+			var tagsWrap = filterForm.querySelector('.Inputfield_mlTagsFs');
+			if (tagsWrap) {
+				tagsWrap.hidden = !hasTags;
+				if (!hasTags) {
+					tagsWrap.querySelectorAll('input[type="checkbox"]:checked').forEach(function (cb) {
+						cb.checked = false;
+						changed = true;
+					});
+				}
+			}
+
+			// "Missing tags" checkbox (.Inputfield_no_tags).
+			var missingTagsWrap = filterForm.querySelector('.Inputfield_no_tags');
+			if (missingTagsWrap) {
+				missingTagsWrap.hidden = !hasTags;
+				var noTagsCb = missingTagsWrap.querySelector('input[type="checkbox"]');
+				if (noTagsCb) noTagsCb.disabled = !hasTags;
+				if (!hasTags && noTagsCb && noTagsCb.checked) {
+					noTagsCb.checked = false;
+					changed = true;
+				}
+			}
+
+			// "Missing <custom>" wrappers (.Inputfield_no_custom_<name>).
+			filterForm.querySelectorAll('[class*="Inputfield_no_custom_"]').forEach(function (w) {
+				var match = /(?:^|\s)Inputfield_no_custom_([A-Za-z0-9_]+)(?:\s|$)/.exec(w.className);
+				if (!match) return;
+				var name = match[1];
+				var ok   = customs === null || customs.indexOf(name) !== -1;
+				w.hidden = !ok;
+				var cb = w.querySelector('input[type="checkbox"]');
+				if (cb) cb.disabled = !ok;
+				if (!ok && cb && cb.checked) {
+					cb.checked = false;
+					changed = true;
+				}
+			});
+
+			// Surface any auto-cleared filters to the reset-visibility +
+			// label-recompute logic so they reflect current state.
+			if (changed) {
+				updateResetVisibility();
+				recomputeFilterLabels();
+			}
+		}
+
 		if (filterForm) {
 			filterForm.addEventListener('input', updateResetVisibility);
 			filterForm.addEventListener('change', updateResetVisibility);
 			filterForm.addEventListener('change', function (e) {
-				if (e.target && e.target.name === 'template') applyTemplateFieldFilter();
+				if (!e.target) return;
+				if (e.target.name === 'template') applyTemplateFieldFilter();
+				if (e.target.name === 'template' || e.target.name === 'field') {
+					applyFieldCapabilityFilter();
+				}
 			});
 			// Sync initial state: narrow the field dropdown to the URL's
 			// template, then hide the Reset button if no filters apply
 			// (the wrapper renders visible by default — PW doesn't know
 			// about our visibility rule).
 			applyTemplateFieldFilter();
+			applyFieldCapabilityFilter();
 			updateResetVisibility();
+			// Expose the live-narrowing helpers so the bookmark click
+			// handler (lives outside the filter-form scope) can run
+			// them after pushing values onto the form.
+			root._mlApplyTemplateFieldFilter   = applyTemplateFieldFilter;
+			root._mlApplyFieldCapabilityFilter = applyFieldCapabilityFilter;
+			root._mlUpdateResetVisibility      = updateResetVisibility;
+			root._mlRecomputeFilterLabels      = recomputeFilterLabels;
 
 			filterForm.addEventListener('submit', function (e) {
 				e.preventDefault();
@@ -1195,10 +1763,13 @@
 			// Also wipe the form's visible state — form.reset() goes back to
 			// the values present at page load, which here ARE the user's
 			// active filters, so we have to clear inputs manually.
-			filterForm.addEventListener('click', function (e) {
-				var reset = e.target.closest && e.target.closest('a[href="./"]');
-				if (!reset) return;
-				e.preventDefault();
+			// Wipe every input on the filter form back to the empty
+			// state. Shared by the Reset link AND the bookmark-click
+			// handler (which applies the bookmark's values onto the
+			// freshly-cleared form so stale checks / selects don't
+			// linger from whatever was active before).
+			function clearFilterForm() {
+				if (!filterForm) return;
 				filterForm.querySelectorAll('input[type="search"], input[type="text"], input[type="hidden"]').forEach(function (i) {
 					i.value = '';
 				});
@@ -1212,6 +1783,18 @@
 						s.selectedIndex = 0;
 					}
 				});
+			}
+			// Expose so the bookmark click handler (outside this
+			// scope) can reuse it.
+			root._mlClearFilterForm = clearFilterForm;
+
+			filterForm.addEventListener('click', function (e) {
+				var reset = e.target.closest && e.target.closest('a[href="./"]');
+				if (!reset) return;
+				e.preventDefault();
+				clearFilterForm();
+				applyTemplateFieldFilter();
+				applyFieldCapabilityFilter();
 				updateResetVisibility();
 				recomputeFilterLabels();
 				replaceFromQs('', true);
@@ -1302,6 +1885,10 @@
 		// the window goes over the wire. Always sends the full
 		// {columns, pageSize} state so the server record stays
 		// authoritative regardless of which control changed.
+		var bookmarks = (userPrefs.bookmarks && Array.isArray(userPrefs.bookmarks))
+			? userPrefs.bookmarks.slice()
+			: [];
+
 		var savePrefsTimer = null;
 		function saveUserPrefs() {
 			if (!config.userPrefsUrl) return;
@@ -1313,7 +1900,8 @@
 						visible: columnsState,
 						order:   columnsOrder
 					},
-					pageSize: readCurrentPageSize()
+					pageSize:  readCurrentPageSize(),
+					bookmarks: bookmarks
 				}));
 				if (config.csrf && config.csrf.name) {
 					fd.append(config.csrf.name, config.csrf.value);
@@ -1327,6 +1915,238 @@
 				});
 			}, 400);
 		}
+
+		// -- Bookmarks -------------------------------------------------
+		// Tab strip above the filter bar; each tab is a saved filter
+		// combination. State lives in $user->meta via the existing
+		// userPrefs endpoint. UI delegation: click a tab → AJAX-load
+		// its querystring; × on hover → delete; "+" leftmost → name-
+		// dialog → save current filter.
+
+		// Same shape canonicalizeBookmarkQs produces server-side, so
+		// active-tab detection is a straight string compare.
+		function canonicalFilterQs(qs) {
+			var u = new URLSearchParams((qs || '').replace(/^\?/, ''));
+			var allow = ['q', 'template', 'field', 'tags', 'no_desc', 'no_tags'];
+			var keep = [];
+			u.forEach(function (v, k) {
+				var ok = allow.indexOf(k) !== -1 || k.indexOf('no_custom_') === 0;
+				if (!ok) return;
+				if (v === '') return;
+				keep.push([k, v]);
+			});
+			if (!keep.length) return '';
+			keep.sort(function (a, b) { return a[0].localeCompare(b[0]); });
+			var out = new URLSearchParams();
+			keep.forEach(function (p) { out.append(p[0], p[1]); });
+			return '?' + out.toString();
+		}
+
+		function syncBookmarkActive() {
+			var tabs = document.querySelectorAll('.ml-bookmarks-tabs > li');
+			if (!tabs.length) return;
+			var current = canonicalFilterQs(location.search);
+			tabs.forEach(function (li) {
+				li.classList.remove('uk-active');
+			});
+			// Walk every tab with a .ml-bookmark anchor — that's both
+			// "Show all" (qs="") and the saved bookmarks. First match
+			// wins the active marker.
+			var bookmarkMatched = false;
+			tabs.forEach(function (li) {
+				var a = li.querySelector('a.ml-bookmark');
+				if (!a) return;
+				var qs = a.dataset.qs || '';
+				if (qs === current && !li.classList.contains('uk-active')) {
+					li.classList.add('uk-active');
+					// A non-empty match means the current URL state
+					// IS a saved bookmark — gates the Add button.
+					if (qs !== '') bookmarkMatched = true;
+				}
+			});
+			// Add button visible only when a filter is active that's
+			// NOT already a saved bookmark; otherwise hidden.
+			var addLi = document.querySelector('.ml-bookmarks-add');
+			if (addLi) addLi.hidden = (current === '' || bookmarkMatched);
+		}
+
+		function bookmarksContainer() {
+			return document.querySelector('.ml-bookmarks-tabs');
+		}
+
+		function rerenderBookmarksList() {
+			var ul = bookmarksContainer();
+			if (!ul) return;
+			// Wipe every bookmark <li>, keep "Show all" (first child)
+			// and the Add button (last child). Then insert fresh
+			// bookmark <li>s in memory order BEFORE the Add button so
+			// it stays rightmost.
+			var addLi = ul.querySelector('li.ml-bookmarks-add');
+			Array.from(ul.children).forEach(function (li, i) {
+				if (i === 0 || li === addLi) return;
+				li.remove();
+			});
+			bookmarks.forEach(function (b, idx) {
+				var li = document.createElement('li');
+				li.dataset.bookmarkIdx = String(idx);
+				var a = document.createElement('a');
+				a.className = 'ml-bookmark';
+				a.href = location.pathname + (b.qs || '');
+				a.dataset.qs = b.qs || '';
+				a.textContent = b.name;
+				li.appendChild(a);
+				var del = document.createElement('button');
+				del.type = 'button';
+				del.className = 'ml-bookmark-del';
+				del.setAttribute('aria-label', labels.bookmarkDelete || 'Delete bookmark');
+				del.title = labels.bookmarkDelete || 'Delete bookmark';
+				del.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
+				li.appendChild(del);
+				ul.insertBefore(li, addLi);
+			});
+			syncBookmarkActive();
+		}
+
+		function openBookmarkAddDialog() {
+			var current = canonicalFilterQs(location.search);
+			if (current === '') {
+				announce(labels.bookmarkEmpty || 'Apply some filters first.');
+				return;
+			}
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-bookmark-dialog';
+
+			var header = document.createElement('header');
+			header.textContent = labels.bookmarkSave || 'Save bookmark';
+			dialog.appendChild(header);
+
+			var hint = document.createElement('p');
+			hint.className = 'ml-popup-hint';
+			hint.textContent = labels.bookmarkHint || 'Saves the active filter combination under a name.';
+			dialog.appendChild(hint);
+
+			var input = document.createElement('input');
+			input.type = 'text';
+			input.className = 'uk-input';
+			input.required = true;
+			input.maxLength = 80;
+			dialog.appendChild(input);
+
+			var footer = document.createElement('footer');
+			var cancelBtn = document.createElement('button');
+			cancelBtn.type = 'button';
+			cancelBtn.className = 'uk-button uk-button-secondary';
+			cancelBtn.textContent = labels.cancel || 'Cancel';
+			var saveBtn = document.createElement('button');
+			saveBtn.type = 'button';
+			saveBtn.className = 'uk-button uk-button-primary';
+			saveBtn.textContent = labels.save || 'Save';
+			footer.appendChild(cancelBtn);
+			footer.appendChild(saveBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			function cleanup() { if (dialog.open) dialog.close(); }
+			cancelBtn.addEventListener('click', cleanup);
+
+			function commit() {
+				var name = input.value.trim();
+				if (!name) { input.focus(); return; }
+				bookmarks.push({ name: name, qs: current });
+				cleanup();
+				rerenderBookmarksList();
+				saveUserPrefs();
+				announce(labels.bookmarkSaved || 'Bookmark saved');
+			}
+			saveBtn.addEventListener('click', commit);
+			input.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter') { e.preventDefault(); commit(); }
+			});
+
+			dialog.showModal();
+			input.focus();
+		}
+
+		// Click delegation on the bookmarks bar — wraps Add, tab
+		// activation and delete in one handler so reorder via re-
+		// rendering doesn't invalidate listeners.
+		document.addEventListener('click', function (e) {
+			if (!e.target.closest) return;
+			var add = e.target.closest('.ml-bookmarks-add a');
+			if (add) {
+				e.preventDefault();
+				openBookmarkAddDialog();
+				return;
+			}
+			var del = e.target.closest('.ml-bookmark-del');
+			if (del) {
+				e.preventDefault();
+				e.stopPropagation();
+				var li = del.closest('li');
+				if (!li) return;
+				var idx = parseInt(li.dataset.bookmarkIdx, 10);
+				if (isNaN(idx) || idx < 0 || idx >= bookmarks.length) return;
+				bookmarks.splice(idx, 1);
+				rerenderBookmarksList();
+				saveUserPrefs();
+				announce(labels.bookmarkDeleted || 'Bookmark deleted');
+				return;
+			}
+			var tab = e.target.closest('a.ml-bookmark');
+			if (tab) {
+				e.preventDefault();
+				var qs = tab.dataset.qs || '';
+				applyBookmarkToForm(qs);
+				replaceFromQs(qs, true);
+				syncBookmarkActive();
+				return;
+			}
+		});
+
+		// Push the bookmark's filter values onto the filter form so
+		// what the user SEES matches what was just applied. Without
+		// this, the form keeps showing the previous filter's selects
+		// + checkboxes while the table reflects the bookmark — and
+		// the next Apply would resurrect the stale values.
+		function applyBookmarkToForm(qs) {
+			var filterForm = document.querySelector('.ml-filter-bar');
+			if (!filterForm) return;
+			if (typeof root._mlClearFilterForm === 'function') {
+				root._mlClearFilterForm();
+			}
+			var params = new URLSearchParams((qs || '').replace(/^\?/, ''));
+			params.forEach(function (v, k) {
+				if (k === 'tags' && v) {
+					v.split(',').forEach(function (tag) {
+						filterForm.querySelectorAll('input[name="tags[]"]').forEach(function (cb) {
+							if (cb.value === tag) cb.checked = true;
+						});
+					});
+					return;
+				}
+				var input = filterForm.querySelector('[name="' + k + '"]');
+				if (!input) return;
+				if (input.type === 'checkbox' || input.type === 'radio') {
+					input.checked = (v === '1' || v === 'on' || v === input.value);
+				} else {
+					input.value = v;
+				}
+			});
+			// Re-run the live narrowing + label updates so the form
+			// state is internally consistent (template→field hide
+			// rules, missing-X capability gates, "(N)" suffix).
+			if (typeof root._mlApplyTemplateFieldFilter === 'function') root._mlApplyTemplateFieldFilter();
+			if (typeof root._mlApplyFieldCapabilityFilter === 'function') root._mlApplyFieldCapabilityFilter();
+			if (typeof root._mlUpdateResetVisibility === 'function') root._mlUpdateResetVisibility();
+			if (typeof root._mlRecomputeFilterLabels === 'function') root._mlRecomputeFilterLabels();
+		}
+
+		// Reflect URL changes (back/forward, AJAX swap from filter
+		// bar) onto the bookmark active marker.
+		window.addEventListener('popstate', syncBookmarkActive);
+		root._mlSyncBookmarkActive = syncBookmarkActive;
+		syncBookmarkActive();
 
 		// Sync the <li> order in the picker to match columnsOrder
 		// (after init from user-meta, before drag-drop wiring).
@@ -1466,6 +2286,7 @@
 		// Browser sees Content-Disposition: attachment on the
 		// response and triggers a download without navigating away.
 		var exportLinks = document.querySelectorAll('.ml-export-link');
+		var exportVariantSel = document.querySelector('.ml-export-variant');
 		Array.prototype.forEach.call(exportLinks, function (link) {
 			link.addEventListener('click', function (e) {
 				var base = link.dataset.exportBase
@@ -1475,6 +2296,14 @@
 				var qs = location.search || '';
 				if (link.dataset.format === 'csv') {
 					qs += (qs ? '&' : '?') + 'format=csv';
+				}
+				// Image-URL variant — append only when the user picked
+				// something other than the default so clean URLs stay
+				// clean. Values are: "original" (omit) | "260" | "512"
+				// | "1024".
+				var variant = exportVariantSel ? exportVariantSel.value : '';
+				if (variant && variant !== 'original') {
+					qs += (qs ? '&' : '?') + 'urlVariant=' + encodeURIComponent(variant);
 				}
 				window.location.href = base + qs;
 			});
