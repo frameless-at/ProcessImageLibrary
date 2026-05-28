@@ -124,9 +124,19 @@ trait ImageLibraryExportImport {
 			. '</form>'
 			. '</div>';
 
+		// Toggle chevron matches what PW emits for a native
+		// InputfieldFieldset — the AdminTheme JS picks the .toggle-icon
+		// up via .InputfieldStateToggle and flips fa-angle-right ↔
+		// fa-angle-down on click via the data-to attribute. Without it,
+		// the header has no visual hint that it's collapsible.
+		$toggleIcon = '<i title="' . $san->entities($this->_('Toggle open/close')) . '"'
+			. ' class="toggle-icon fa fa-fw fa-angle-right"'
+			. ' data-to="fa-angle-down fa-angle-right"></i>';
+
 		return '<div class="Inputfield InputfieldFieldset InputfieldStateCollapsed ml-export-import">'
 			. '<label class="InputfieldHeader InputfieldStateToggle">'
 			. $san->entities($this->_('Export / Import'))
+			. ' ' . $toggleIcon
 			. '</label>'
 			. '<div class="InputfieldContent">'
 			. '<p class="ml-ei-help">' . $san->entities(
