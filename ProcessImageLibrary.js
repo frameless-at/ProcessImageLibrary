@@ -839,6 +839,19 @@
 				if (img && data.thumbUrl) {
 					img.src = data.thumbUrl;
 				}
+				// Patch the read-only metadata cells in place so the
+				// row reflects the new file without a full table reload.
+				// Description / tags / customs stay because the Pagefile
+				// metadata is preserved across a replace.
+				function patch(col, val) {
+					if (val === undefined || val === null) return;
+					var cell = tr.querySelector('[data-col="' + col + '"]');
+					if (cell) cell.textContent = String(val);
+				}
+				patch('dimensions', data.dimensions);
+				patch('size',       data.filesizeFormatted);
+				patch('modified',   data.modifiedFormatted);
+				patch('variations', data.variationsCount);
 				announce(labels.saved || 'Saved');
 			}).catch(function (err) {
 				announce((labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'));

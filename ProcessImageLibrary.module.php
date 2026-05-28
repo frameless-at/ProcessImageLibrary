@@ -1201,17 +1201,46 @@ class ProcessImageLibrary extends Process {
 		$thumbInfo = $this->resolveThumbForImage($img2, $this->getThumbDims());
 
 		clearstatcache(true, $targetPath);
-		$mtime = @filemtime($targetPath);
+		$mtime    = @filemtime($targetPath);
+		$filesize = (int) @filesize($targetPath);
 		$cacheBust = $mtime ? (string) $mtime : (string) time();
+
+		// Re-derive the row's metadata fields so the table can patch
+		// them in place. Width / height come from the fresh Pageimage
+		// (which lazy-reads getimagesize off the new file). The
+		// variations counter is 1 — removeVariations() wiped the lot
+		// and we just generated one fresh thumb.
+		$dims = ($img2->width && $img2->height)
+			? ((int) $img2->width) . '×' . ((int) $img2->height)
+			: '';
+
+		// Modified column comes from MySQL DATETIME on the file row;
+		// PW's $page->save() writes NOW() to that column for every
+		// Pagefile in the saved field, so the value is already fresh.
+		// We pass it back through the same formatTimestamp the table
+		// uses so the patched cell matches a server-rendered one.
+		$modifiedRaw = (string) ($img2->modified ?? '');
+		if ($modifiedRaw === '' || strtotime($modifiedRaw) === false) {
+			// Defensive — if PW didn't bump it (older PW versions,
+			// missing column), fall back to the filesystem mtime.
+			$modifiedRaw = $mtime ? date('Y-m-d H:i:s', $mtime) : '';
+		}
 
 		return $this->jsonResponse([
 			'ok'          => true,
 			'basename'    => $basename,
 			'cacheBust'   => $cacheBust,
-			'filesize'    => (int) @filesize($targetPath),
 			'thumbUrl'    => $thumbInfo['url'] . '?v=' . $cacheBust,
 			'thumbWidth'  => $thumbInfo['width'],
 			'thumbHeight' => $thumbInfo['height'],
+			// Cell-level updates for the JS to patch in place — these
+			// are pre-formatted on the server so the patched cells
+			// look identical to a freshly-rendered row.
+			'dimensions'       => $dims,
+			'filesize'         => $filesize,
+			'filesizeFormatted'=> $this->formatFilesize($filesize),
+			'modifiedFormatted'=> $modifiedRaw ? $this->formatTimestamp($modifiedRaw) : '',
+			'variationsCount'  => 1,
 		]);
 	}
 
