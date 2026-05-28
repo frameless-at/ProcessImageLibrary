@@ -875,6 +875,7 @@ textarea.ml-langtabs-pane {
 	margin: 0.5rem 0 0;
 }
 .ml-ei-fieldset {
+	position: relative;
 	flex: 1 1 280px;
 	display: flex;
 	flex-direction: column;
@@ -882,11 +883,22 @@ textarea.ml-langtabs-pane {
 	margin: 0;
 	padding: 0.75rem 1rem 1rem;
 	border: 1px solid var(--pw-border-color, #ddd);
-	border-radius: 4px;
 	background: var(--pw-blocks-background, #fff);
 }
+/* Legend sits on the top border, breaking it only where the text
+   sits. Absolute positioning + translateY(-50%) puts it centred on
+   the border line; the background matches the surrounding so the
+   border is hidden behind the text width and only there. UIkit
+   normalises legend to display:table by default which suppresses
+   the native overlay behaviour, hence the manual positioning. */
 .ml-ei-fieldset > legend {
+	position: absolute;
+	top: 0;
+	left: 0.75rem;
+	transform: translateY(-50%);
+	margin: 0;
 	padding: 0 0.4rem;
+	background: var(--pw-blocks-background, #fff);
 	font-weight: 600;
 	font-size: 0.9em;
 	color: var(--pw-text-color, #333);
