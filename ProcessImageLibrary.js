@@ -499,17 +499,20 @@
 				var cb = batchBar.querySelector('input[type="radio"]:checked');
 				return cb ? cb.value : 'add';
 			}
-			// Batch mode picker: Add / Replace / Remove for prose +
-			// tag broadcasts; Replace / Remove for filename rename
-			// (Add doesn't fit the filename semantic — there's nothing
-			// meaningful to "append" to a filename).
-			if (batch) {
+			// Batch mode picker: Add / Replace for prose + custom
+			// broadcasts; Add / Replace / Remove for tags (set
+			// operations match the tag-token semantic — same rule
+			// applies to checkbox-shaped custom subfields when those
+			// land). Batch rename has just one mode (apply the
+			// pattern with its (n) counter), so the radios stay
+			// hidden there.
+			if (batch && td.dataset.input !== 'filename') {
 				batchBar = document.createElement('div');
 				batchBar.className = 'ml-batch-mode';
 				var radioName = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
-				var modes = td.dataset.input === 'filename'
-					? ['replace', 'remove']
-					: ['add', 'replace', 'remove'];
+				var modes = (td.dataset.subfield === 'tags')
+					? ['add', 'replace', 'remove']
+					: ['add', 'replace'];
 				var modeLabels = {
 					add:     labels.add     || 'Add',
 					replace: labels.replace || 'Replace',
@@ -603,13 +606,11 @@
 					// the dedicated rename endpoint.
 					if (batch) {
 						// Flash + optimistic stem update on every
-						// selected row's filename cell. Per-row context
-						// applies in Replace mode (template resolution
-						// via (n) / (N) / (t) / etc.); Remove mode
-						// strips the substring from each row's own
-						// stem instead. Each cell remembers its prev
+						// selected row's filename cell. Per-row
+						// placeholder context: n = selection-order
+						// index + 1, total = batch size, plus the row's
+						// own data attrs. Each cell stores its prev
 						// stem so a server failure can revert all.
-						var renameMode = (mode === 'remove') ? 'remove' : 'replace';
 						var bulkRenameCells = batchCellsForSubfield('basename');
 						var renameTotal = bulkRenameCells.length;
 						var prevStems = [];
@@ -619,20 +620,15 @@
 								stemEl: stEl,
 								prev:   c.dataset.stem || ''
 							});
-							var resolvedForRow;
-							if (renameMode === 'remove') {
-								resolvedForRow = (c.dataset.stem || '').split(newStem).join('');
-							} else {
-								var trC = c.closest('tr');
-								var batchRenameCtx = {
-									n: idx + 1, total: renameTotal,
-									pageTitle: trC ? (trC.dataset.pageTitle || '') : '',
-									pageName:  trC ? (trC.dataset.pageName  || '') : '',
-									date:      todayIso,
-									field:     c.dataset.field || td.dataset.field || ''
-								};
-								resolvedForRow = resolveTemplateClient(newStem, batchRenameCtx);
-							}
+							var trC = c.closest('tr');
+							var batchRenameCtx = {
+								n: idx + 1, total: renameTotal,
+								pageTitle: trC ? (trC.dataset.pageTitle || '') : '',
+								pageName:  trC ? (trC.dataset.pageName  || '') : '',
+								date:      todayIso,
+								field:     c.dataset.field || td.dataset.field || ''
+							};
+							var resolvedForRow = resolveTemplateClient(newStem, batchRenameCtx);
 							if (stEl) stEl.textContent = resolvedForRow;
 							c.dataset.stem = resolvedForRow;
 							if (c !== td) c.classList.add('ml-cell-saving');
@@ -640,7 +636,7 @@
 						runBulk('set', {
 							subfield: 'basename',
 							value:    newStem,
-							mode:     renameMode
+							mode:     'replace'
 						}).then(function (result) {
 							var ok = reportBulk(result);
 							bulkRenameCells.forEach(function (c, idx) {
@@ -835,22 +831,16 @@
 							} else if (resolvedDelta !== '') {
 								optimistic = (rowOriginal ? rowOriginal + ' ' : '') + resolvedDelta;
 							}
-						} else if (resolvedMode === 'remove' && !isMultilang) {
-							if (subf === 'tags') {
-								// Set difference — mirror the server.
-								var dropToks = sendValue.split(/\s+/).filter(Boolean);
-								var dropSet  = Object.create(null);
-								dropToks.forEach(function (t) { dropSet[t] = true; });
-								optimistic = rowOriginal.split(/\s+/)
-									.filter(function (t) { return t && !dropSet[t]; })
-									.join(' ');
-							} else if (sendValue !== '') {
-								// Substring removal + whitespace collapse —
-								// matches the server's trim + preg_replace.
-								optimistic = rowOriginal.split(sendValue).join('')
-									.replace(/\s+/g, ' ')
-									.trim();
-							}
+						} else if (resolvedMode === 'remove' && !isMultilang && subf === 'tags') {
+							// Set difference — mirror the server. Only
+							// tags get Remove; prose subfields fall
+							// through to the default Replace optimistic.
+							var dropToks = sendValue.split(/\s+/).filter(Boolean);
+							var dropSet  = Object.create(null);
+							dropToks.forEach(function (t) { dropSet[t] = true; });
+							optimistic = rowOriginal.split(/\s+/)
+								.filter(function (t) { return t && !dropSet[t]; })
+								.join(' ');
 						}
 						c.textContent = optimistic;
 						c.classList.add('ml-cell-saving');
