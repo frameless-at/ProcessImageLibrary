@@ -1423,11 +1423,16 @@ class ProcessImageLibrary extends Process {
 		// sane defaults. The previous version built a fresh dict with
 		// only those three keys, which dropped 'total' on the floor —
 		// (N) → 0 in every batch rename and (d) → empty string.
-		$resolved = $this->resolveRenamePattern($pattern, array_merge([
-			'n'     => 1,
-			'page'  => $page,
-			'field' => $fieldName,
-		], $ctx));
+		// Callers that already hold a fully-resolved stem (e.g. the
+		// batch 'remove' branch passing the substring-stripped name)
+		// can opt out of template resolution via $ctx['skipResolve'].
+		$resolved = !empty($ctx['skipResolve'])
+			? $pattern
+			: $this->resolveRenamePattern($pattern, array_merge([
+				'n'     => 1,
+				'page'  => $page,
+				'field' => $fieldName,
+			], $ctx));
 		$newStem = $sanitizer->filename($resolved, true);
 		$newStem = preg_replace('/\.+/', '', $newStem) ?? '';
 		if ($newStem === '') {
@@ -1635,7 +1640,7 @@ class ProcessImageLibrary extends Process {
 		$action    = (string) $input->post('action');
 		$value     = (string) $input->post('value');
 		$subfield  = $sanitizer->fieldName((string) $input->post('subfield'));
-		$mode      = (string) $input->post('mode'); // 'replace' (default) | 'add'
+		$mode      = (string) $input->post('mode'); // 'replace' (default) | 'add' | 'remove'
 
 		// Multilang batch: same {langId: value} JSON shape as the
 		// single-row save endpoint. When present, the bulk loop
@@ -1647,7 +1652,7 @@ class ProcessImageLibrary extends Process {
 			$decoded = json_decode($langValuesJson, true);
 			if (is_array($decoded)) $langValues = $decoded;
 		}
-		if ($mode !== 'add') $mode = 'replace';
+		if (!in_array($mode, ['add', 'remove'], true)) $mode = 'replace';
 		$itemsJson = (string) $input->post('items');
 
 		if ($action !== 'set') {
@@ -1733,7 +1738,33 @@ class ProcessImageLibrary extends Process {
 						$failed[] = sprintf('Image %s not found in %d.%s', $bn, $pid, $fn);
 						continue;
 					}
-					$renameResult = $this->performRename($img, $page, $fn, $value, $ctx);
+					// Remove mode: strip the user's substring from the
+					// existing stem (ext stays put). Empty needle or
+					// no-match rows succeed as no-ops; non-empty hits
+					// route through performRename with skipResolve so
+					// parens in the substring don't get parsed as
+					// placeholders.
+					if ($mode === 'remove') {
+						if ($value === '') {
+							$succeeded++;
+							$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+							continue;
+						}
+						$dot = strrpos($bn, '.');
+						$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+						$newStem = str_replace($value, '', $stem);
+						if ($newStem === $stem) {
+							$succeeded++;
+							$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+							continue;
+						}
+						$renameResult = $this->performRename(
+							$img, $page, $fn, $newStem,
+							array_merge($ctx, ['skipResolve' => true])
+						);
+					} else {
+						$renameResult = $this->performRename($img, $page, $fn, $value, $ctx);
+					}
 					if (!$renameResult['ok']) {
 						$failed[] = sprintf('Rename %s in %s: %s', $bn, $fn, $renameResult['error']);
 						continue;
@@ -1789,8 +1820,40 @@ class ProcessImageLibrary extends Process {
 						// Union with the row's existing tags, dedup.
 						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
 						$tokens   = array_values(array_unique(array_merge($existing, $tokens)));
+					} elseif ($mode === 'remove') {
+						// Set difference: drop every token the user
+						// listed from the row's existing tag set. No-op
+						// for rows that don't carry any of them.
+						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$drop     = array_flip($tokens);
+						$tokens   = array_values(array_filter($existing, function ($t) use ($drop) {
+							return !isset($drop[$t]);
+						}));
 					}
 					$itemValue = implode(' ', $tokens);
+				} elseif ($mode === 'remove') {
+					// Substring removal for non-tag subfields (description,
+					// customs, filename). Empty needle means no-op. Same-
+					// before-after means no-op too (recorded as success
+					// but no save / no key churn). Filename is handled
+					// further below where the rename pipeline kicks in.
+					if ($itemValue === '') {
+						$succeeded++;
+						$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+						continue;
+					}
+					$existing = (string) $img->get($subfield);
+					$after = str_replace($itemValue, '', $existing);
+					// Collapse the orphan whitespace runs the removal
+					// leaves behind, then trim — purely visual hygiene.
+					$after = trim(preg_replace('/\s+/', ' ', $after));
+					if ($after === $existing) {
+						// Needle never appeared on this row → skip.
+						$succeeded++;
+						$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+						continue;
+					}
+					$itemValue = $after;
 				} elseif ($mode === 'add') {
 					// Add of an empty delta is a no-op — don't append a
 					// trailing space to every selected row.
@@ -2813,6 +2876,7 @@ class ProcessImageLibrary extends Process {
 				'done'             => $this->_('Done'),
 				'add'              => $this->_('Add'),
 				'replace'          => $this->_('Replace'),
+				'remove'           => $this->_('Remove'),
 				'save'             => $this->_('Save'),
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
