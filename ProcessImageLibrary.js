@@ -962,6 +962,196 @@
 			});
 		}
 
+		// -- Delete image (click icon + paintbrush on selection) -------
+		// Single-row: click the per-row trash icon → confirm dialog
+		// listing the one filename → POST.
+		// Batch (paintbrush): when N rows are selected AND the click
+		// landed on a selected row's trash icon, ALL selected items
+		// are deleted (across pages too, since selection persists).
+		// Always behind a confirm dialog — destructive, no undo.
+
+		function rowItem(tr) {
+			return tr ? {
+				pageId:    tr.getAttribute('data-page-id'),
+				fieldName: tr.getAttribute('data-field'),
+				basename:  tr.getAttribute('data-basename')
+			} : null;
+		}
+
+		function itemKey(item) {
+			return item.pageId + ':' + item.fieldName + ':' + item.basename;
+		}
+
+		function openDeleteConfirm(items, onConfirm) {
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-delete-confirm';
+
+			var header = document.createElement('header');
+			header.textContent = items.length === 1
+				? (labels.deleteOne || 'Delete this image?')
+				: (labels.deleteMany || 'Delete %d images?').replace('%d', items.length);
+			dialog.appendChild(header);
+
+			var body = document.createElement('div');
+			body.className = 'ml-delete-confirm-body';
+			var intro = document.createElement('div');
+			intro.textContent = items.length === 1
+				? (labels.deleteOneIntro || 'The following file will be permanently removed:')
+				: (labels.deleteManyIntro || 'The following files will be permanently removed:');
+			body.appendChild(intro);
+
+			var list = document.createElement('ul');
+			list.className = 'ml-delete-confirm-list';
+			var show = Math.min(items.length, 8);
+			for (var i = 0; i < show; i++) {
+				var li = document.createElement('li');
+				li.textContent = items[i].basename;
+				list.appendChild(li);
+			}
+			if (items.length > show) {
+				var more = document.createElement('li');
+				more.textContent = '… +' + (items.length - show) + ' more';
+				list.appendChild(more);
+			}
+			body.appendChild(list);
+
+			var warn = document.createElement('div');
+			warn.className = 'ml-delete-confirm-warn';
+			warn.textContent = labels.deleteWarn || 'This cannot be undone.';
+			body.appendChild(warn);
+			dialog.appendChild(body);
+
+			var footer = document.createElement('footer');
+			var cancelBtn = document.createElement('button');
+			cancelBtn.type = 'button';
+			cancelBtn.className = 'uk-button uk-button-default uk-button-small';
+			cancelBtn.textContent = labels.cancel || 'Cancel';
+			var okBtn = document.createElement('button');
+			okBtn.type = 'button';
+			okBtn.className = 'uk-button uk-button-danger uk-button-small';
+			okBtn.textContent = labels.deleteOk || 'Delete';
+			footer.appendChild(cancelBtn);
+			footer.appendChild(okBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+
+			function cleanup() {
+				if (dialog.open) dialog.close();
+				dialog.remove();
+			}
+			cancelBtn.addEventListener('click', cleanup);
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			okBtn.addEventListener('click', function () {
+				cleanup();
+				onConfirm();
+			});
+
+			dialog.showModal();
+			okBtn.focus();
+		}
+
+		// Build a (data-key → <tr>) map once so we don't have to escape
+		// arbitrary basenames into CSS attribute selectors. Refreshed
+		// per call since AJAX swaps can replace .ml-results contents.
+		function rowsByKey() {
+			var map = {};
+			if (!results) return map;
+			results.querySelectorAll('.ml-select-row').forEach(function (cb) {
+				var tr = cb.closest('tr');
+				if (cb.dataset.key && tr) map[cb.dataset.key] = tr;
+			});
+			return map;
+		}
+
+		function deleteItems(items) {
+			if (!config.deleteUrl || !items.length) return;
+			var fd = new FormData();
+			fd.append('items', JSON.stringify(items));
+			if (config.csrf && config.csrf.name) {
+				fd.append(config.csrf.name, config.csrf.value);
+			}
+			// Mark rows about to be deleted so they fade out — the
+			// actual removal happens once the server reports back
+			// which ones succeeded.
+			var keys = items.map(itemKey);
+			var map  = rowsByKey();
+			keys.forEach(function (k) {
+				if (map[k]) map[k].classList.add('ml-row-uploading');
+			});
+
+			fetch(config.deleteUrl, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' },
+				body: fd
+			}).then(function (res) {
+				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
+			}).then(function (data) {
+				// Drop the uploading state regardless — the rows we
+				// actually keep should look normal again.
+				keys.forEach(function (k) {
+					if (map[k]) map[k].classList.remove('ml-row-uploading');
+				});
+				if (!data || !data.ok) {
+					announce((labels.error || 'Delete failed') + (data && data.error ? ': ' + data.error : ''));
+					return;
+				}
+				var succeeded = Array.isArray(data.succeeded) ? data.succeeded : [];
+				var failed    = Array.isArray(data.failed)    ? data.failed    : [];
+				// Fade-out + remove for every server-confirmed row,
+				// drop from the persistent selection set as we go.
+				succeeded.forEach(function (k) {
+					selection.delete(k);
+					var tr = map[k];
+					if (!tr) return;
+					tr.classList.add('ml-row-deleting');
+					setTimeout(function () { tr.remove(); syncSelectAllHeader(); }, 220);
+				});
+				syncSelectAllHeader();
+				if (failed.length) {
+					// Reuse the bulk-result dialog for failure detail.
+					showBulkResult(
+						(labels.deletePartial || 'Deleted %d, %d failed')
+							.replace('%d', succeeded.length).replace('%d', failed.length),
+						failed
+					);
+				} else {
+					announce(
+						(labels.deleted || 'Deleted %d').replace('%d', succeeded.length)
+					);
+				}
+			}).catch(function (err) {
+				keys.forEach(function (k) {
+					if (map[k]) map[k].classList.remove('ml-row-uploading');
+				});
+				announce((labels.error || 'Delete failed') + ': ' + (err && err.message ? err.message : 'network error'));
+			});
+		}
+
+		results && results.addEventListener('click', function (e) {
+			var btn = e.target.closest && e.target.closest('.ml-delete-btn');
+			if (!btn) return;
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			var tr = btn.closest('tr');
+			if (!isEditableRow(tr)) return;
+			var rowItm = rowItem(tr);
+			if (!rowItm || !rowItm.pageId) return;
+
+			// Paintbrush: if N rows are selected AND this row is in the
+			// selection, treat the click as a batch on the selection.
+			// Otherwise it's a single-row delete.
+			var thisKey = itemKey(rowItm);
+			var items;
+			if (selection.size > 0 && selection.has(thisKey)) {
+				items = selectionItems();
+			} else {
+				items = [rowItm];
+			}
+			openDeleteConfirm(items, function () { deleteItems(items); });
+		});
+
 		// -- AJAX re-render --------------------------------------------
 
 		function replaceFromHref(href) {

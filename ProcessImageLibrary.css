@@ -153,13 +153,13 @@
 	position: relative;
 	width: var(--ml-thumb-cell-width, 100px);
 }
-/* Replace icon: top-right of the thumb cell, fades in on row hover.
-   Click opens the file picker (JS), the surrounding row also acts as
-   a drag-and-drop target for the same operation. */
-.ml-replace-btn {
+/* Per-row action icons (Replace + Delete): top-right of the thumb
+   cell, fade in on row hover. Both share the same visual treatment
+   so they read as a paired action cluster. */
+.ml-replace-btn,
+.ml-delete-btn {
 	position: absolute;
 	top: 4px;
-	right: 4px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -176,12 +176,65 @@
 	opacity: 0;
 	transition: opacity 0.12s ease-out;
 }
+.ml-replace-btn { right: 30px; }
+.ml-delete-btn  { right: 4px; }
 .ml-table tbody tr:hover .ml-replace-btn,
-.ml-replace-btn:focus-visible {
+.ml-table tbody tr:hover .ml-delete-btn,
+.ml-replace-btn:focus-visible,
+.ml-delete-btn:focus-visible {
 	opacity: 1;
 }
-.ml-replace-btn:hover {
-	color: var(--pw-main-color, #5b8cd6);
+.ml-replace-btn:hover { color: var(--pw-main-color, #5b8cd6); }
+.ml-delete-btn:hover  { color: #c33; }
+/* Fade-out animation for rows being deleted — JS adds the class
+   right before the row is removed from the DOM so the disappear is
+   visible instead of jarring. */
+.ml-row-deleting {
+	transition: opacity 0.2s ease-out;
+	opacity: 0;
+}
+/* Confirm dialog for Delete (single + batch). Same native <dialog>
+   approach as the bulk-result + columns dialogs; backdrop is the
+   browser default. */
+.ml-delete-confirm {
+	min-width: 360px;
+	max-width: 520px;
+	border: 1px solid var(--pw-border-color, #ddd);
+	border-radius: 4px;
+	padding: 0;
+	background: var(--pw-inputs-background, #fff);
+	color: var(--pw-text-color, #333);
+}
+.ml-delete-confirm header {
+	padding: 12px 16px;
+	font-weight: 600;
+	border-bottom: 1px solid var(--pw-border-color, #eee);
+}
+.ml-delete-confirm .ml-delete-confirm-body {
+	padding: 12px 16px;
+	font-size: 0.95em;
+	line-height: 1.4;
+}
+.ml-delete-confirm .ml-delete-confirm-list {
+	margin: 8px 0 0;
+	padding: 0 0 0 18px;
+	max-height: 180px;
+	overflow: auto;
+	font-family: monospace;
+	font-size: 0.85em;
+	color: var(--pw-muted-color, #666);
+}
+.ml-delete-confirm .ml-delete-confirm-warn {
+	margin-top: 8px;
+	font-size: 0.85em;
+	color: #c33;
+}
+.ml-delete-confirm footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding: 10px 16px;
+	border-top: 1px solid var(--pw-border-color, #eee);
 }
 /* Drop-target highlight: the single row currently under the file
    drag pointer. Uses the same soft tint as inline-edit hover so the

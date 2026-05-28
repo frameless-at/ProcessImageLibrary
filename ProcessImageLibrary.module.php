@@ -1245,6 +1245,115 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * AJAX endpoint: delete one or more images (single + batch share
+	 * the same code path — JS always sends an `items` JSON array).
+	 *
+	 * Items: [{pageId, fieldName, basename}, ...]. Per-page editable()
+	 * is enforced; failures land in the result list so the UI can
+	 * report them via the existing bulk-result dialog pattern.
+	 *
+	 * Process per page: $pageimages->delete($img) removes the file
+	 * and its row, $page->save($field) persists. removeVariations()
+	 * happens implicitly through PW's file delete. Cache is dropped
+	 * via Pages::saved hook + an explicit deleteFor for symmetry
+	 * with the other endpoints.
+	 */
+	public function ___executeDelete() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+		$itemsJson = (string) $input->post('items');
+		$items     = json_decode($itemsJson, true);
+		if (!is_array($items) || !$items) {
+			return $this->jsonError('No items provided');
+		}
+
+		// Group by pageId so each page is saved once.
+		$byPage = [];
+		foreach ($items as $item) {
+			if (!is_array($item)) continue;
+			$pid = (int) ($item['pageId'] ?? 0);
+			$fn  = $sanitizer->fieldName((string) ($item['fieldName'] ?? ''));
+			$bn  = basename((string) ($item['basename'] ?? ''));
+			if (!$pid || !$fn || !$bn) continue;
+			$byPage[$pid][] = ['fieldName' => $fn, 'basename' => $bn];
+		}
+		if (!$byPage) return $this->jsonError('No valid items');
+
+		$imageFields = $this->discoverImageFields();
+		$succeeded   = [];
+		$failed      = [];
+
+		foreach ($byPage as $pid => $pageItems) {
+			$page = $this->wire('pages')->get($pid);
+			if (!$page->id) {
+				foreach ($pageItems as $i) $failed[] = sprintf('Page %d not found', $pid);
+				continue;
+			}
+			if (!$page->editable()) {
+				foreach ($pageItems as $i) $failed[] = sprintf('Page %d not editable', $pid);
+				continue;
+			}
+			$page->of(false);
+			$fieldsTouched = [];
+			foreach ($pageItems as $i) {
+				$fn = $i['fieldName'];
+				$bn = $i['basename'];
+				if (!in_array($fn, $imageFields, true)) {
+					$failed[] = sprintf('%s on page %d is not a managed image field', $fn, $pid);
+					continue;
+				}
+				$pageimages = $page->getUnformatted($fn);
+				if (!($pageimages instanceof Pagefiles)) {
+					$failed[] = sprintf('%s on page %d has no files', $fn, $pid);
+					continue;
+				}
+				$img = $pageimages->getFile($bn);
+				if (!$img) {
+					$failed[] = sprintf('%s/%s on page %d not found', $fn, $bn, $pid);
+					continue;
+				}
+				try {
+					$pageimages->delete($img);
+					$fieldsTouched[$fn] = true;
+					$succeeded[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+				} catch (\Throwable $e) {
+					$failed[] = sprintf('%s/%s on page %d: %s', $fn, $bn, $pid, $e->getMessage());
+				}
+			}
+			if ($fieldsTouched) {
+				try {
+					foreach (array_keys($fieldsTouched) as $fn) {
+						$page->save($fn);
+					}
+				} catch (\Throwable $e) {
+					$failed[] = sprintf('Save on page %d failed: %s', $pid, $e->getMessage());
+				}
+			}
+		}
+
+		$this->wire('cache')->deleteFor($this);
+
+		return $this->jsonResponse([
+			'ok'        => true,
+			'succeeded' => $succeeded,
+			'failed'    => $failed,
+		]);
+	}
+
+	/**
 	 * Core rename routine — shared by ___executeRename (single) and
 	 * ___executeBulk's basename branch (batch). Resolves placeholders
 	 * in $pattern using $n + the image's page / field context,
@@ -2434,6 +2543,7 @@ class ProcessImageLibrary extends Process {
 			'bulkUrl'   => $this->wire('page')->url . 'bulk/',
 			'renameUrl'  => $this->wire('page')->url . 'rename/',
 			'replaceUrl' => $this->wire('page')->url . 'replace/',
+			'deleteUrl'  => $this->wire('page')->url . 'delete/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -2487,6 +2597,17 @@ class ProcessImageLibrary extends Process {
 				'importError'      => $this->_('Import failed'),
 				'batching'         => $this->_('Applying to %d selected…'),
 				'bulkResult'       => $this->_('Succeeded: %1$d  ·  Failed: %2$d'),
+				// Delete confirm + result labels. The JS substitutes %d
+				// for the count; the %d placeholder stays literal in the
+				// translatable strings.
+				'deleteOne'        => $this->_('Delete this image?'),
+				'deleteMany'       => $this->_('Delete %d images?'),
+				'deleteOneIntro'   => $this->_('The following file will be permanently removed:'),
+				'deleteManyIntro'  => $this->_('The following files will be permanently removed:'),
+				'deleteWarn'       => $this->_('This cannot be undone.'),
+				'deleteOk'         => $this->_('Delete'),
+				'deleted'          => $this->_('Deleted %d'),
+				'deletePartial'    => $this->_('Deleted %d, %d failed'),
 				// Field-dropdown label when a template is active — %s is
 				// the template name. The JS swaps "All image fields" for
 				// this so the user isn't told "all" while non-template
@@ -2966,18 +3087,29 @@ class ProcessImageLibrary extends Process {
 					. ' width="' . $dispW . '"'
 					. ' height="' . $dispH . '">';
 			}
-			// Replace icon — visible on row hover, opens the file picker
-			// for an in-place file swap. Drag-and-drop on the whole row
-			// is the parallel path; both end up calling the same JS
-			// handler against the same /replace/ endpoint.
+			// Per-row actions — both icons hang in the top-right of the
+			// thumb cell and are visible only on row hover. Replace
+			// triggers the file picker / accepts a row DnD; Delete
+			// opens a confirm dialog. Batch semantics for Delete
+			// follow the existing paintbrush: when N rows are
+			// selected, clicking Delete on any selected row's icon
+			// deletes the whole selection.
 			if (!empty($row['pageEditUrl'])) {
 				$replaceLabel = $san->entities(sprintf(
 					$this->_('Replace %s'), (string) $row['basename']
+				));
+				$deleteLabel = $san->entities(sprintf(
+					$this->_('Delete %s'), (string) $row['basename']
 				));
 				$out .= '<button type="button" class="ml-replace-btn"'
 					. ' title="' . $replaceLabel . '"'
 					. ' aria-label="' . $replaceLabel . '">'
 					. '<i class="fa fa-upload" aria-hidden="true"></i>'
+					. '</button>';
+				$out .= '<button type="button" class="ml-delete-btn"'
+					. ' title="' . $deleteLabel . '"'
+					. ' aria-label="' . $deleteLabel . '">'
+					. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
 					. '</button>';
 			}
 			$out .= '</td>';
