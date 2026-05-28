@@ -193,48 +193,79 @@
 	transition: opacity 0.2s ease-out;
 	opacity: 0;
 }
-/* Confirm dialog for Delete (single + batch). Same native <dialog>
-   approach as the bulk-result + columns dialogs; backdrop is the
-   browser default. */
+/* ------------------------------------------------------------------
+   SHARED DIALOG CHROME
+   ------------------------------------------------------------------
+   Four "panel" dialogs share the exact same outer styling: native
+   <dialog>, same border, padding, background, shadow and backdrop;
+   same <header> / <footer> rhythm. Per-dialog rules below only set
+   the WIDTH (each dialog has a different content density). The
+   image-modal is intentionally not in here — it's a near-fullscreen
+   iframe shell with its own bar instead of a header / footer pair —
+   but it shares the backdrop colour so the overlay matches. */
+.ml-popup-editor,
+.ml-columns-dialog,
+.ml-bulk-result-dialog,
 .ml-delete-confirm {
-	min-width: 360px;
-	max-width: 520px;
-	border: 1px solid var(--pw-border-color, #ddd);
+	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 4px;
-	padding: 0;
-	background: var(--pw-inputs-background, #fff);
-	color: var(--pw-text-color, #333);
+	padding: 1.25rem;
+	max-height: 90vh;
+	overflow: auto;
+	background: var(--pw-blocks-background, #fff);
+	color: var(--pw-text-color, inherit);
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 }
-.ml-delete-confirm header {
-	padding: 12px 16px;
+.ml-popup-editor::backdrop,
+.ml-columns-dialog::backdrop,
+.ml-bulk-result-dialog::backdrop,
+.ml-delete-confirm::backdrop,
+.ml-image-modal::backdrop {
+	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
+}
+.ml-popup-editor > header,
+.ml-columns-dialog > header,
+.ml-bulk-result-dialog > header,
+.ml-delete-confirm > header {
 	font-weight: 600;
-	border-bottom: 1px solid var(--pw-border-color, #eee);
+	font-size: 1.05em;
+	margin: 0 0 0.75rem;
+	padding: 0;
+	border: 0;
 }
-.ml-delete-confirm .ml-delete-confirm-body {
-	padding: 12px 16px;
-	font-size: 0.95em;
-	line-height: 1.4;
+.ml-popup-editor > footer,
+.ml-columns-dialog > footer,
+.ml-bulk-result-dialog > footer,
+.ml-delete-confirm > footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: 0.5rem;
+	margin-top: 1rem;
+	padding: 0;
+	border: 0;
 }
-.ml-delete-confirm .ml-delete-confirm-list {
-	margin: 8px 0 0;
-	padding: 0 0 0 18px;
+/* Per-dialog widths — each dialog's content density gets its own
+   target. min(_, 92vw) keeps things sane on narrow viewports. */
+.ml-popup-editor       { width: min(720px, 92vw); }
+.ml-bulk-result-dialog { width: min(640px, 92vw); }
+.ml-delete-confirm     { width: min(480px, 92vw); }
+.ml-columns-dialog     { width: min(420px, 92vw); }
+
+/* Delete-confirm content bits (preview list + warning line) — the
+   structural chrome is inherited from the shared block above. */
+.ml-delete-confirm-list {
+	margin: 0.5rem 0 0;
+	padding: 0 0 0 1.1rem;
 	max-height: 180px;
 	overflow: auto;
-	font-family: monospace;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	font-size: 0.85em;
 	color: var(--pw-muted-color, #666);
 }
-.ml-delete-confirm .ml-delete-confirm-warn {
-	margin-top: 8px;
+.ml-delete-confirm-warn {
+	margin-top: 0.5rem;
 	font-size: 0.85em;
-	color: #c33;
-}
-.ml-delete-confirm footer {
-	display: flex;
-	justify-content: flex-end;
-	gap: 8px;
-	padding: 10px 16px;
-	border-top: 1px solid var(--pw-border-color, #eee);
+	color: var(--pw-error-inline-text-color, #c33);
 }
 /* Drop-target highlight: the single row currently under the file
    drag pointer. Uses the same soft tint as inline-edit hover so the
@@ -489,26 +520,10 @@ textarea.ml-cell-input {
 
 /* Popup editor for textarea-typed subfields (description, custom
    FieldtypeTextarea customs like "summary"). Native <dialog>, so
-   the browser handles the backdrop + Esc + focus trap for us. */
-.ml-popup-editor {
-	border: 1px solid var(--pw-border-color, #ccc);
-	border-radius: 4px;
-	padding: 1.25rem;
-	width: min(720px, 92vw);
-	max-height: 90vh;
-	overflow: auto;
-	background: var(--pw-blocks-background, #fff);
-	color: var(--pw-text-color, inherit);
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-}
-.ml-popup-editor::backdrop {
-	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
-}
-.ml-popup-editor header {
-	font-weight: 600;
-	font-size: 1.05em;
-	margin-bottom: 0.75rem;
-}
+   the browser handles the backdrop + Esc + focus trap for us.
+   Outer chrome (border / padding / background / shadow / backdrop /
+   header / footer / width) is set in the shared dialog block. */
+
 /* Secondary help text inside a popup (e.g. rename placeholder
    syntax). Muted so it sits below the title without competing
    with the input itself. */
@@ -684,65 +699,18 @@ textarea.ml-langtabs-pane {
 .ml-col-hidden {
 	display: none !important;
 }
-.ml-columns-dialog {
-	border: 1px solid var(--pw-border-color, #ccc);
-	border-radius: 4px;
-	padding: 1.25rem;
-	width: min(420px, 92vw);
-	max-height: 85vh;
-	overflow: auto;
-	background: var(--pw-blocks-background, #fff);
-	color: var(--pw-text-color, inherit);
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-}
-.ml-columns-dialog::backdrop {
-	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
-}
-.ml-columns-dialog header {
-	font-weight: 600;
-	font-size: 1.05em;
-	margin-bottom: 0.5rem;
-}
+/* Columns dialog — outer chrome inherited from the shared dialog
+   block; only the hint paragraph is unique here. */
 .ml-columns-hint {
 	margin: 0 0 0.75rem;
 	color: var(--pw-muted-color, #777);
 	font-size: 0.9em;
 }
-.ml-columns-dialog footer {
-	display: flex;
-	justify-content: flex-end;
-	margin-top: 1rem;
-}
-.ml-columns-close {
-	font: inherit;
-	padding: 0.3rem 0.9rem;
-	cursor: pointer;
-}
 
 /* Bulk-result modal — replaces the old alert() for the
-   selection-as-paintbrush save report. Same chrome as the columns
-   dialog (border, padding, backdrop), but a touch wider to keep
-   long failure messages readable, and the inner list scrolls
-   when the report runs long. */
-.ml-bulk-result-dialog {
-	border: 1px solid var(--pw-border-color, #ccc);
-	border-radius: 4px;
-	padding: 1.25rem;
-	width: min(640px, 92vw);
-	max-height: 85vh;
-	overflow: auto;
-	background: var(--pw-blocks-background, #fff);
-	color: var(--pw-text-color, inherit);
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
-}
-.ml-bulk-result-dialog::backdrop {
-	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
-}
-.ml-bulk-result-header {
-	font-weight: 600;
-	font-size: 1.05em;
-	margin-bottom: 0.75rem;
-}
+   selection-as-paintbrush save report. Outer chrome inherited from
+   the shared dialog block; the inner list (which scrolls when the
+   failure report runs long) is unique. */
 .ml-bulk-result-list {
 	list-style: none;
 	padding: 0;
@@ -766,16 +734,6 @@ textarea.ml-langtabs-pane {
 }
 .ml-bulk-result-list li:last-child {
 	border-bottom: 0;
-}
-.ml-bulk-result-dialog footer {
-	display: flex;
-	justify-content: flex-end;
-	margin-top: 1rem;
-}
-.ml-bulk-result-close {
-	font: inherit;
-	padding: 0.3rem 0.9rem;
-	cursor: pointer;
 }
 /* Single-column stack so the dialog's top-to-bottom reading order
    matches the table's left-to-right column order. Each <li> is a
@@ -866,9 +824,6 @@ textarea.ml-langtabs-pane {
 	flex-direction: column;
 	background: var(--pw-blocks-background, #fff);
 }
-.ml-image-modal::backdrop {
-	background: var(--pw-modal-color, rgba(0, 0, 0, 0.5));
-}
 .ml-image-modal-bar {
 	flex: 0 0 auto;
 	display: flex;
@@ -890,12 +845,6 @@ textarea.ml-langtabs-pane {
 	width: 100%;
 	border: 0;
 	background: var(--pw-blocks-background, #fff);
-}
-.ml-popup-editor footer {
-	display: flex;
-	justify-content: flex-end;
-	gap: 0.5rem;
-	margin-top: 1rem;
 }
 .ml-popup-editor .ml-batch-mode {
 	margin: 0.75rem 0 0;

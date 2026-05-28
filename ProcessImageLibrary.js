@@ -992,13 +992,11 @@
 				: (labels.deleteMany || 'Delete %d images?').replace('%d', items.length);
 			dialog.appendChild(header);
 
-			var body = document.createElement('div');
-			body.className = 'ml-delete-confirm-body';
-			var intro = document.createElement('div');
+			var intro = document.createElement('p');
 			intro.textContent = items.length === 1
 				? (labels.deleteOneIntro || 'The following file will be permanently removed:')
 				: (labels.deleteManyIntro || 'The following files will be permanently removed:');
-			body.appendChild(intro);
+			dialog.appendChild(intro);
 
 			var list = document.createElement('ul');
 			list.className = 'ml-delete-confirm-list';
@@ -1013,13 +1011,12 @@
 				more.textContent = '… +' + (items.length - show) + ' more';
 				list.appendChild(more);
 			}
-			body.appendChild(list);
+			dialog.appendChild(list);
 
-			var warn = document.createElement('div');
+			var warn = document.createElement('p');
 			warn.className = 'ml-delete-confirm-warn';
 			warn.textContent = labels.deleteWarn || 'This cannot be undone.';
-			body.appendChild(warn);
-			dialog.appendChild(body);
+			dialog.appendChild(warn);
 
 			var footer = document.createElement('footer');
 			var cancelBtn = document.createElement('button');
@@ -1271,7 +1268,8 @@
 			bulkDialog.innerHTML =
 				'<header class="ml-bulk-result-header"></header>'
 				+ '<ul class="ml-bulk-result-list"></ul>'
-				+ '<footer><button type="button" class="ml-bulk-result-close">'
+				+ '<footer><button type="button" class="ml-bulk-result-close'
+				+ ' uk-button uk-button-default uk-button-small">'
 				+ ((labels && labels.close) ? labels.close : 'Close')
 				+ '</button></footer>';
 			root.appendChild(bulkDialog);
