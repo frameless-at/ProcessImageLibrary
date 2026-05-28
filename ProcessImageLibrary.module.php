@@ -89,6 +89,68 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Pick (and lazily generate) the thumbnail variation for a single
+	 * Pageimage following the same rules used by the row hydrator:
+	 *
+	 *  - svg / gif → original (no resize)
+	 *  - keep-ratio + longerSide ≤ 260 → PW admin variation (0×260 or 260×0)
+	 *  - keep-ratio + longerSide  > 260 → dedicated longer-axis variation
+	 *  - crop + box fits admin variation → reuse admin variation
+	 *  - crop + box doesn't fit          → dedicated cropping=true variation
+	 *
+	 * Both hydrateSlice and ___executeReplace call this — the replace
+	 * endpoint needs it to materialise the variation file on disk right
+	 * after removeVariations() wiped the old one, so the cache-busted
+	 * thumb URL the client gets back actually resolves.
+	 *
+	 * @param array $thumb Output of getThumbDims().
+	 * @return array{url:string,width:int,height:int}
+	 */
+	protected function resolveThumbForImage(Pageimage $img, array $thumb): array {
+		$ext = strtolower((string) $img->ext);
+		$skipResize = $ext === 'svg' || $ext === 'gif';
+		$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
+
+		if ($skipResize) {
+			$thumbImg = $img;
+		} elseif ($thumb['keepRatio']) {
+			$longer = (int) $thumb['longerSide'];
+			if ($longer <= 260) {
+				if ($img->width >= $img->height) {
+					$thumbImg = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
+				} else {
+					$thumbImg = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
+				}
+			} else {
+				if ($img->width >= $img->height) {
+					$thumbImg = ($img->width > $longer) ? $img->size($longer, 0, $opts) : $img;
+				} else {
+					$thumbImg = ($img->height > $longer) ? $img->size(0, $longer, $opts) : $img;
+				}
+			}
+		} else {
+			$tW = (int) $thumb['width'];
+			$tH = (int) $thumb['height'];
+			if ($img->width >= $img->height) {
+				$adminVar = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
+			} else {
+				$adminVar = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
+			}
+			if ($tW <= (int) $adminVar->width && $tH <= (int) $adminVar->height) {
+				$thumbImg = $adminVar;
+			} else {
+				$thumbImg = $img->size($tW, $tH, $opts + ['cropping' => true]);
+			}
+		}
+
+		return [
+			'url'    => (string) $thumbImg->url,
+			'width'  => (int) $thumbImg->width,
+			'height' => (int) $thumbImg->height,
+		];
+	}
+
+	/**
 	 * Admin-configurable per-page options (comma- or whitespace-
 	 * separated list in the config). Falls back to PAGE_SIZE_OPTIONS
 	 * when nothing's set; always sorted, deduped, positive ints.
@@ -1121,13 +1183,26 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Replace error: ' . $e->getMessage());
 		}
 
+		// Pre-generate the same thumbnail variation hydrateSlice would
+		// produce, so the cache-busted URL the JS swaps in actually
+		// resolves immediately — without this the browser would 404
+		// against the just-removed variation file until the next page
+		// render lazily recreates it.
+		$img2 = $this->resolvePageimage($page, $fieldName, $basename) ?: $img;
+		$thumbInfo = $this->resolveThumbForImage($img2, $this->getThumbDims());
+
 		clearstatcache(true, $targetPath);
 		$mtime = @filemtime($targetPath);
+		$cacheBust = $mtime ? (string) $mtime : (string) time();
+
 		return $this->jsonResponse([
-			'ok'        => true,
-			'basename'  => $basename,
-			'cacheBust' => $mtime ? (string) $mtime : (string) time(),
-			'filesize'  => (int) @filesize($targetPath),
+			'ok'          => true,
+			'basename'    => $basename,
+			'cacheBust'   => $cacheBust,
+			'filesize'    => (int) @filesize($targetPath),
+			'thumbUrl'    => $thumbInfo['url'] . '?v=' . $cacheBust,
+			'thumbWidth'  => $thumbInfo['width'],
+			'thumbHeight' => $thumbInfo['height'],
 		]);
 	}
 
@@ -2197,74 +2272,10 @@ class ProcessImageLibrary extends Process {
 			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
 			if (!$img) continue;
 
-			// Non-rasterisable / animation-preserving formats: serve
-			// the original instead of running it through ImageSizer.
-			// SVG loses its vector nature on size(); GIF loses its
-			// animation when re-encoded — and browsers render
-			// animated GIFs in <img> tags natively, so the original
-			// played at CSS-constrained size is exactly what the user
-			// wants to see. CSS still keeps the cell compact via
-			// max-width / object-fit.
-			$ext = strtolower((string) $img->ext);
-			$skipResize = $ext === 'svg' || $ext === 'gif';
-
-			// Source-file decision: try to ride PW's lazily-generated
-			// admin variation (260 px on the shorter axis — same call
-			// signature InputfieldImage::getAdminThumb uses) whenever
-			// the configured display target fits inside it. The admin
-			// variation has shorter axis = 260 and longer axis ≥ 260,
-			// so display targets ≤ 260 on every relevant axis are
-			// safely covered. Above the threshold we generate a
-			// dedicated variation so the requested pixels actually
-			// exist on disk.
-			$opts = ['upscaling' => false, 'quality' => $thumb['quality']];
-
-			if ($skipResize) {
-				$thumbImg = $img;
-			} elseif ($thumb['keepRatio']) {
-				// Keep-ratio mode — single "longer-side" cap from
-				// the user's config drives display. ≤ 260 ⇒ admin
-				// variation (the longer axis is always ≥ 260, so
-				// it's never the binding constraint at this point).
-				// > 260 ⇒ produce a matching size($longer, 0) /
-				// size(0, $longer) variation so the longer-axis
-				// display target is met without browser upscaling.
-				$longer = (int) $thumb['longerSide'];
-				if ($longer <= 260) {
-					if ($img->width >= $img->height) {
-						$thumbImg = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
-					} else {
-						$thumbImg = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
-					}
-				} else {
-					if ($img->width >= $img->height) {
-						$thumbImg = ($img->width > $longer) ? $img->size($longer, 0, $opts) : $img;
-					} else {
-						$thumbImg = ($img->height > $longer) ? $img->size(0, $longer, $opts) : $img;
-					}
-				}
-			} else {
-				// Crop mode — compare W × H against what the admin
-				// variation can carry. Fits ⇒ reuse it and let CSS
-				// object-fit: cover handle the visible crop. Doesn't
-				// fit (e.g. 500 × 500 super-thumb) ⇒ produce a
-				// dedicated cropping=true variation.
-				$tW = (int) $thumb['width'];
-				$tH = (int) $thumb['height'];
-				if ($img->width >= $img->height) {
-					$adminVar = ($img->height > 260) ? $img->size(0, 260, $opts) : $img;
-				} else {
-					$adminVar = ($img->width > 260) ? $img->size(260, 0, $opts) : $img;
-				}
-				if ($tW <= (int) $adminVar->width && $tH <= (int) $adminVar->height) {
-					$thumbImg = $adminVar;
-				} else {
-					$thumbImg = $img->size($tW, $tH, $opts + ['cropping' => true]);
-				}
-			}
-			$row['thumbUrl']    = $thumbImg->url;
-			$row['thumbWidth']  = (int) $thumbImg->width;
-			$row['thumbHeight'] = (int) $thumbImg->height;
+			$thumbInfo = $this->resolveThumbForImage($img, $thumb);
+			$row['thumbUrl']    = $thumbInfo['url'];
+			$row['thumbWidth']  = $thumbInfo['width'];
+			$row['thumbHeight'] = $thumbInfo['height'];
 			// Variations count — Phase 2 column from the concept,
 			// useful for pre-warm diagnosis and cleanup. getVariations()
 			// does a filesystem scan per image, but only for the 50-ish

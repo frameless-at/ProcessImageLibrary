@@ -831,17 +831,13 @@
 					announce((labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''));
 					return;
 				}
-				// Cache-bust the thumbnail src so the new bytes show
-				// up immediately. ?v=<filemtime> is stable enough that
-				// shared cache entries for the OLD bytes get bypassed,
-				// and reproducible enough that re-renders of the same
-				// version don't keep churning new URLs.
+				// Use the server-resolved thumb URL directly — it points
+				// at the freshly-regenerated variation (the old one was
+				// wiped by removeVariations) and carries the cache-bust
+				// parameter so the browser doesn't reuse the old bytes.
 				var img = tr.querySelector('.ml-cell-thumb img');
-				if (img && img.src) {
-					var bust = data.cacheBust || String(Date.now());
-					var u = new URL(img.src, location.href);
-					u.searchParams.set('v', bust);
-					img.src = u.toString();
+				if (img && data.thumbUrl) {
+					img.src = data.thumbUrl;
 				}
 				announce(labels.saved || 'Saved');
 			}).catch(function (err) {
@@ -888,42 +884,70 @@
 			replaceFileInput.click();
 		});
 
-		// Drag-and-drop on rows. Global dragover prevent-default keeps
-		// the browser from opening the file when the user drops outside
-		// a drop zone; per-row handlers add the highlight + dispatch
-		// to replaceImage on the actual drop.
+		// Drag-and-drop on rows. dataTransfer.types is a DOMStringList in
+		// some engines (no Array methods), so we iterate by index.
+		function dragHasFiles(e) {
+			if (!e.dataTransfer) return false;
+			var types = e.dataTransfer.types;
+			if (!types) return false;
+			for (var i = 0; i < types.length; i++) {
+				if (types[i] === 'Files') return true;
+			}
+			return false;
+		}
+		// Global dragover preventDefault keeps the browser from opening
+		// the file when the user drops outside a drop zone, AND is the
+		// signal that lets `drop` events fire on descendants (HTML5
+		// spec: drop only fires if the preceding dragover wasn't the
+		// default-action one). Belt-and-suspenders: results gets its
+		// own dragover listener too so dropEffect can be set explicitly.
 		document.addEventListener('dragover', function (e) {
-			if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1) {
+			if (dragHasFiles(e)) e.preventDefault();
+		});
+		document.addEventListener('drop', function (e) {
+			// Catch anything that wasn't claimed by a row listener so the
+			// browser doesn't navigate to the dropped file.
+			if (dragHasFiles(e)) e.preventDefault();
+		});
+		if (results) {
+			results.addEventListener('dragover', function (e) {
+				if (!dragHasFiles(e)) return;
 				e.preventDefault();
-			}
-		});
-		results && results.addEventListener('dragenter', function (e) {
-			var tr = e.target.closest && e.target.closest('tr');
-			if (!isEditableRow(tr)) return;
-			if (!e.dataTransfer || Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') === -1) return;
-			tr.classList.add('ml-row-drop-target');
-		});
-		results && results.addEventListener('dragleave', function (e) {
-			var tr = e.target.closest && e.target.closest('tr');
-			if (!tr) return;
-			// dragleave fires when crossing child boundaries too — only
-			// drop the highlight when the pointer actually exits the row.
-			if (e.relatedTarget && tr.contains(e.relatedTarget)) return;
-			tr.classList.remove('ml-row-drop-target');
-		});
-		results && results.addEventListener('drop', function (e) {
-			var tr = e.target.closest && e.target.closest('tr');
-			if (!isEditableRow(tr)) return;
-			if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
-			e.preventDefault();
-			e.stopPropagation();
-			tr.classList.remove('ml-row-drop-target');
-			if (e.dataTransfer.files.length > 1) {
-				announce((labels.error || 'Replace failed') + ': only one file at a time');
-				return;
-			}
-			replaceImage(tr, e.dataTransfer.files[0]);
-		});
+				var tr = e.target.closest && e.target.closest('tr');
+				if (e.dataTransfer) {
+					e.dataTransfer.dropEffect = isEditableRow(tr) ? 'copy' : 'none';
+				}
+			});
+			results.addEventListener('dragenter', function (e) {
+				if (!dragHasFiles(e)) return;
+				var tr = e.target.closest && e.target.closest('tr');
+				if (!isEditableRow(tr)) return;
+				tr.classList.add('ml-row-drop-target');
+			});
+			results.addEventListener('dragleave', function (e) {
+				var tr = e.target.closest && e.target.closest('tr');
+				if (!tr) return;
+				// dragleave fires when crossing child boundaries too —
+				// only drop the highlight when the pointer actually
+				// exits the row.
+				if (e.relatedTarget && tr.contains(e.relatedTarget)) return;
+				tr.classList.remove('ml-row-drop-target');
+			});
+			results.addEventListener('drop', function (e) {
+				if (!dragHasFiles(e)) return;
+				e.preventDefault();
+				e.stopPropagation();
+				var tr = e.target.closest && e.target.closest('tr');
+				if (!isEditableRow(tr)) return;
+				tr.classList.remove('ml-row-drop-target');
+				if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+				if (e.dataTransfer.files.length > 1) {
+					announce((labels.error || 'Replace failed') + ': only one file at a time');
+					return;
+				}
+				replaceImage(tr, e.dataTransfer.files[0]);
+			});
+		}
 
 		// -- AJAX re-render --------------------------------------------
 
