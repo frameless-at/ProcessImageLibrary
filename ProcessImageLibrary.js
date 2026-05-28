@@ -514,6 +514,16 @@
 					var oldStem = td.dataset.stem || '';
 					if (newStem === '' || newStem === oldStem) { teardown(); return; }
 					teardown();
+					// Optimistic update — show the new stem in the cell
+					// immediately so the rhythm matches a single inline
+					// save (which already does td.textContent = newValue
+					// before the AJAX call). Batch rename can't resolve
+					// the per-cell counter locally, so the template
+					// string is the best we can pin in place.
+					var stemEl = td.querySelector('.ml-fn-stem');
+					var prevStem = td.dataset.stem || '';
+					if (stemEl) stemEl.textContent = newStem;
+					td.dataset.stem = newStem;
 					td.classList.add('ml-cell-saving');
 					td.title = labels.saving || 'Saving…';
 
@@ -548,11 +558,16 @@
 								replaceFromQs(location.search, false);
 							}, ok ? 1400 : 0);
 							if (!ok && td.isConnected) {
+								// Revert the optimistic stem update.
+								if (stemEl) stemEl.textContent = prevStem;
+								td.dataset.stem = prevStem;
 								td.classList.remove('ml-cell-saving');
 								flashCell(td, false);
 							}
 						}).catch(function (err) {
 							if (!td.isConnected) return;
+							if (stemEl) stemEl.textContent = prevStem;
+							td.dataset.stem = prevStem;
 							td.classList.remove('ml-cell-saving');
 							td.title = (err && err.message) || labels.error || 'Network error';
 							flashCell(td, false);
@@ -591,6 +606,9 @@
 								replaceFromQs(location.search, false);
 							}, 1400);
 						} else {
+							// Revert the optimistic stem update.
+							if (stemEl) stemEl.textContent = prevStem;
+							td.dataset.stem = prevStem;
 							var reason = (result && result.data && result.data.error)
 								|| ('HTTP ' + (result && result.status));
 							console.error('[ImageLibrary] rename failed:', result);
@@ -599,6 +617,8 @@
 						}
 					}).catch(function (err) {
 						if (!td.isConnected) return;
+						if (stemEl) stemEl.textContent = prevStem;
+						td.dataset.stem = prevStem;
 						td.classList.remove('ml-cell-saving');
 						console.error('[ImageLibrary] rename errored:', err);
 						td.title = (err && err.message) || labels.error || 'Network error';
@@ -638,7 +658,28 @@
 						if (sendValue === '') { teardown(); return; }
 					}
 					teardown();
-					td.textContent = '…';
+					// Optimistic update — show the post-save value
+					// directly so the visual rhythm matches the single
+					// inline save. For Replace mode that's primaryValue
+					// verbatim; for Add mode it's the existing content
+					// plus the broadcast delta, which is what every
+					// selected row will end up holding.
+					var optimisticBulkValue = primaryValue;
+					if ((mode || 'replace') === 'add' && !isMultilang) {
+						if (td.dataset.subfield === 'tags') {
+							var origToks2 = original.split(/\s+/).filter(Boolean);
+							var addToks2  = sendValue.split(/\s+/).filter(Boolean);
+							var seen2 = Object.create(null);
+							var merged2 = [];
+							origToks2.concat(addToks2).forEach(function (t) {
+								if (!seen2[t]) { seen2[t] = true; merged2.push(t); }
+							});
+							optimisticBulkValue = merged2.join(' ');
+						} else if (sendValue !== '') {
+							optimisticBulkValue = (original ? original + ' ' : '') + sendValue;
+						}
+					}
+					td.textContent = optimisticBulkValue;
 					td.classList.add('ml-cell-saving');
 					var bulkExtra = {
 						subfield: td.dataset.subfield,
@@ -650,7 +691,6 @@
 						var ok = reportBulk(result);
 						if (ok && td.isConnected) {
 							td.classList.remove('ml-cell-saving');
-							td.textContent = primaryValue;
 							flashCell(td, true);
 						}
 						// Defer re-render so the flash plays first,
