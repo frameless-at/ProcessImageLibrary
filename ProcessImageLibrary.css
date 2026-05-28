@@ -181,11 +181,19 @@
 .ml-replace-btn:hover {
 	color: var(--pw-main-color, #5b8cd6);
 }
-/* Drop-target highlight while the user drags a file over the row.
-   Use a thin inset outline so the row doesn't shift its column widths
-   when the indicator appears. */
-.ml-row-drop-target > td {
+/* While a file drag is in progress anywhere on the page, dim-tint
+   every editable row so the user sees at a glance which rows are
+   valid Replace targets. Read-only rows (no data-page-id) stay
+   unchanged. The body class is toggled in JS from the document-level
+   dragover/drop listeners. */
+body.ml-file-dragging .ml-table tbody tr[data-page-id] > td {
 	background: var(--pw-table-row-hover-background, rgba(0, 0, 0, 0.04));
+}
+/* The row currently under the pointer gets a stronger accent on top,
+   so the user knows where the drop will land. Inset shadow instead of
+   outline so column widths stay stable. */
+.ml-row-drop-target > td {
+	background: var(--pw-table-row-hover-background, rgba(0, 0, 0, 0.08));
 	box-shadow: inset 0 0 0 1px var(--pw-main-color, #5b8cd6);
 }
 /* While the replace request is in flight, dim the row so it's
@@ -476,8 +484,20 @@ textarea.ml-cell-input {
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, inherit);
 }
-.ml-popup-editor textarea:focus,
-.ml-popup-editor input[type="text"]:focus {
+/* No focus outline anywhere on module-owned UI — user preference,
+   per the doc-trail. Covers .ml-root (the admin page region) plus
+   every <dialog> the JS spawns into <body>. Browsers' default focus
+   ring otherwise leaks through wherever an explicit rule is absent. */
+.ml-root :focus,
+.ml-root :focus-visible,
+.ml-popup-editor :focus,
+.ml-popup-editor :focus-visible,
+.ml-image-modal :focus,
+.ml-image-modal :focus-visible,
+.ml-bulk-result-dialog :focus,
+.ml-bulk-result-dialog :focus-visible,
+.ml-columns-dialog :focus,
+.ml-columns-dialog :focus-visible {
 	outline: none;
 }
 .ml-popup-editor input[type="text"] {
@@ -572,9 +592,6 @@ textarea.ml-cell-input {
 	resize: vertical;
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, inherit);
-}
-.ml-langtabs-pane:focus {
-	outline: none;
 }
 textarea.ml-langtabs-pane {
 	min-height: 12em;
@@ -758,9 +775,6 @@ textarea.ml-langtabs-pane {
 	background: color-mix(in srgb, var(--pw-main-background, #f0f0f0) 60%, var(--pw-text-color, #000) 8%);
 	color: var(--pw-text-color, #333);
 }
-.ml-col-move:focus-visible {
-	outline: none;
-}
 
 /* Visually-hidden live region — kept in the DOM and announced by
    screen readers, invisible to sighted users. Same idiom as
@@ -779,10 +793,6 @@ textarea.ml-langtabs-pane {
 
 /* Editable cells advertise themselves as buttons for keyboard
    users — show a focus ring so the active cell is obvious. */
-.ml-cell-editable:focus-visible,
-.ml-cell-thumb[role="button"]:focus-visible {
-	outline: none;
-}
 
 /* Image-editor modal — wraps PW's ProcessPageEdit in an iframe so
    the user gets the native crop / focus / variations UI plus all
