@@ -23,7 +23,7 @@ Ein ProcessWire-Modul, das **alle Bilder einer PW-Installation** in einer einzig
 - **Delete Image (Einzel + Batch)**: Trash-Icon auf der Row, hinter einem Confirm-Dialog mit Count + Filename-Preview + „kein Undo"-Warnung. Selection-als-Pinsel gilt auch hier: bei N selektierten Rows löscht ein Klick auf das Trash-Icon einer selektierten Row die gesamte Selektion. Per-Row-Fehler landen im bestehenden Bulk-Result-Modal
 - **Datums-Spalten**: Uploaded (Pagefile `created`) und Modified, sortierbar, formatiert über `$config->dateFormat`
 - **Variations-Spalte**: pro Bild Zähler aus `$img->getVariations()`
-- **Export / Import**: JSON und CSV (mit multilang-aware Spalten-Suffixen `<subfield>_<langName>`)
+- **Export / Import**: JSON und CSV (mit multilang-aware Spalten-Suffixen `<subfield>_<langName>`). Image-URL-Varianten-Picker im Export — Original / 260 / 512 / 1024 px kürzere Seite — damit externe Pipelines (z. B. AI-Vision-Agents) günstige Admin-Variations statt der Original-Files fetchen können
 - Server-side Filter / Sortierung / Pagination mit **capability-basierter Filter-Verengung**: das Tags-Fieldset und jede `Missing <custom>`-Checkbox blenden sich live aus, sobald die aktive Template- / Image-Feld-Auswahl die jeweilige Capability nicht trägt
 - Spalten-Konfiguration per User in `$user->meta('imageLibraryPrefs')` — **cross-device**, inklusive Page-Size
 - Auto-Erkennung von **Custom Fields on Images** (`field-{fieldname}`-Template, PW 3.0.142+)
@@ -74,7 +74,7 @@ Die `src/`-Traits halten das Main-Modul-File auf AJAX-Endpoints + Rendering foku
 - `___executeRename()` — AJAX-POST, benennt das File eines einzelnen Bildes um (oder im Batch-Modus jedes selektierte Bild) via `Pagefile::rename()` nach Platzhalter-Expansion und Bereinigung alter Variations-Files.
 - `___executeReplace()` — AJAX-POST, ersetzt die File-Bytes eines Bildes via `move_uploaded_file()` auf den existierenden Pfad, droppt alte Variations, regeneriert das Thumb-Variation und gibt den aktualisierten Cell-Payload zurück (Thumb-URL, Dimensions, Filesize, Modified, Variations-Zähler). Extension-Match wird erzwungen, damit der Basename gültig bleibt.
 - `___executeDelete()` — AJAX-POST mit einem `items`-Array; Einzel + Batch teilen denselben Pfad. Pro Page `$page->editable()`, dann `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed-Listen, damit JS die Rows ausfaden lassen und Partial-Failures via Bulk-Result-Dialog reporten kann.
-- `___executeExport()` — Direct-Download von JSON oder CSV unter Berücksichtigung der aktiven Filter.
+- `___executeExport()` — Direct-Download von JSON oder CSV unter Berücksichtigung der aktiven Filter. Liest `urlVariant` (`original` Default; `260` / `512` / `1024` für same-axis Variations) und emittiert die passende URL in der `url`-Spalte; die gewählte Variante wird in `meta.urlVariant` festgehalten.
 - `___executeImport()` — AJAX-POST, akzeptiert eine vorher exportierte (und extern bearbeitete) JSON/CSV-Datei und schreibt zurück; idempotent (unverändert gebliebene Items werden geskippt).
 - `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size in `$user->meta('imageLibraryPrefs')` (debounced).
 - `___install()` / `___uninstall()` — Admin-Page-Lifecycle + Permission `image-library-access`.

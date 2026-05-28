@@ -212,6 +212,7 @@ Bottom of the page — a collapsible fieldset with Export buttons and an Import 
 
 - **Export JSON** — full structured export of the currently filtered set
 - **Export CSV** — flat tabular export; multilang subfields expand to language-suffixed columns (e.g. `description_english`, `description_german`)
+- **Image URL variant picker** — choose what URL goes into the `url` field of the export: **Original** (the raw file), or a same-axis variation at **260 / 512 / 1024 px shorter side**. The variants follow the admin-variation rule (shorter axis capped, longer axis auto). Use case: handing the export to an AI vision pipeline / agent without making it download 5 MB originals — the 260 px variant is already on disk from the admin's lazy generation and is usually enough for description-generation work. SVG / GIF are emitted untouched.
 
 The download URL carries the live filter state at click time, so you always get exactly the slice you're looking at.
 
@@ -224,6 +225,7 @@ JSON structure:
     "siteUrl": "https://yoursite.com",
     "imageCount": 59,
     "appliedFilter": { "no_desc": true },
+    "urlVariant": "260",
     "editableFields": ["description", "tags", "custom.*"],
     "readOnlyFields": ["id", "pageId", "fieldName", "basename", "url", …]
   },
