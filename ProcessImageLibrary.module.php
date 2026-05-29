@@ -3150,40 +3150,31 @@ class ProcessImageLibrary extends Process {
 			$outer->add($cb);
 		}
 
-		// Apply + Reset wrapped in their own sub-fieldset so they
-		// always sit on a dedicated row (independent of how the
-		// missing-X grid wrapped above). Flex-left via .ml-filter-bar
-		// CSS pulls them to the row's left edge, with Apply first
-		// (the primary action reads first in a left-aligned cluster).
-		// Reset stays a real <a>; JS intercepts it for AJAX reset.
-		/** @var \ProcessWire\InputfieldFieldset $actionsFs */
-		$actionsFs = $modules->get('InputfieldFieldset');
-		$actionsFs->name        = 'mlActions';
-		$actionsFs->skipLabel   = Inputfield::skipLabelHeader;
-		$actionsFs->columnWidth = 100;
-
-		$apply = $modules->get('InputfieldSubmit');
-		$apply->name  = 'apply';
-		$apply->value = $this->_('Apply');
-		// InputfieldSubmit / InputfieldButton are PW core fields and
-		// render their <button> with jQuery-UI heritage classes
-		// (ui-button …) that AdminThemeUikit only skins via the wrapper.
-		// Add the native UIkit button classes explicitly so the two
-		// filter actions match the module's own dialog buttons instead
-		// of carrying a different (ui-*) class system.
-		$apply->addClass('uk-button uk-button-primary');
-		$actionsFs->add($apply);
-
-		$reset = $modules->get('InputfieldButton');
-		$reset->name = 'reset';
-		$reset->value = $this->_('Reset');
-		$reset->attr('href', './');
-		// Secondary (grey) UIkit button — same uk-button-secondary the
-		// popup Cancel / Close buttons use, so Reset matches them.
-		$reset->addClass('ml-reset uk-button uk-button-secondary');
-		$actionsFs->add($reset);
-
-		$outer->add($actionsFs);
+		// Apply + Reset as raw UIkit buttons inside an InputfieldMarkup.
+		// PW's InputfieldSubmit / InputfieldButton render their <button>
+		// with jQuery-UI heritage classes (ui-button …) that
+		// AdminThemeUikit styles with enough weight to override any
+		// uk-button class added alongside — so adding uk classes to the
+		// core fields has no visual effect. Hand-rendering is the only
+		// way to get true UIkit buttons that match the module's own
+		// dialog buttons (uk-button-secondary = grey, like Cancel /
+		// Close). Apply is type=submit so the form's submit handler
+		// still fires; Reset stays a real <a href="./"> the JS
+		// intercepts for the AJAX reset. Flex-left layout via
+		// .ml-filter-actions.
+		$san = $this->wire('sanitizer');
+		$actions = $modules->get('InputfieldMarkup');
+		$actions->name        = 'mlActions';
+		$actions->skipLabel   = Inputfield::skipLabelHeader;
+		$actions->columnWidth = 100;
+		$actions->value =
+			'<div class="ml-filter-actions">'
+			. '<button type="submit" name="apply" class="uk-button uk-button-primary">'
+			. $san->entities($this->_('Apply')) . '</button>'
+			. '<a href="./" class="ml-reset uk-button uk-button-secondary">'
+			. $san->entities($this->_('Reset')) . '</a>'
+			. '</div>';
+		$outer->add($actions);
 
 		$form->add($outer);
 

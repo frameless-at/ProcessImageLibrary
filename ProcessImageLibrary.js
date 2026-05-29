@@ -1797,9 +1797,10 @@
 		}
 		function updateResetVisibility() {
 			if (!filterForm) return;
-			// PW wraps every Inputfield in a <li class="Inputfield_<name>">;
-			// hiding the wrapper removes both link AND its layout cell.
-			var wrap = filterForm.querySelector('.Inputfield_reset');
+			// Reset is now a hand-rendered <a class="ml-reset"> inside
+			// the actions markup (no PW Inputfield wrapper to hide);
+			// toggle the anchor itself.
+			var wrap = filterForm.querySelector('.ml-reset');
 			if (wrap) wrap.hidden = !hasAnyFilterActive();
 		}
 

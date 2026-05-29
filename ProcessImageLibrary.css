@@ -33,19 +33,13 @@
 }
 
 /* Action row: Apply + Reset pinned to the left edge, primary
-   (Apply) first. Buttons shrink to their content width inside
-   the flex row so they don't stretch to a column-width
-   allocation. */
-.ml-filter-bar .Inputfield_mlActions > .InputfieldContent > .Inputfields {
+   (Apply) first. The two buttons are hand-rendered UIkit buttons
+   inside an InputfieldMarkup, wrapped in .ml-filter-actions. */
+.ml-filter-actions {
 	display: flex;
 	justify-content: flex-start;
 	align-items: center;
 	gap: 0.5rem;
-}
-.ml-filter-bar .Inputfield_mlActions .Inputfield {
-	width: auto;
-	flex: 0 0 auto;
-	margin: 0;
 }
 
 /* Module-settings cog. Sits absolute in the .ml-root so it lifts
