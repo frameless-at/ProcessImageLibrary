@@ -296,7 +296,6 @@
 	color: var(--pw-code-color, inherit);
 }
 .ml-cell-desc,
-.ml-cell-tags,
 .ml-cell-textarea {
 	min-width: 14rem;
 	max-width: 28rem;
