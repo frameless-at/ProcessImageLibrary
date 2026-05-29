@@ -127,6 +127,8 @@ Storage piggy-backs on `$user->meta('imageLibraryPrefs')` alongside the existing
 - **Dimensions, Size, Variations** — read-only.
 - **Custom subfields** — auto-discovered from each image field's `field-{name}` custom template (PW 3.0.142+). Editable.
 
+**Long-value display.** Description and Textarea-backed custom cells cap their *visible* height to a few lines (≈150 characters) with a trailing ellipsis so a long value can't stretch the row and blow up the table layout. Only the display is clamped — the full text always stays in the cell, so clicking it opens the editor with the complete value (see [Inline editing](#inline-editing)). The line count is configurable via the `--ml-clamp-lines` CSS custom property (default 3).
+
 Column-header click toggles sort direction. Active sort gets `aria-sort=ascending/descending` for screen readers.
 
 ### Columns dialog
@@ -143,7 +145,7 @@ The `fa-columns` icon in the pagination row opens a `<dialog>` listing every col
 
 ## Inline editing
 
-Click any cell with a hover highlight. A modal popup opens with the widget appropriate to the subfield:
+Click any cell with a hover highlight. A modal popup opens with the widget appropriate to the subfield. Even when the table view clamps a long value to a few lines, the editor always opens with the **complete** text — the clamp is purely visual.
 
 - **Description** — textarea
 - **Tags (free-form)** — text input with native `<datalist>` autocomplete pulled from tags actually in use on rows of that field
@@ -159,10 +161,11 @@ Save commits via AJAX, the cell flashes green on success / red on failure. Scree
 
 ### Editing as paintbrush (bulk)
 
-When one or more rows are ticked via the selection checkboxes, editing any cell on a selected row opens the same popup with an extra **Add / Replace** radio group. The chosen value broadcasts to every selected row.
+When one or more rows are ticked via the selection checkboxes, editing any cell on a selected row opens the same popup with an extra mode radio group — **Add / Replace** for description, customs and filenames, plus a third **Remove** option for tags. The chosen value broadcasts to every selected row.
 
 - **Replace** — overwrites the existing value
 - **Add** — appends (for text/textarea), unions tag tokens (for tags)
+- **Remove** (tags only) — drops the listed tag tokens from each selected row's tag set; a no-op for rows that don't carry them
 
 ![Bulk-edit popup with Add / Replace radios visible because multiple rows are selected](docs/screenshots/08-bulk-edit.png)
 

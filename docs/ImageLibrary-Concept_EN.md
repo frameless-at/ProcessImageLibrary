@@ -17,7 +17,7 @@ A ProcessWire module that shows **every image in a PW installation** in a single
 - **Repeater / RepeaterMatrix support**: images stored inside a repeater field are resolved up to their owner page so the Page column, sort and template filter operate on the visible owner — not on the internal `repeater_<field>` storage page
 - Inline edit of editable subfields (description, tags, custom fields); Textarea customs open a popup
 - **Multilingual subfields**: per-language tabs in the popup (pre-activated on the editor's current admin language), round-trip in JSON / CSV export-import
-- **Bulk edit** via "selection as paintbrush": ticked rows are updated alongside the next cell save in Add or Replace mode
+- **Bulk edit** via "selection as paintbrush": ticked rows are updated alongside the next cell save in Add or Replace mode (tags additionally offer a Remove mode that drops the listed tag tokens from each selected row)
 - **Filename rename**: inline (single image) or batch (across the active selection) via the same popup; placeholder grammar `(n)`, `(n2)..(n5)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)` works in every prose-shaped editor (filename, description, custom text/textarea) — tags excluded
 - **Replace image in place**: click the upload icon on a row OR drag a file onto the row. Bytes swap, basename + URLs + Pagefile metadata stay. Extension match enforced (no jpg → png surprises). Variations regenerate server-side, the table row's thumb / dimensions / size / modified / variations cells patch in place
 - **Delete image (single + batch)**: trash icon on the row, behind a confirm dialog with count + filename preview + "no undo" warning. Selection-as-paintbrush applies: with N rows ticked, deleting on any selected row deletes the whole selection. Per-row failures land in the existing bulk-result modal
@@ -71,8 +71,8 @@ The `src/` traits keep the main module file focused on AJAX endpoints + renderin
 
 - `___execute()` — renders the table and filter UI (server-rendered HTML; JS hydrates for interaction). Columns picker lives as a sibling `<dialog>` next to `.ml-results` so AJAX swaps leave drag/toggle handlers intact.
 - `___executeData()` — AJAX GET, returns only the `.ml-results` block (table + pagination) for filter/sort/page swaps.
-- `___executeSave()` — AJAX POST, validates + saves a cell change, returns JSON. Multilang-aware: the payload can carry `langId`, in which case only that language slot is written. Reads `filterQs` from POST and returns `stillMatches` + `newTotal` so the client can fade rows that fell out of scope.
-- `___executeBulk()` — AJAX POST: apply an identical cell save to a selection (Add or Replace mode). Returns `vanished` (list of selection keys that dropped out of the filter) + `newTotal` alongside the success / failure counts.
+- `___executeSave()` — AJAX POST, validates + saves a cell change, returns JSON. Multilang-aware: the payload can carry a `langValues` JSON map (`{langId: value}`), in which case every language slot is written in one POST via `applyLangValues()` (single-language installs just send `value`). Reads `filterQs` from POST and returns `stillMatches` + `newTotal` so the client can fade rows that fell out of scope.
+- `___executeBulk()` — AJAX POST: apply an identical cell save to a selection (Add / Replace mode, plus a tags-only Remove mode). Returns `vanished` (list of selection keys that dropped out of the filter) + `newTotal` alongside the success / failure counts.
 - `___executeRename()` — AJAX POST, renames a single image's file (or every selected image in batch mode) via `Pagefile::rename()` after expanding placeholders and clearing old variation files.
 - `___executeReplace()` — AJAX POST, replaces an image's file bytes via `move_uploaded_file()` onto the existing path, drops old variations, re-generates the thumb variation, returns the refreshed cell payload (thumb URL, dimensions, filesize, modified, variations count). Extension match enforced so the basename stays valid.
 - `___executeDelete()` — AJAX POST with an `items` array; single + batch share the path. Per page `$page->editable()`, then `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed lists so the JS can fade rows out and surface partial failures through the bulk-result dialog.
@@ -220,7 +220,7 @@ Mandatory / read-only:
 
 Visible by default / editable:
 
-- **Description** — textarea
+- **Description** — textarea. Long values are clamped in the table to a few lines (≈150 chars) with an ellipsis via CSS (`.ml-clamp`, `--ml-clamp-lines`, default 3); the clamp is display-only — the full text stays in the cell so the editor always opens with the complete value.
 - **Tags** — input depends on the field's `useTags` config:
   - `useTags=0`: hide the column
   - `useTags=1`: text input + autocomplete from historically used tags
@@ -244,13 +244,13 @@ Auto-discovered (every custom-field subfield of the `field-{fieldname}` template
 
 **Per-cell inline edit:**
 
-1. Click (or keyboard Enter/Space — cells are `role="button" tabindex="0"`) on a cell → input/textarea replaces the display value. Textarea customs open a modal popup with multilang tabs when the installation has languages enabled.
-2. Blur OR Enter → AJAX POST with `{ pageId, fieldName, basename, subfield, value, langId? }`
+1. Click (or keyboard Enter/Space — cells are `role="button" tabindex="0"`) on a cell → a modal popup opens with the value. Textarea cells (description + Textarea customs) are clamped to a few lines in the table, but the popup always shows the full text. Multilang fields get per-language tabs when the installation has languages enabled.
+2. Blur OR Enter → AJAX POST with `{ pageId, fieldName, basename, subfield, value, langValues? }` — `langValues` is a `{langId: value}` map sent for multilang fields so every language commits in one save.
 3. Server: validates (tag whitelist when `useTags=2`, etc.), runs `$page->save()`, returns `{ ok, value }` or `{ ok: false, error }`.
 4. UI: optimistic update, green check / red X. Both state changes are additionally written into a visually-hidden `aria-live` region so screen readers pick them up.
 5. Cache is invalidated both explicitly and via the `Pages::saved` hook.
 
-**Bulk edit (selection as paintbrush):** When the edited cell belongs to an active selection, an "Add / Replace" picker appears on save. Choice + commit distributes the new value to all selected rows with the same subfield addressing.
+**Bulk edit (selection as paintbrush):** When the edited cell belongs to an active selection, an "Add / Replace" picker appears on save (tags additionally offer "Remove", which drops the listed tag tokens from each selected row). Choice + commit distributes the new value to all selected rows with the same subfield addressing.
 
 **Save queue:** Multiple edits get serialized per pageId — no parallel `$page->save()` calls against the same page (avoids ChangeTracker races).
 

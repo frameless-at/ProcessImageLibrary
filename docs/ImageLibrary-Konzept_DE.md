@@ -17,7 +17,7 @@ Ein ProcessWire-Modul, das **alle Bilder einer PW-Installation** in einer einzig
 - **Repeater- / RepeaterMatrix-Support**: Bilder, die in einem Repeater-Feld liegen, werden bis zur Owner-Page aufgelöst, damit Page-Spalte, Sort und Template-Filter auf der sichtbaren Owner-Page operieren — nicht auf der internen `repeater_<field>`-Storage-Page
 - Inline-Edit der editable Subfields (Description, Tags, Custom-Felder); Textarea-Customs öffnen einen Popup
 - **Mehrsprachige Subfields**: per-Sprache-Tabs im Popup (pre-aktiviert auf der aktuellen Admin-Sprache des Editors), Roundtrip in JSON/CSV-Export-Import
-- **Bulk-Edit** via „Selection als Pinsel": markierte Rows werden gemeinsam mit der nächsten Cell-Save in Add- oder Replace-Mode aktualisiert
+- **Bulk-Edit** via „Selection als Pinsel": markierte Rows werden gemeinsam mit der nächsten Cell-Save in Add- oder Replace-Mode aktualisiert (Tags bieten zusätzlich einen Remove-Mode, der die genannten Tag-Tokens aus jeder selektierten Row entfernt)
 - **Filename-Rename**: inline (Einzelbild) oder Batch (über die aktive Selektion) via desselben Popups; Platzhalter-Grammatik `(n)`, `(n2)..(n5)`, `(N)`, `(t)`, `(d)`, `(p)`, `(f)` greift in jedem prosenförmigen Editor (Filename, Description, Custom-Text/Textarea) — Tags ausgenommen
 - **Replace Image in place**: Click auf das Upload-Icon der Row ODER Drag-and-Drop einer Datei auf die Row. Bytes werden getauscht, Basename + URLs + Pagefile-Metadata bleiben. Extension-Match wird erzwungen (keine jpg → png-Überraschungen). Variations werden serverseitig neu generiert, die Zellen der Row (Thumb / Dimensions / Size / Modified / Variations) werden in-place gepatcht
 - **Delete Image (Einzel + Batch)**: Trash-Icon auf der Row, hinter einem Confirm-Dialog mit Count + Filename-Preview + „kein Undo"-Warnung. Selection-als-Pinsel gilt auch hier: bei N selektierten Rows löscht ein Klick auf das Trash-Icon einer selektierten Row die gesamte Selektion. Per-Row-Fehler landen im bestehenden Bulk-Result-Modal
@@ -71,8 +71,8 @@ Die `src/`-Traits halten das Main-Modul-File auf AJAX-Endpoints + Rendering foku
 
 - `___execute()` — Tabelle + Filter-UI rendern (Server-rendered HTML; JS hydratisiert für Interaktion). Spalten-Picker liegt als sibling-`<dialog>` neben `.ml-results` damit AJAX-Swaps Drag/Toggle-Handler intakt lassen.
 - `___executeData()` — AJAX-GET, returnt nur den `.ml-results`-Block (Tabelle + Pagination) für Filter/Sort/Page-Swaps.
-- `___executeSave()` — AJAX-POST, validiert + speichert eine Cell-Änderung, gibt JSON zurück. Multilang-aware: payload kann `langId` tragen, dann wird nur dieser Sprach-Slot geschrieben. Liest `filterQs` aus dem POST und gibt `stillMatches` + `newTotal` zurück, damit der Client Rows ausfaden kann, die aus dem Scope gefallen sind.
-- `___executeBulk()` — AJAX-POST: identische Cell-Save auf eine Selektion anwenden (Add- oder Replace-Mode). Liefert `vanished` (Liste der Selection-Keys, die aus dem Filter gefallen sind) + `newTotal` zusätzlich zu den Succeed/Fail-Counts.
+- `___executeSave()` — AJAX-POST, validiert + speichert eine Cell-Änderung, gibt JSON zurück. Multilang-aware: payload kann eine `langValues`-JSON-Map (`{langId: value}`) tragen, dann wird jeder Sprach-Slot in einem POST via `applyLangValues()` geschrieben (Single-Language-Installs schicken nur `value`). Liest `filterQs` aus dem POST und gibt `stillMatches` + `newTotal` zurück, damit der Client Rows ausfaden kann, die aus dem Scope gefallen sind.
+- `___executeBulk()` — AJAX-POST: identische Cell-Save auf eine Selektion anwenden (Add-/Replace-Mode, plus ein Tags-only Remove-Mode). Liefert `vanished` (Liste der Selection-Keys, die aus dem Filter gefallen sind) + `newTotal` zusätzlich zu den Succeed/Fail-Counts.
 - `___executeRename()` — AJAX-POST, benennt das File eines einzelnen Bildes um (oder im Batch-Modus jedes selektierte Bild) via `Pagefile::rename()` nach Platzhalter-Expansion und Bereinigung alter Variations-Files.
 - `___executeReplace()` — AJAX-POST, ersetzt die File-Bytes eines Bildes via `move_uploaded_file()` auf den existierenden Pfad, droppt alte Variations, regeneriert das Thumb-Variation und gibt den aktualisierten Cell-Payload zurück (Thumb-URL, Dimensions, Filesize, Modified, Variations-Zähler). Extension-Match wird erzwungen, damit der Basename gültig bleibt.
 - `___executeDelete()` — AJAX-POST mit einem `items`-Array; Einzel + Batch teilen denselben Pfad. Pro Page `$page->editable()`, dann `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed-Listen, damit JS die Rows ausfaden lassen und Partial-Failures via Bulk-Result-Dialog reporten kann.
@@ -220,7 +220,7 @@ Pflicht / read-only:
 
 Default-sichtbar / editable:
 
-- **Description** — Textarea
+- **Description** — Textarea. Lange Werte werden in der Tabelle per CSS auf wenige Zeilen (≈150 Zeichen) mit Ellipsis gekürzt (`.ml-clamp`, `--ml-clamp-lines`, Default 3); die Kürzung ist reine Anzeige — der volle Text bleibt in der Zelle, der Editor öffnet also immer mit dem kompletten Wert.
 - **Tags** — Input je nach `useTags`-Konfig des jeweiligen Felds:
   - `useTags=0`: Spalte verbergen
   - `useTags=1`: Text-Input + Autocomplete aus historisch verwendeten Tags
@@ -244,13 +244,13 @@ Auto-entdeckt (alle Custom-Field-Subfields des `field-{fieldname}`-Templates):
 
 **Inline-Edit pro Zelle:**
 
-1. Klick (oder Tastatur-Enter/Space — die Zellen sind `role="button" tabindex="0"`) auf Zelle → Input/Textarea ersetzt Display-Wert. Textarea-Customs öffnen einen modalen Popup mit Multilang-Tabs wenn die Installation Languages aktiviert hat.
-2. Blur ODER Enter → AJAX-POST mit `{ pageId, fieldName, basename, subfield, value, langId? }`
+1. Klick (oder Tastatur-Enter/Space — die Zellen sind `role="button" tabindex="0"`) auf Zelle → ein modaler Popup öffnet mit dem Wert. Textarea-Zellen (Description + Textarea-Customs) sind in der Tabelle auf wenige Zeilen gekürzt, der Popup zeigt aber immer den vollständigen Text. Multilang-Felder bekommen per-Sprache-Tabs, wenn die Installation Languages aktiviert hat.
+2. Blur ODER Enter → AJAX-POST mit `{ pageId, fieldName, basename, subfield, value, langValues? }` — `langValues` ist eine `{langId: value}`-Map, die für Multilang-Felder geschickt wird, damit alle Sprachen in einem Save committen.
 3. Server: validiert (Tag-Whitelist wenn `useTags=2`, etc.), führt `$page->save()` aus, returnt `{ ok, value }` oder `{ ok: false, error }`.
 4. UI: optimistic update, grüner Check / rotes X. Beide Status-Wechsel werden zusätzlich in eine visually-hidden `aria-live`-Region geschrieben, damit Screen Reader sie picken.
 5. Cache wird sowohl explicit als auch durch den `Pages::saved`-Hook invalidiert.
 
-**Bulk-Edit (Selection als Pinsel):** Wenn die editierte Zelle zu einer aktiven Selektion gehört, blendet sich beim Save ein „Add / Replace"-Picker ein. Auswahl + Commit verteilt die neue Value auf alle selektierten Rows mit derselben Subfield-Adressierung.
+**Bulk-Edit (Selection als Pinsel):** Wenn die editierte Zelle zu einer aktiven Selektion gehört, blendet sich beim Save ein „Add / Replace"-Picker ein (Tags bieten zusätzlich „Remove", das die genannten Tag-Tokens aus jeder selektierten Row entfernt). Auswahl + Commit verteilt die neue Value auf alle selektierten Rows mit derselben Subfield-Adressierung.
 
 **Save-Queue:** Mehrere Edits werden pro PageId seriell geschickt — keine parallelen `$page->save()`-Aufrufe auf derselben Page (vermeidet ChangeTracker-Races).
 
