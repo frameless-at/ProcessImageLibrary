@@ -3165,13 +3165,22 @@ class ProcessImageLibrary extends Process {
 		$apply = $modules->get('InputfieldSubmit');
 		$apply->name  = 'apply';
 		$apply->value = $this->_('Apply');
+		// InputfieldSubmit / InputfieldButton are PW core fields and
+		// render their <button> with jQuery-UI heritage classes
+		// (ui-button …) that AdminThemeUikit only skins via the wrapper.
+		// Add the native UIkit button classes explicitly so the two
+		// filter actions match the module's own dialog buttons instead
+		// of carrying a different (ui-*) class system.
+		$apply->addClass('uk-button uk-button-primary');
 		$actionsFs->add($apply);
 
 		$reset = $modules->get('InputfieldButton');
 		$reset->name = 'reset';
 		$reset->value = $this->_('Reset');
 		$reset->attr('href', './');
-		$reset->addClass('ml-reset');
+		// Secondary (grey) UIkit button — same uk-button-secondary the
+		// popup Cancel / Close buttons use, so Reset matches them.
+		$reset->addClass('ml-reset uk-button uk-button-secondary');
 		$actionsFs->add($reset);
 
 		$outer->add($actionsFs);
