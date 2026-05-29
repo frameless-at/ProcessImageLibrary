@@ -301,6 +301,20 @@
 	min-width: 14rem;
 	max-width: 28rem;
 }
+/* Clamp the VISIBLE height of textarea-backed cell values (description
+   + FieldtypeTextarea customs) to a few lines with an ellipsis so long
+   prose can't stretch the row. The full value still lives in the DOM
+   inside this box — the inline editor reads td.textContent, so it
+   always opens with the COMPLETE text regardless of this cap. Line
+   count is tunable via --ml-clamp-lines (≈150 chars at the column's
+   width with the default of 3). */
+.ml-clamp {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: var(--ml-clamp-lines, 3);
+	line-clamp: var(--ml-clamp-lines, 3);
+	overflow: hidden;
+}
 /* Text-typed custom subfields — short prose. Narrower than textarea
    so columns don't sprawl, but wide enough that "credit" / "summary"
    one-liners stay readable instead of wrapping every word. */

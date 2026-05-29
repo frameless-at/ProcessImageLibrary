@@ -46,6 +46,32 @@
 		var isBulking   = false;
 		var selection   = new Set();
 
+		// Write a value back into a cell. Textarea-backed cells
+		// (description + custom textareas) render their text inside a
+		// .ml-clamp box so CSS can cap the visible height; write into
+		// that box (creating it on demand) so the clamp survives an
+		// inline save, and drop it when the value is empty so the cell's
+		// :empty "—" placeholder returns. Reads stay on td.textContent —
+		// which still returns the full value through the box — so the
+		// editor always opens with the complete text. Non-textarea cells
+		// (tags, text customs) keep their plain text node.
+		function setCellText(td, val) {
+			val = String(val == null ? '' : val);
+			if (td.dataset.input === 'textarea') {
+				var box = td.querySelector('.ml-clamp');
+				if (val === '') { if (box) box.remove(); else td.textContent = ''; return; }
+				if (!box) {
+					td.textContent = '';
+					box = document.createElement('div');
+					box.className = 'ml-clamp';
+					td.appendChild(box);
+				}
+				box.textContent = val;
+			} else {
+				td.textContent = val;
+			}
+		}
+
 		// -- Inline edit ------------------------------------------------
 
 		function enqueueSave(pageId, task) {
@@ -842,7 +868,7 @@
 								.filter(function (t) { return t && !dropSet[t]; })
 								.join(' ');
 						}
-						c.textContent = optimistic;
+						setCellText(c, optimistic);
 						c.classList.add('ml-cell-saving');
 					});
 					var bulkExtra = {
@@ -859,7 +885,7 @@
 							if (ok) {
 								flashCell(c, true);
 							} else {
-								c.textContent = savedTexts[i];
+								setCellText(c, savedTexts[i]);
 								flashCell(c, false);
 							}
 						});
@@ -875,7 +901,7 @@
 						bulkCells.forEach(function (c, i) {
 							if (!c.isConnected) return;
 							c.classList.remove('ml-cell-saving');
-							c.textContent = savedTexts[i];
+							setCellText(c, savedTexts[i]);
 							flashCell(c, false);
 						});
 						if (td.isConnected) {
@@ -902,9 +928,9 @@
 					date:      todayIso,
 					field:     td.dataset.field || ''
 				};
-				td.textContent = (td.dataset.subfield === 'tags')
+				setCellText(td, (td.dataset.subfield === 'tags')
 					? primaryValue
-					: resolveTemplateClient(primaryValue, singleCtx);
+					: resolveTemplateClient(primaryValue, singleCtx));
 				td.classList.add('ml-cell-saving');
 				td.title = labels.saving || 'Saving…';
 
@@ -922,7 +948,7 @@
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
 					if (result && result.data && result.data.ok) {
-						td.textContent = result.data.value;
+						setCellText(td, result.data.value);
 						// Refresh the per-language data attrs from the
 						// post-save state so reopening the popup shows
 						// the fresh value in every tab, not the stale
@@ -936,7 +962,7 @@
 						flashCell(td, true);
 						fadeRowIfMismatched(td, result.data);
 					} else {
-						td.textContent = original;
+						setCellText(td, original);
 						var reason = (result && result.data && result.data.error)
 							|| ('HTTP ' + (result && result.status));
 						console.error('[ImageLibrary] save failed:', result);
@@ -946,7 +972,7 @@
 				}).catch(function (err) {
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
-					td.textContent = original;
+					setCellText(td, original);
 					console.error('[ImageLibrary] save errored:', err);
 					td.title = (err && err.message) || labels.error || 'Network error';
 					flashCell(td, false);

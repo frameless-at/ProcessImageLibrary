@@ -3232,6 +3232,20 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Wrap a textarea-backed cell value (description + custom textareas)
+	 * in the .ml-clamp box. CSS caps the box to a few lines with an
+	 * ellipsis so long prose can't blow up the row height — but the
+	 * value itself is never truncated: the full text stays in the DOM,
+	 * so td.textContent (the source the inline editor AND bulk Add-mode
+	 * read) always returns the complete string. Empty values render
+	 * nothing so the cell's :empty "—" placeholder still shows.
+	 */
+	protected function clampCell(string $text): string {
+		if ($text === '') return '';
+		return '<div class="ml-clamp">' . $this->wire('sanitizer')->entities($text) . '</div>';
+	}
+
+	/**
 	 * @param array<int,array<string,mixed>> $slice hydrated slice
 	 * @param array<int,string> $customCols custom-field column names
 	 * @param array<string,array{mode:int,allowed:array<int,string>}> $tagsConfig per-field tag mode + whitelist
@@ -3501,7 +3515,7 @@ class ProcessImageLibrary extends Process {
 			)));
 			$out .= '<td class="ml-cell-desc ml-cell-editable" data-col="description" ' . $editAttrs . $editA11y . $descAria
 				. ' data-subfield="description" data-input="textarea"' . $this->buildLangAttrs($row['description']) . '>'
-				. $san->entities($desc) . '</td>';
+				. $this->clampCell($desc) . '</td>';
 			if ($showTagsCol) {
 				$tagCfg = $tagsConfig[$row['fieldName']] ?? ['mode' => 0, 'allowed' => []];
 				if ((int) $tagCfg['mode'] === 0) {
@@ -3571,11 +3585,16 @@ class ProcessImageLibrary extends Process {
 				$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 					$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
 				)));
+				// Only textarea-backed customs get the clamp box; single-
+				// line text customs are short and stay a plain text node.
+				$customInner = $inputType === 'textarea'
+					? $this->clampCell((string) $val)
+					: $san->entities((string) $val);
 				$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
 					. ' data-subfield="' . $san->entities($name) . '"'
 					. ' data-input="' . $san->entities($inputType) . '"'
 					. $this->buildLangAttrs($raw) . '>'
-					. $san->entities((string) $val) . '</td>';
+					. $customInner . '</td>';
 			}
 
 			$out .= '</tr>';
