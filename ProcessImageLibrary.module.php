@@ -852,6 +852,38 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 
+		// Page-reference resolution diagnostics — why a page-ref custom
+		// subfield renders inline (select) vs falls back to the native
+		// editor. Shows the field config + the resolved option count.
+		$pageRefDiag = [];
+		foreach ($this->getCustomTypes() as $cname => $ctype) {
+			if ($ctype !== 'page') continue;
+			$cf  = $this->wire('fields')->get($cname);
+			$cfg = $this->getPageRefConfig($cname);
+			$selPa = ($cf instanceof Field) ? $this->resolvePageRefPages($cf) : null;
+			$pageRefDiag[$cname] = [
+				'fieldtype'         => ($cf instanceof Field) ? (string) $cf->type : null,
+				'inputfield'        => ($cf instanceof Field) ? (string) $cf->get('inputfield') : null,
+				'derefAsPage'       => ($cf instanceof Field) ? (int) $cf->get('derefAsPage') : null,
+				'parent_id'         => ($cf instanceof Field) ? (int) $cf->get('parent_id') : null,
+				'template_id'       => ($cf instanceof Field) ? (int) $cf->get('template_id') : null,
+				'template_ids'      => ($cf instanceof Field) ? $cf->get('template_ids') : null,
+				'findPagesSelector' => ($cf instanceof Field) ? (string) $cf->get('findPagesSelector') : null,
+				'findPagesCode'     => ($cf instanceof Field) ? ((string) $cf->get('findPagesCode') !== '' ? '(set)' : '') : null,
+				'configSelector'    => ($cf instanceof Field) ? $this->pageRefSelector($cf) : '',
+				'resolvedPages'     => $selPa instanceof PageArray ? $selPa->count() : 'null',
+				'inlineCap'         => self::PAGEREF_INLINE_CAP,
+				'decision'          => $cfg
+					? ('inline select, ' . count($cfg['options']) . ' options' . ($cfg['multiple'] ? ', multiple' : ', single'))
+					: 'NULL → native editor',
+			];
+		}
+		if ($pageRefDiag) {
+			$out .= '<dt>Page-reference resolution</dt><dd><pre>'
+				. $sanitizer->entities(json_encode($pageRefDiag, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
+				. '</pre></dd>';
+		}
+
 		$out .= '</dl>';
 		$out .= '</div>';
 		return $out;
@@ -2690,9 +2722,7 @@ class ProcessImageLibrary extends Process {
 		if ($t instanceof FieldtypeCheckbox) return 'checkbox';
 		if ($t instanceof FieldtypeDatetime) return 'date';
 		if ($t instanceof FieldtypePage)     return 'page';
-		if ($t instanceof FieldtypeOptions) {
-			return $this->isSingleValueInput($f) ? 'select' : 'page';
-		}
+		if ($t instanceof FieldtypeOptions)  return 'select'; // single + multi
 		if ($t instanceof FieldtypeInteger) return 'number';
 		return 'text';
 	}
@@ -2827,10 +2857,13 @@ class ProcessImageLibrary extends Process {
 					: date('Y-m-d', $ts);
 			case 'select':
 				// FieldtypeOptions stores a SelectableOptionArray; the
-				// widget keys on the option id.
-				if (is_object($val) && method_exists($val, 'first')) {
-					$o = $val->first();
-					return $o ? (string) $o->id : '';
+				// widget keys on the option id(s), comma-joined for multi.
+				if (is_object($val) && $val instanceof \IteratorAggregate) {
+					$ids = [];
+					foreach ($val as $o) {
+						if (is_object($o) && isset($o->id)) $ids[] = (int) $o->id;
+					}
+					return implode(',', $ids);
 				}
 				return (string) $val;
 			case 'page':
@@ -2883,10 +2916,10 @@ class ProcessImageLibrary extends Process {
 			$ts = strtotime($value);
 			return $ts !== false ? $ts : '';
 		}
-		if ($type === 'page') {
-			// Comma-separated selected page id(s). Hand the Fieldtype an
-			// array (single fields collapse it themselves); it validates
-			// the ids against the field's selectable set.
+		if ($type === 'select' || $type === 'page') {
+			// Comma-separated selected option / page id(s). Hand the
+			// Fieldtype an array of ids (single-value fields collapse it
+			// themselves); it validates against the allowed set.
 			$ids = array_values(array_filter(
 				array_map('intval', explode(',', $value)),
 				fn($i) => $i > 0
@@ -2897,7 +2930,7 @@ class ProcessImageLibrary extends Process {
 			}
 			return $ids;
 		}
-		// number / select / options: let the Fieldtype validate + coerce.
+		// number: let the Fieldtype validate + coerce.
 		if ($field instanceof Field) {
 			try { return $field->type->sanitizeValue($page, $field, $value); }
 			catch (\Throwable $e) { /* fall through */ }
@@ -2939,6 +2972,8 @@ class ProcessImageLibrary extends Process {
 	 *
 	 * @return array{multiple:bool,options:array<int,array{value:int,label:string}>}|null
 	 */
+	const PAGEREF_INLINE_CAP = 2000;
+
 	protected function getPageRefConfig(string $name): ?array {
 		if (array_key_exists($name, $this->pageRefConfigCache)) {
 			return $this->pageRefConfigCache[$name];
@@ -2946,33 +2981,75 @@ class ProcessImageLibrary extends Process {
 		$result = null;
 		$f = $this->wire('fields')->get($name);
 		if ($f instanceof Field && $f->type instanceof FieldtypePage) {
-			try {
-				$ctx = $this->wire('page');
-				$inputfield = $f->getInputfield($ctx);
-				if ($inputfield && method_exists($inputfield, 'getSelectablePages')) {
-					$pa = $inputfield->getSelectablePages($ctx);
-					// Bounded set only — autocomplete fields return an empty
-					// / huge set, which we leave to the native editor.
-					if ($pa && $pa->count() > 0 && $pa->count() <= 500) {
-						$opts = [];
-						foreach ($pa as $p) {
-							$opts[] = [
-								'value' => (int) $p->id,
-								'label' => (string) (((string) $p->title !== '') ? $p->title : $p->name),
-							];
-						}
-						$result = [
-							'multiple' => ((int) $f->get('derefAsPage') === 0),
-							'options'  => $opts,
-						];
-					}
+			$pa = $this->resolvePageRefPages($f);
+			if ($pa instanceof PageArray && $pa->count() > 0 && $pa->count() <= self::PAGEREF_INLINE_CAP) {
+				$opts = [];
+				foreach ($pa as $p) {
+					$opts[] = [
+						'value' => (int) $p->id,
+						'label' => (string) (((string) $p->title !== '') ? $p->title : $p->name),
+					];
 				}
-			} catch (\Throwable $e) {
-				$result = null;
+				$result = [
+					'multiple' => ((int) $f->get('derefAsPage') === 0),
+					'options'  => $opts,
+				];
 			}
 		}
 		$this->pageRefConfigCache[$name] = $result;
 		return $result;
+	}
+
+	/**
+	 * Resolve a Page-reference field's selectable pages. Tries the
+	 * InputfieldPage's own getSelectablePages() first (honours every
+	 * config incl. custom find code); falls back to a selector built
+	 * straight from the field config when that yields nothing — more
+	 * robust across the various page inputs (Select, AsmSelect,
+	 * PageListSelect, …). Returns null when nothing bounded resolves.
+	 */
+	protected function resolvePageRefPages(Field $f): ?PageArray {
+		try {
+			$inputfield = $f->getInputfield($this->wire('page'));
+			if ($inputfield && method_exists($inputfield, 'getSelectablePages')) {
+				$pa = $inputfield->getSelectablePages($this->wire('page'));
+				if ($pa instanceof PageArray && $pa->count() > 0) return $pa;
+			}
+		} catch (\Throwable $e) { /* fall through to config selector */ }
+
+		$selector = $this->pageRefSelector($f);
+		if ($selector === '') return null;
+		try {
+			$pa = $this->wire('pages')->find($selector . ', limit=' . (self::PAGEREF_INLINE_CAP + 1));
+			return $pa instanceof PageArray ? $pa : null;
+		} catch (\Throwable $e) {
+			return null;
+		}
+	}
+
+	/**
+	 * Build a find selector from a Page-reference field's config
+	 * (findPagesSelector / parent_id / template_id(s)). Returns '' when
+	 * the field relies on custom find code (can't be resolved safely) or
+	 * has no usable constraint.
+	 */
+	protected function pageRefSelector(Field $f): string {
+		if ((string) $f->get('findPagesCode') !== '') return '';
+		$sel = trim((string) $f->get('findPagesSelector'));
+		if ($sel !== '') return $sel . ', include=hidden';
+		$parts = [];
+		$parent = (int) $f->get('parent_id');
+		if ($parent) $parts[] = 'parent_id=' . $parent;
+		$tplIds = $f->get('template_ids');
+		$tplId  = (int) $f->get('template_id');
+		if (is_array($tplIds) && $tplIds) {
+			$parts[] = 'template=' . implode('|', array_map('intval', $tplIds));
+		} elseif ($tplId) {
+			$parts[] = 'template=' . $tplId;
+		}
+		if (!$parts) return '';
+		$parts[] = 'include=hidden';
+		return implode(', ', $parts);
 	}
 
 	/**
@@ -3993,6 +4070,10 @@ class ProcessImageLibrary extends Process {
 						$typedExtra .= " data-options='" . $san->entities(
 							json_encode($this->getCustomOptions($name), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
 						) . "'";
+						$sf = $this->wire('fields')->get($name);
+						if ($sf instanceof Field && !$this->isSingleValueInput($sf)) {
+							$typedExtra .= ' data-multiple="1"';
+						}
 					} elseif ($inputType === 'page') {
 						$typedExtra .= " data-options='" . $san->entities(
 							json_encode($pageRefCfg['options'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
