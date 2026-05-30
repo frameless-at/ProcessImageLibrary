@@ -72,6 +72,14 @@
 			}
 		}
 
+		// Append the CSRF token to a FormData (no-op when the page
+		// didn't ship one). Centralises the guard every POST endpoint
+		// repeated verbatim.
+		function appendCsrf(fd) {
+			if (config.csrf && config.csrf.name) fd.append(config.csrf.name, config.csrf.value);
+			return fd;
+		}
+
 		// -- Inline edit ------------------------------------------------
 
 		function enqueueSave(pageId, task) {
@@ -87,9 +95,7 @@
 			// Send the current filter URL state so the server can
 			// tell us whether the saved row still belongs in this view.
 			fd.append('filterQs', location.search || '');
-			if (config.csrf && config.csrf.name) {
-				fd.append(config.csrf.name, config.csrf.value);
-			}
+			appendCsrf(fd);
 			return fetch(config.saveUrl, {
 				method: 'POST',
 				body: fd,
@@ -720,9 +726,7 @@
 						fd.append('fieldName', td.dataset.field);
 						fd.append('basename',  td.dataset.basename);
 						fd.append('value',     newStem);
-						if (config.csrf && config.csrf.name) {
-							fd.append(config.csrf.name, config.csrf.value);
-						}
+						appendCsrf(fd);
 						return fetch(config.renameUrl, {
 							method: 'POST',
 							body: fd,
@@ -1176,9 +1180,7 @@
 			fd.append('fieldName', field);
 			fd.append('basename', basename);
 			fd.append('file', file);
-			if (config.csrf && config.csrf.name) {
-				fd.append(config.csrf.name, config.csrf.value);
-			}
+			appendCsrf(fd);
 
 			fetch(config.replaceUrl, {
 				method: 'POST',
@@ -1426,9 +1428,7 @@
 			if (!config.deleteUrl || !items.length) return;
 			var fd = new FormData();
 			fd.append('items', JSON.stringify(items));
-			if (config.csrf && config.csrf.name) {
-				fd.append(config.csrf.name, config.csrf.value);
-			}
+			appendCsrf(fd);
 			// Mark rows about to be deleted so they fade out — the
 			// actual removal happens once the server reports back
 			// which ones succeeded.
@@ -1611,9 +1611,7 @@
 			// the single-save postSave() path.
 			fd.append('filterQs', location.search || '');
 			if (extra) Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
-			if (config.csrf && config.csrf.name) {
-				fd.append(config.csrf.name, config.csrf.value);
-			}
+			appendCsrf(fd);
 
 			return fetch(config.bulkUrl, {
 				method: 'POST',
@@ -2219,9 +2217,7 @@
 					pageSize:  readCurrentPageSize(),
 					bookmarks: bookmarks
 				}));
-				if (config.csrf && config.csrf.name) {
-					fd.append(config.csrf.name, config.csrf.value);
-				}
+				appendCsrf(fd);
 				fetch(config.userPrefsUrl, {
 					method: 'POST',
 					body: fd,

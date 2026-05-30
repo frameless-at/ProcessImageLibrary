@@ -1014,13 +1014,8 @@ class ProcessImageLibrary extends Process {
 		// Match-aware UX: tell the client whether the saved row still
 		// passes the active filter set, so it can fade rows out that
 		// dropped out of scope (e.g. "missing tags" → user adds a tag).
-		$imageFields       = $this->discoverImageFields();
-		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
-		$customCols        = $this->collectCustomNames();
-		$filterQs          = (string) $this->wire('input')->post('filterQs');
-		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
-		$key               = sprintf('%d:%s:%s', $pageId, $fieldName, $basename);
-		$match             = $this->evaluateFilterTouchedRows([$key], $filters);
+		$key   = $this->rowKey($pageId, $fieldName, $basename);
+		$match = $this->matchTouchedRows([$key]);
 		$response['stillMatches'] = !in_array($key, $match['vanished'], true);
 		$response['newTotal']     = $match['newTotal'];
 		return $this->jsonResponse($response);
@@ -1119,13 +1114,8 @@ class ProcessImageLibrary extends Process {
 		// renamed row still belongs in the active filter view. Match
 		// against the NEW basename — the row key follows the new
 		// filename, which is what the client's DOM also uses now.
-		$imageFields       = $this->discoverImageFields();
-		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
-		$customCols        = $this->collectCustomNames();
-		$filterQs          = (string) $this->wire('input')->post('filterQs');
-		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
-		$key               = sprintf('%d:%s:%s', $pageId, $fieldName, $finalBasename);
-		$match             = $this->evaluateFilterTouchedRows([$key], $filters);
+		$key   = $this->rowKey($pageId, $fieldName, $finalBasename);
+		$match = $this->matchTouchedRows([$key]);
 
 		return $this->jsonResponse([
 			'ok'           => true,
@@ -1372,7 +1362,7 @@ class ProcessImageLibrary extends Process {
 				try {
 					$pageimages->delete($img);
 					$fieldsTouched[$fn] = true;
-					$succeeded[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+					$succeeded[] = $this->rowKey($pid, $fn, $bn);
 				} catch (\Throwable $e) {
 					$failed[] = sprintf('%s/%s on page %d: %s', $fn, $bn, $pid, $e->getMessage());
 				}
@@ -1743,10 +1733,10 @@ class ProcessImageLibrary extends Process {
 					}
 					$succeeded++;
 					$newBn = (string) $renameResult['basename'];
-					$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $newBn);
+					$succeededKeys[] = $this->rowKey($pid, $fn, $newBn);
 					if ($newBn !== $bn) {
-						$renamed[sprintf('%d:%s:%s', $pid, $fn, $bn)]
-							= sprintf('%d:%s:%s', $pid, $fn, $newBn);
+						$renamed[$this->rowKey($pid, $fn, $bn)]
+							= $this->rowKey($pid, $fn, $newBn);
 					}
 					continue;
 				}
@@ -1805,7 +1795,7 @@ class ProcessImageLibrary extends Process {
 					// trailing space to every selected row.
 					if ($itemValue === '') {
 						$succeeded++;
-						$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+						$succeededKeys[] = $this->rowKey($pid, $fn, $bn);
 						continue;
 					}
 					// Description / custom text: append with a single space
@@ -1834,7 +1824,7 @@ class ProcessImageLibrary extends Process {
 				}
 				$fieldsTouched[$fn] = true;
 				$succeeded++;
-				$succeededKeys[] = sprintf('%d:%s:%s', $pid, $fn, $bn);
+				$succeededKeys[] = $this->rowKey($pid, $fn, $bn);
 			}
 
 			foreach (array_keys($fieldsTouched) as $fn) {
@@ -1854,11 +1844,7 @@ class ProcessImageLibrary extends Process {
 
 		// Match-aware UX: report which of the just-saved rows no
 		// longer pass the active filter so the client can fade them.
-		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
-		$customCols        = $this->collectCustomNames();
-		$filterQs          = (string) $this->wire('input')->post('filterQs');
-		$filters           = $this->parseFilterQs($filterQs, $imageFields, $eligibleTemplates, $customCols);
-		$match             = $this->evaluateFilterTouchedRows($succeededKeys, $filters);
+		$match = $this->matchTouchedRows($succeededKeys);
 
 		return $this->jsonResponse([
 			'ok'        => true,
@@ -2323,6 +2309,39 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Canonical row-identity key shared with the client JS:
+	 * "pageId:fieldName:basename". Centralised so the format lives in
+	 * one place — the table's data-key, the selection set, the
+	 * match-aware vanish checks and the bulk / delete result lists all
+	 * depend on it matching byte-for-byte.
+	 */
+	protected function rowKey(int $pageId, string $fieldName, string $basename): string {
+		return sprintf('%d:%s:%s', $pageId, $fieldName, $basename);
+	}
+
+	/**
+	 * Shared match-aware post-write step for executeSave / executeRename
+	 * / executeBulk: read the client's current filter state (the
+	 * filterQs POST field) and report which of the just-touched row keys
+	 * no longer pass it, plus the new total. Lets each endpoint hand the
+	 * client a stillMatches / vanished / newTotal payload without
+	 * re-deriving the filter set inline.
+	 *
+	 * @param array<int,string> $keys touched row keys (rowKey() shape)
+	 * @return array{vanished:array<int,string>,newTotal:int}
+	 */
+	protected function matchTouchedRows(array $keys): array {
+		$imageFields       = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		$customCols        = $this->collectCustomNames();
+		$filters           = $this->parseFilterQs(
+			(string) $this->wire('input')->post('filterQs'),
+			$imageFields, $eligibleTemplates, $customCols
+		);
+		return $this->evaluateFilterTouchedRows($keys, $filters);
+	}
+
+	/**
 	 * Match-check after a write: for the just-touched rows, work out
 	 * which of them no longer belong in the current filtered view, and
 	 * return the new total visible count.
@@ -2355,7 +2374,7 @@ class ProcessImageLibrary extends Process {
 
 		$present = [];
 		foreach ($rows as $r) {
-			$k = sprintf('%d:%s:%s',
+			$k = $this->rowKey(
 				(int) $r['pageId'],
 				(string) $r['fieldName'],
 				(string) $r['basename']
@@ -3362,7 +3381,7 @@ class ProcessImageLibrary extends Process {
 			// its own descriptive name.
 			$editA11y = ' role="button" tabindex="0"';
 
-			$selKey = sprintf('%d:%s:%s',
+			$selKey = $this->rowKey(
 				(int) $row['pageId'],
 				(string) $row['fieldName'],
 				(string) $row['basename']
