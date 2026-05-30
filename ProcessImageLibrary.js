@@ -1517,7 +1517,7 @@
 			replaceFromQs(u.search, true);
 		}
 
-		function replaceFromQs(qs, push) {
+		function replaceFromQs(qs, push, clearSelection) {
 			if (!config.renderUrl || !results) {
 				// Degraded path: full reload to the URL with the query string.
 				location.href = location.pathname + qs;
@@ -1535,14 +1535,15 @@
 				return res.text();
 			}).then(function (html) {
 				results.innerHTML = html;
-				// Navigation (filter / reset / sort / page / page-size /
-				// bookmark — all push=true) starts a fresh selection: clear
-				// it before re-syncing so the new view comes up unchecked.
-				// In-place refreshes (push=false: after bulk / rename /
-				// import / image-editor close) keep the selection.
-				if (push) selection.clear();
+				// Filter Apply / Reset / Bookmark change the result SET, so
+				// they pass clearSelection=true to start a fresh selection.
+				// Same-set view changes (pagination, page size, sort) and
+				// in-place refreshes (bulk / rename / import / image-editor
+				// close) keep the cross-page selection intact — that's the
+				// selection-as-paintbrush across pages.
+				if (clearSelection) selection.clear();
 				// New rows = new checkboxes; restore checked state from the
-				// persistent selection Set so it survives an in-place swap.
+				// persistent selection Set so it survives the swap.
 				syncCheckboxes();
 				// New cells = lost ml-col-hidden classes; re-apply the
 				// user's column visibility prefs to the swapped DOM.
@@ -2060,7 +2061,8 @@
 				});
 				if (tagsList.length) params.append('tags', tagsList.join(','));
 				var qs = params.toString() ? '?' + params.toString() : '';
-				replaceFromQs(qs, true);
+				// Filter changes the result set → clear the selection.
+				replaceFromQs(qs, true, true);
 				recomputeFilterLabels();
 				// Collapse the outer "Filters" fieldset after Apply —
 				// the user has committed their choice; keeping the
@@ -2110,7 +2112,8 @@
 				applyFieldCapabilityFilter();
 				updateResetVisibility();
 				recomputeFilterLabels();
-				replaceFromQs('', true);
+				// Reset clears the filter → clear the selection too.
+				replaceFromQs('', true, true);
 			});
 		}
 
@@ -2411,7 +2414,8 @@
 				e.preventDefault();
 				var qs = tab.dataset.qs || '';
 				applyBookmarkToForm(qs);
-				replaceFromQs(qs, true);
+				// Bookmark switches the filter set → clear the selection.
+				replaceFromQs(qs, true, true);
 				syncBookmarkActive();
 				return;
 			}
