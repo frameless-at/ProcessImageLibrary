@@ -607,7 +607,9 @@ textarea.ml-cell-input {
 	outline: none !important;
 	box-shadow: none !important;
 }
-.ml-popup-editor input[type="text"] {
+.ml-popup-editor input[type="text"],
+.ml-popup-editor input[type="date"],
+.ml-popup-editor select.ml-popup-input {
 	display: block;
 	width: 100%;
 	box-sizing: border-box;
@@ -617,6 +619,14 @@ textarea.ml-cell-input {
 	border-radius: 3px;
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, inherit);
+}
+/* Boolean custom subfield — checkbox + label on one line. */
+.ml-popup-checkbox {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	cursor: pointer;
+	font: inherit;
 }
 
 /* Rename popup: stem input + locked extension chip side by side.

@@ -943,6 +943,36 @@ class ProcessImageLibrary extends Process {
 		// and avoid double-encoding for fields like description.
 		$page->of(false);
 
+		// Typed custom subfields (checkbox / date / select): coerce to
+		// the Fieldtype's stored shape, set directly, and return the
+		// typed display + editor-raw value. No placeholder / multilang
+		// / tag handling applies to these.
+		$customType = $this->getCustomTypes()[$subfield] ?? null;
+		if (in_array($customType, ['checkbox', 'date', 'select'], true)) {
+			$field   = $this->wire('fields')->get($subfield);
+			$coerced = $this->coerceCustomValue($page, $field, $customType, $value);
+			try {
+				$img->set($subfield, $coerced);
+				$saved = $page->save($fieldName);
+			} catch (\Throwable $e) {
+				return $this->jsonError('Save error: ' . $e->getMessage());
+			}
+			if (!$saved) {
+				return $this->jsonError('Save returned false — value may not have persisted');
+			}
+			$this->wire('cache')->deleteFor($this);
+
+			$key   = $this->rowKey($pageId, $fieldName, $basename);
+			$match = $this->matchTouchedRows([$key]);
+			return $this->jsonResponse([
+				'ok'           => true,
+				'value'        => (string) $this->readCustomValue($img, $subfield),
+				'rawValue'     => $this->readCustomRaw($img, $subfield),
+				'stillMatches' => !in_array($key, $match['vanished'], true),
+				'newTotal'     => $match['newTotal'],
+			]);
+		}
+
 		// Multilang popup ships a per-language map alongside the
 		// primary value. When that's present, write each language
 		// directly instead of letting writeLangValue() pick one.
@@ -1757,6 +1787,19 @@ class ProcessImageLibrary extends Process {
 				$img = $this->resolvePageimage($page, $fn, $bn);
 				if (!$img) {
 					$failed[] = sprintf('Image %s not found in %d.%s', $bn, $pid, $fn);
+					continue;
+				}
+
+				// Typed custom subfields (checkbox / date / select):
+				// coerce + set directly. Replace-only — the client sends a
+				// single scalar, no Add / Remove for these.
+				$customTypeBulk = $this->getCustomTypes()[$subfield] ?? null;
+				if (in_array($customTypeBulk, ['checkbox', 'date', 'select'], true)) {
+					$field = $this->wire('fields')->get($subfield);
+					$img->set($subfield, $this->coerceCustomValue($page, $field, $customTypeBulk, (string) $value));
+					$fieldsTouched[$fn] = true;
+					$succeeded++;
+					$succeededKeys[] = $this->rowKey($pid, $fn, $bn);
 					continue;
 				}
 
@@ -2743,6 +2786,78 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Editor-RAW value for an inline-editable typed custom subfield —
+	 * the value the popup widget round-trips, distinct from the display
+	 * label: checkbox → "1"/"0", date → "Y-m-d", select → option id.
+	 * Only meaningful for checkbox / date / select.
+	 */
+	protected function readCustomRaw(Pageimage $img, string $name): string {
+		$val = $img->get($name);
+		if ($val === null) return '';
+		switch ($this->getCustomTypes()[$name] ?? 'text') {
+			case 'checkbox':
+				return ((int) (string) $val) ? '1' : '0';
+			case 'date':
+				$ts = is_numeric($val) ? (int) $val : @strtotime((string) $val);
+				return $ts ? date('Y-m-d', $ts) : '';
+			case 'select':
+				// FieldtypeOptions stores a SelectableOptionArray; the
+				// widget keys on the option id.
+				if (is_object($val) && method_exists($val, 'first')) {
+					$o = $val->first();
+					return $o ? (string) $o->id : '';
+				}
+				return (string) $val;
+			default:
+				return '';
+		}
+	}
+
+	/**
+	 * Selectable options for a FieldtypeOptions custom subfield, as a
+	 * [{value:id,label:title}] list for the inline <select> widget.
+	 *
+	 * @return array<int,array{value:int,label:string}>
+	 */
+	protected function getCustomOptions(string $name): array {
+		$f = $this->wire('fields')->get($name);
+		if (!($f instanceof Field) || !($f->type instanceof FieldtypeOptions)) return [];
+		$out = [];
+		$opts = $f->type->getOptions($f);
+		if ($opts) {
+			foreach ($opts as $o) {
+				$out[] = ['value' => (int) $o->id, 'label' => (string) $o->title];
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Coerce an inline-typed-custom string value from the editor into
+	 * the shape the Fieldtype stores: checkbox → 0/1, date → timestamp,
+	 * select → SelectableOptionArray (via the Fieldtype's own
+	 * sanitizeValue, which rejects non-allowed ids). Empty string clears.
+	 *
+	 * @param mixed return type varies by Fieldtype
+	 */
+	protected function coerceCustomValue(Page $page, ?Field $field, string $type, string $value) {
+		if ($type === 'checkbox') {
+			return ($value === '1' || $value === 'on' || $value === 'true') ? 1 : 0;
+		}
+		if ($value === '') return '';
+		if ($type === 'date') {
+			$ts = strtotime($value);
+			return $ts !== false ? $ts : '';
+		}
+		// select / options: let the Fieldtype validate + coerce.
+		if ($field instanceof Field) {
+			try { return $field->type->sanitizeValue($page, $field, $value); }
+			catch (\Throwable $e) { /* fall through */ }
+		}
+		return $value;
+	}
+
+	/**
 	 * Hydrate the visible row slice with thumbnail URLs and page links.
 	 *
 	 * Only this slice triggers Pageimage hydration — the bulk row list stays
@@ -2819,6 +2934,12 @@ class ProcessImageLibrary extends Process {
 			// formatted, page / option labels; text/textarea keep their
 			// multilang shape). See readCustomValue().
 			foreach ($customByField[$row['fieldName']] ?? [] as $customName) {
+				// Editor-RAW value for inline-editable typed cells — set on
+				// every visible-slice row (even when the display value was
+				// already filled by the bulk-hydrate pass).
+				if (in_array($this->getCustomTypes()[$customName] ?? 'text', ['checkbox', 'date', 'select'], true)) {
+					$row['customRaw'][$customName] = $this->readCustomRaw($img, $customName);
+				}
 				if (isset($row['custom'][$customName])) continue; // already filled by bulk pass
 				$v = $this->readCustomValue($img, $customName);
 				if ($v === null || $v === '') continue;
@@ -2973,6 +3094,8 @@ class ProcessImageLibrary extends Process {
 				'save'             => $this->_('Save'),
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
+				// Label next to the checkbox widget for a boolean custom subfield.
+				'enabled'          => $this->_('Enabled'),
 				'rename'           => $this->_('New filename'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
@@ -3735,12 +3858,28 @@ class ProcessImageLibrary extends Process {
 						. ' data-input="' . $san->entities($inputType) . '"'
 						. $this->buildLangAttrs($raw) . '>'
 						. $customInner . '</td>';
+				} elseif (in_array($inputType, ['checkbox', 'date', 'select'], true) && !empty($row['pageEditUrl'])) {
+					// Inline-editable typed cell. Display shows the typed
+					// value (glyph / date / label); data-value carries the
+					// editor-RAW value, and select also ships its options.
+					$rawVal = (string) ($row['customRaw'][$name] ?? '');
+					$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
+					if ($inputType === 'select') {
+						$typedExtra .= " data-options='" . $san->entities(
+							json_encode($this->getCustomOptions($name), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+						) . "'";
+					}
+					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+					)));
+					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+						. ' data-subfield="' . $san->entities($name) . '"'
+						. ' data-input="' . $san->entities($inputType) . '"' . $typedExtra . '>'
+						. $san->entities((string) $val) . '</td>';
 				} elseif (!empty($row['pageEditUrl'])) {
-					// Typed subfield (checkbox / date / select / page):
-					// show the value; clicking opens the native per-image
-					// editor (same file-hash target as the thumbnail).
-					// Phase 2 swaps checkbox / date / select to inline
-					// widgets; page stays on the native editor.
+					// Page-reference (and multi-value Options) → open the
+					// native per-image editor (same file-hash target as
+					// the thumbnail); no inline widget for these.
 					$nativeAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 						$this->_('Edit %1$s of %2$s in the image editor'), $name, (string) $row['basename']
 					)));

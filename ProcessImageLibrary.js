@@ -283,6 +283,15 @@
 				return buildPopupMultilang(td, original, td.dataset.input === 'textarea');
 			}
 
+			if (td.dataset.input === 'checkbox') {
+				return buildPopupCheckbox(original);
+			}
+			if (td.dataset.input === 'date') {
+				return buildPopupDate(original);
+			}
+			if (td.dataset.input === 'select') {
+				return buildPopupSelect(td, original);
+			}
 			if (td.dataset.input === 'textarea') {
 				return buildPopupTextarea(original);
 			}
@@ -420,6 +429,62 @@
 			};
 		}
 
+		// Typed custom-subfield widgets. They round-trip the editor-RAW
+		// value (data-value): checkbox → "1"/"0", date → "Y-m-d", select
+		// → option id. The cell's visible text is a glyph / label, not
+		// the value, so these never read it.
+		function buildPopupCheckbox(original) {
+			var label = document.createElement('label');
+			label.className = 'ml-popup-checkbox';
+			var cb = document.createElement('input');
+			cb.type = 'checkbox';
+			cb.className = 'uk-checkbox';
+			cb.checked = (original === '1' || original === 'on' || original === 'true');
+			label.appendChild(cb);
+			label.appendChild(document.createTextNode(' ' + (labels.enabled || 'Enabled')));
+			return {
+				element: label,
+				getValue: function () { return cb.checked ? '1' : '0'; },
+				focus:    function () { cb.focus(); }
+			};
+		}
+
+		function buildPopupDate(original) {
+			var input = document.createElement('input');
+			input.type = 'date';
+			input.className = 'ml-popup-input';
+			input.value = original || '';
+			return {
+				element: input,
+				getValue: function () { return input.value; },
+				focus:    function () { input.focus(); }
+			};
+		}
+
+		function buildPopupSelect(td, original) {
+			var options = [];
+			try { options = JSON.parse(td.dataset.options || '[]'); }
+			catch (e) { options = []; }
+			var select = document.createElement('select');
+			select.className = 'ml-popup-input uk-select';
+			var blank = document.createElement('option');
+			blank.value = '';
+			blank.textContent = '—';
+			select.appendChild(blank);
+			options.forEach(function (o) {
+				var opt = document.createElement('option');
+				opt.value = String(o.value);
+				opt.textContent = o.label;
+				if (String(o.value) === String(original)) opt.selected = true;
+				select.appendChild(opt);
+			});
+			return {
+				element: select,
+				getValue: function () { return select.value; },
+				focus:    function () { select.focus(); }
+			};
+		}
+
 		// Filename rename: text input for the stem with the original
 		// extension visible-but-locked beside it. The widget only ever
 		// reports the stem back; commit() reattaches the extension on
@@ -493,7 +558,13 @@
 			if (td.classList.contains('ml-editing')) return;
 			td.classList.add('ml-editing');
 
-			var original = td.textContent;
+			// Typed cells (checkbox / date / select) display a glyph /
+			// label, not the value — the editor reads the raw value from
+			// data-value; everything else uses the cell text.
+			var typedInput = td.dataset.input === 'checkbox'
+				|| td.dataset.input === 'date'
+				|| td.dataset.input === 'select';
+			var original = typedInput ? (td.dataset.value || '') : td.textContent;
 			var batch    = isBatchEdit(td);
 			var widget   = buildPopupWidget(td, original);
 
@@ -538,7 +609,12 @@
 			// land). Batch rename has just one mode (apply the
 			// pattern with its (n) counter), so the radios stay
 			// hidden there.
-			if (batch && td.dataset.input !== 'filename') {
+			// Add / Replace (+ Remove for tags) only make sense for
+			// token / prose subfields. Filename and the typed widgets
+			// (checkbox / date / select) are Replace-only → no radios.
+			if (batch && (td.dataset.subfield === 'tags'
+				|| td.dataset.input === 'text'
+				|| td.dataset.input === 'textarea')) {
 				batchBar = document.createElement('div');
 				batchBar.className = 'ml-batch-mode';
 				var radioName = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
@@ -796,6 +872,41 @@
 					: raw;
 				var langValuesJson = isMultilang ? JSON.stringify(raw) : '';
 
+				// Typed widgets (checkbox / date / select) broadcast their
+				// raw value as Replace to every selected row, then re-render
+				// (the server produces the correct typed display). No
+				// per-cell optimistic display, no Add/merge logic.
+				if (batch && typedInput) {
+					teardown();
+					var typedCells = batchCellsForSubfield(td.dataset.subfield);
+					typedCells.forEach(function (c) { c.classList.add('ml-cell-saving'); });
+					runBulk('set', { subfield: td.dataset.subfield, value: primaryValue, mode: 'replace' })
+						.then(function (result) {
+							var ok = reportBulk(result);
+							if (ok && result && result.data && Array.isArray(result.data.vanished)) {
+								result.data.vanished.forEach(function (k) { selection.delete(k); });
+							}
+							typedCells.forEach(function (c) {
+								if (!c.isConnected) return;
+								c.classList.remove('ml-cell-saving');
+								flashCell(c, ok);
+							});
+							setTimeout(function () {
+								replaceFromQs(location.search, false);
+							}, ok ? 1400 : 0);
+						}).catch(function (err) {
+							typedCells.forEach(function (c) {
+								if (!c.isConnected) return;
+								c.classList.remove('ml-cell-saving');
+								flashCell(c, false);
+							});
+							if (td.isConnected) {
+								td.title = (err && err.message) || labels.error || 'Network error';
+							}
+						});
+					return;
+				}
+
 				if (batch) {
 					var sendValue = primaryValue;
 					if ((mode || 'replace') === 'add' && !isMultilang) {
@@ -939,9 +1050,14 @@
 					date:      todayIso,
 					field:     td.dataset.field || ''
 				};
-				setCellText(td, (td.dataset.subfield === 'tags')
-					? primaryValue
-					: resolveTemplateClient(primaryValue, singleCtx));
+				if (!typedInput) {
+					// Typed cells display a glyph / label, not the raw value
+					// — skip the optimistic text and let the save response
+					// set the real display.
+					setCellText(td, (td.dataset.subfield === 'tags')
+						? primaryValue
+						: resolveTemplateClient(primaryValue, singleCtx));
+				}
 				td.classList.add('ml-cell-saving');
 				td.title = labels.saving || 'Saving…';
 
@@ -960,6 +1076,11 @@
 					td.classList.remove('ml-cell-saving');
 					if (result && result.data && result.data.ok) {
 						setCellText(td, result.data.value);
+						// Typed cells: refresh data-value so reopening the
+						// editor shows the freshly-stored raw value.
+						if (typedInput && result.data.rawValue !== undefined) {
+							td.dataset.value = String(result.data.rawValue);
+						}
 						// Refresh the per-language data attrs from the
 						// post-save state so reopening the popup shows
 						// the fresh value in every tab, not the stale
@@ -973,7 +1094,7 @@
 						flashCell(td, true);
 						fadeRowIfMismatched(td, result.data);
 					} else {
-						setCellText(td, original);
+						if (!typedInput) setCellText(td, original);
 						var reason = (result && result.data && result.data.error)
 							|| ('HTTP ' + (result && result.status));
 						console.error('[ImageLibrary] save failed:', result);
@@ -983,7 +1104,7 @@
 				}).catch(function (err) {
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
-					setCellText(td, original);
+					if (!typedInput) setCellText(td, original);
 					console.error('[ImageLibrary] save errored:', err);
 					td.title = (err && err.message) || labels.error || 'Network error';
 					flashCell(td, false);
