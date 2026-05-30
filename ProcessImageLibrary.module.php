@@ -2917,18 +2917,17 @@ class ProcessImageLibrary extends Process {
 			return $ts !== false ? $ts : '';
 		}
 		if ($type === 'select' || $type === 'page') {
-			// Comma-separated selected option / page id(s). Hand the
-			// Fieldtype an array of ids (single-value fields collapse it
-			// themselves); it validates against the allowed set.
-			$ids = array_values(array_filter(
+			// Comma-separated selected option / page id(s). Set them
+			// directly — a custom field on an image behaves exactly like
+			// the same field on a page, so Pageimage::set() routes the
+			// id(s) through the subfield's own Fieldtype on save. (Pre-
+			// sanitizing here with the host-page context made FieldtypePage
+			// reject the ids and silently clear the value.) Empty array
+			// clears.
+			return array_values(array_filter(
 				array_map('intval', explode(',', $value)),
 				fn($i) => $i > 0
 			));
-			if ($field instanceof Field) {
-				try { return $field->type->sanitizeValue($page, $field, $ids); }
-				catch (\Throwable $e) { /* fall through */ }
-			}
-			return $ids;
 		}
 		// number: let the Fieldtype validate + coerce.
 		if ($field instanceof Field) {
