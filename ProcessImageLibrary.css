@@ -609,6 +609,8 @@ textarea.ml-cell-input {
 }
 .ml-popup-editor input[type="text"],
 .ml-popup-editor input[type="date"],
+.ml-popup-editor input[type="datetime-local"],
+.ml-popup-editor input[type="number"],
 .ml-popup-editor select.ml-popup-input {
 	display: block;
 	width: 100%;

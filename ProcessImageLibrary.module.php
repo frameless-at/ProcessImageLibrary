@@ -303,11 +303,19 @@ class ProcessImageLibrary extends Process {
 
 	/**
 	 * Lazily-built map of custom subfield name => editor type
-	 * (text / textarea / checkbox / date / select / page). Built once
-	 * per request; see getCustomTypes().
+	 * (text / textarea / checkbox / date / number / select / page).
+	 * Built once per request; see getCustomTypes().
 	 * @var array<string,string>|null
 	 */
 	protected $customTypesCache = null;
+
+	/**
+	 * Per-field cache of resolved Page-reference inline-select config
+	 * (or null when the field's selectable set can't be a bounded
+	 * inline select). Keyed by subfield name; see getPageRefConfig().
+	 * @var array<string,array{multiple:bool,options:array}|null>
+	 */
+	protected $pageRefConfigCache = [];
 
 	/**
 	 * Module bootstrap — autoloaded on admin pages so the renderItem
@@ -948,7 +956,7 @@ class ProcessImageLibrary extends Process {
 		// typed display + editor-raw value. No placeholder / multilang
 		// / tag handling applies to these.
 		$customType = $this->getCustomTypes()[$subfield] ?? null;
-		if (in_array($customType, ['checkbox', 'date', 'select'], true)) {
+		if (in_array($customType, ['checkbox', 'date', 'number', 'select', 'page'], true)) {
 			$field   = $this->wire('fields')->get($subfield);
 			$coerced = $this->coerceCustomValue($page, $field, $customType, $value);
 			try {
@@ -1794,7 +1802,7 @@ class ProcessImageLibrary extends Process {
 				// coerce + set directly. Replace-only — the client sends a
 				// single scalar, no Add / Remove for these.
 				$customTypeBulk = $this->getCustomTypes()[$subfield] ?? null;
-				if (in_array($customTypeBulk, ['checkbox', 'date', 'select'], true)) {
+				if (in_array($customTypeBulk, ['checkbox', 'date', 'number', 'select', 'page'], true)) {
 					$field = $this->wire('fields')->get($subfield);
 					$img->set($subfield, $this->coerceCustomValue($page, $field, $customTypeBulk, (string) $value));
 					$fieldsTouched[$fn] = true;
@@ -2676,6 +2684,8 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function customEditorType(Field $f): string {
 		$t = $f->type;
+		// Order matters: FieldtypeDatetime / Checkbox / Float extend
+		// FieldtypeInteger, so the Integer check has to come last.
 		if ($t instanceof FieldtypeTextarea) return 'textarea';
 		if ($t instanceof FieldtypeCheckbox) return 'checkbox';
 		if ($t instanceof FieldtypeDatetime) return 'date';
@@ -2683,6 +2693,7 @@ class ProcessImageLibrary extends Process {
 		if ($t instanceof FieldtypeOptions) {
 			return $this->isSingleValueInput($f) ? 'select' : 'page';
 		}
+		if ($t instanceof FieldtypeInteger) return 'number';
 		return 'text';
 	}
 
@@ -2777,9 +2788,15 @@ class ProcessImageLibrary extends Process {
 				return $this->langValueToStorable($val);
 			case 'checkbox':
 				return ((int) (string) $val) ? '✓' : '';
+			case 'number':
+				return (string) $val;
 			case 'date':
 				$ts = is_numeric($val) ? (int) $val : @strtotime((string) $val);
-				return $ts ? $this->formatTimestamp($ts) : '';
+				if (!$ts) return '';
+				$f = $this->wire('fields')->get($name);
+				// Use the field's OWN output format so a date-only field
+				// doesn't show a spurious 00:00 time.
+				return ($f instanceof Field) ? $this->formatCustomDate($f, $ts) : $this->formatTimestamp($ts);
 			default:
 				return $this->customLabel($val);
 		}
@@ -2797,15 +2814,32 @@ class ProcessImageLibrary extends Process {
 		switch ($this->getCustomTypes()[$name] ?? 'text') {
 			case 'checkbox':
 				return ((int) (string) $val) ? '1' : '0';
+			case 'number':
+				return (string) $val;
 			case 'date':
 				$ts = is_numeric($val) ? (int) $val : @strtotime((string) $val);
-				return $ts ? date('Y-m-d', $ts) : '';
+				if (!$ts) return '';
+				$f = $this->wire('fields')->get($name);
+				// datetime-local needs the time component; a date-only
+				// field uses the bare date.
+				return ($f instanceof Field && $this->dateHasTime($f))
+					? date('Y-m-d\TH:i', $ts)
+					: date('Y-m-d', $ts);
 			case 'select':
 				// FieldtypeOptions stores a SelectableOptionArray; the
 				// widget keys on the option id.
 				if (is_object($val) && method_exists($val, 'first')) {
 					$o = $val->first();
 					return $o ? (string) $o->id : '';
+				}
+				return (string) $val;
+			case 'page':
+				// Selected page id(s), comma-joined for the <select>.
+				if ($val instanceof Page) return (string) $val->id;
+				if ($val instanceof PageArray) {
+					$ids = [];
+					foreach ($val as $p) $ids[] = (int) $p->id;
+					return implode(',', $ids);
 				}
 				return (string) $val;
 			default:
@@ -2849,12 +2883,96 @@ class ProcessImageLibrary extends Process {
 			$ts = strtotime($value);
 			return $ts !== false ? $ts : '';
 		}
-		// select / options: let the Fieldtype validate + coerce.
+		if ($type === 'page') {
+			// Comma-separated selected page id(s). Hand the Fieldtype an
+			// array (single fields collapse it themselves); it validates
+			// the ids against the field's selectable set.
+			$ids = array_values(array_filter(
+				array_map('intval', explode(',', $value)),
+				fn($i) => $i > 0
+			));
+			if ($field instanceof Field) {
+				try { return $field->type->sanitizeValue($page, $field, $ids); }
+				catch (\Throwable $e) { /* fall through */ }
+			}
+			return $ids;
+		}
+		// number / select / options: let the Fieldtype validate + coerce.
 		if ($field instanceof Field) {
 			try { return $field->type->sanitizeValue($page, $field, $value); }
 			catch (\Throwable $e) { /* fall through */ }
 		}
 		return $value;
+	}
+
+	/**
+	 * True if a FieldtypeDatetime field's output format carries a time
+	 * component (so the editor uses datetime-local instead of date, and
+	 * the display keeps the time).
+	 */
+	protected function dateHasTime(Field $f): bool {
+		$fmt = (string) $f->get('dateOutputFormat');
+		// date() time tokens, plus the common strftime time tokens.
+		return $fmt !== '' && (bool) preg_match('/[aAgGhHisuv]|%[HIklMpPrRSTX]/', $fmt);
+	}
+
+	/**
+	 * Format a timestamp with a Datetime field's own output format
+	 * (falling back to the module's generic timestamp format). wireDate()
+	 * handles both date() and legacy strftime formats safely.
+	 */
+	protected function formatCustomDate(Field $f, int $ts): string {
+		$fmt = (string) $f->get('dateOutputFormat');
+		if ($fmt === '') return $this->formatTimestamp($ts);
+		if (function_exists('ProcessWire\\wireDate')) {
+			$out = \ProcessWire\wireDate($fmt, $ts);
+			if (is_string($out) && $out !== '') return $out;
+		}
+		return date($fmt, $ts);
+	}
+
+	/**
+	 * Resolve a Page-reference custom subfield to a bounded inline-select
+	 * config: { multiple: bool, options: [{value:id,label:title}] }.
+	 * Returns null when the selectable set can't be a sane inline select
+	 * (autocomplete / huge / unresolvable) — those keep the native editor.
+	 *
+	 * @return array{multiple:bool,options:array<int,array{value:int,label:string}>}|null
+	 */
+	protected function getPageRefConfig(string $name): ?array {
+		if (array_key_exists($name, $this->pageRefConfigCache)) {
+			return $this->pageRefConfigCache[$name];
+		}
+		$result = null;
+		$f = $this->wire('fields')->get($name);
+		if ($f instanceof Field && $f->type instanceof FieldtypePage) {
+			try {
+				$ctx = $this->wire('page');
+				$inputfield = $f->getInputfield($ctx);
+				if ($inputfield && method_exists($inputfield, 'getSelectablePages')) {
+					$pa = $inputfield->getSelectablePages($ctx);
+					// Bounded set only — autocomplete fields return an empty
+					// / huge set, which we leave to the native editor.
+					if ($pa && $pa->count() > 0 && $pa->count() <= 500) {
+						$opts = [];
+						foreach ($pa as $p) {
+							$opts[] = [
+								'value' => (int) $p->id,
+								'label' => (string) (((string) $p->title !== '') ? $p->title : $p->name),
+							];
+						}
+						$result = [
+							'multiple' => ((int) $f->get('derefAsPage') === 0),
+							'options'  => $opts,
+						];
+					}
+				}
+			} catch (\Throwable $e) {
+				$result = null;
+			}
+		}
+		$this->pageRefConfigCache[$name] = $result;
+		return $result;
 	}
 
 	/**
@@ -2937,7 +3055,7 @@ class ProcessImageLibrary extends Process {
 				// Editor-RAW value for inline-editable typed cells — set on
 				// every visible-slice row (even when the display value was
 				// already filled by the bulk-hydrate pass).
-				if (in_array($this->getCustomTypes()[$customName] ?? 'text', ['checkbox', 'date', 'select'], true)) {
+				if (in_array($this->getCustomTypes()[$customName] ?? 'text', ['checkbox', 'date', 'number', 'select', 'page'], true)) {
 					$row['customRaw'][$customName] = $this->readCustomRaw($img, $customName);
 				}
 				if (isset($row['custom'][$customName])) continue; // already filled by bulk pass
@@ -3843,6 +3961,11 @@ class ProcessImageLibrary extends Process {
 				}
 				$raw = $row['custom'][$name] ?? '';
 				$val = $this->normalizeDescription($raw);
+				// Page-reference resolves to an inline <select> when its
+				// selectable set is bounded; otherwise null → native editor.
+				$pageRefCfg = $inputType === 'page' ? $this->getPageRefConfig($name) : null;
+				$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select'], true)
+					|| ($inputType === 'page' && $pageRefCfg !== null);
 				if (in_array($inputType, ['text', 'textarea'], true)) {
 					// Inline-editable prose cell.
 					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
@@ -3858,28 +3981,38 @@ class ProcessImageLibrary extends Process {
 						. ' data-input="' . $san->entities($inputType) . '"'
 						. $this->buildLangAttrs($raw) . '>'
 						. $customInner . '</td>';
-				} elseif (in_array($inputType, ['checkbox', 'date', 'select'], true) && !empty($row['pageEditUrl'])) {
+				} elseif ($inlineTyped && !empty($row['pageEditUrl'])) {
 					// Inline-editable typed cell. Display shows the typed
 					// value (glyph / date / label); data-value carries the
-					// editor-RAW value, and select also ships its options.
+					// editor-RAW value. select + page ship their options;
+					// page-ref reuses the select widget (data-input="select").
 					$rawVal = (string) ($row['customRaw'][$name] ?? '');
+					$widgetInput = $inputType === 'page' ? 'select' : $inputType;
 					$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
 					if ($inputType === 'select') {
 						$typedExtra .= " data-options='" . $san->entities(
 							json_encode($this->getCustomOptions($name), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
 						) . "'";
+					} elseif ($inputType === 'page') {
+						$typedExtra .= " data-options='" . $san->entities(
+							json_encode($pageRefCfg['options'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+						) . "'";
+						if (!empty($pageRefCfg['multiple'])) $typedExtra .= ' data-multiple="1"';
+					} elseif ($inputType === 'date') {
+						$df = $this->wire('fields')->get($name);
+						if ($df instanceof Field && $this->dateHasTime($df)) $typedExtra .= ' data-datetime="1"';
 					}
 					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
 					)));
 					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
 						. ' data-subfield="' . $san->entities($name) . '"'
-						. ' data-input="' . $san->entities($inputType) . '"' . $typedExtra . '>'
+						. ' data-input="' . $san->entities($widgetInput) . '"' . $typedExtra . '>'
 						. $san->entities((string) $val) . '</td>';
 				} elseif (!empty($row['pageEditUrl'])) {
-					// Page-reference (and multi-value Options) → open the
-					// native per-image editor (same file-hash target as
-					// the thumbnail); no inline widget for these.
+					// Only page-refs whose selectable set can't be a bounded
+					// inline select (autocomplete / huge / custom find code)
+					// fall back to the native per-image editor.
 					$nativeAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 						$this->_('Edit %1$s of %2$s in the image editor'), $name, (string) $row['basename']
 					)));

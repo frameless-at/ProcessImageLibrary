@@ -287,7 +287,10 @@
 				return buildPopupCheckbox(original);
 			}
 			if (td.dataset.input === 'date') {
-				return buildPopupDate(original);
+				return buildPopupDate(td, original);
+			}
+			if (td.dataset.input === 'number') {
+				return buildPopupNumber(original);
 			}
 			if (td.dataset.input === 'select') {
 				return buildPopupSelect(td, original);
@@ -449,9 +452,9 @@
 			};
 		}
 
-		function buildPopupDate(original) {
+		function buildPopupDate(td, original) {
 			var input = document.createElement('input');
-			input.type = 'date';
+			input.type = (td && td.dataset.datetime === '1') ? 'datetime-local' : 'date';
 			input.className = 'ml-popup-input';
 			input.value = original || '';
 			return {
@@ -465,23 +468,49 @@
 			var options = [];
 			try { options = JSON.parse(td.dataset.options || '[]'); }
 			catch (e) { options = []; }
+			var multiple = td.dataset.multiple === '1';
+			var current = String(original || '').split(',').filter(Boolean);
 			var select = document.createElement('select');
 			select.className = 'ml-popup-input uk-select';
-			var blank = document.createElement('option');
-			blank.value = '';
-			blank.textContent = '—';
-			select.appendChild(blank);
+			if (multiple) {
+				select.multiple = true;
+				select.size = Math.min(Math.max(options.length, 3), 10);
+			} else {
+				var blank = document.createElement('option');
+				blank.value = '';
+				blank.textContent = '—';
+				select.appendChild(blank);
+			}
 			options.forEach(function (o) {
 				var opt = document.createElement('option');
 				opt.value = String(o.value);
 				opt.textContent = o.label;
-				if (String(o.value) === String(original)) opt.selected = true;
+				if (current.indexOf(String(o.value)) !== -1) opt.selected = true;
 				select.appendChild(opt);
 			});
 			return {
 				element: select,
-				getValue: function () { return select.value; },
-				focus:    function () { select.focus(); }
+				getValue: function () {
+					if (multiple) {
+						return Array.prototype.filter.call(select.options, function (o) { return o.selected; })
+							.map(function (o) { return o.value; }).join(',');
+					}
+					return select.value;
+				},
+				focus: function () { select.focus(); }
+			};
+		}
+
+		function buildPopupNumber(original) {
+			var input = document.createElement('input');
+			input.type = 'number';
+			input.className = 'ml-popup-input';
+			input.step = 'any';
+			input.value = original || '';
+			return {
+				element: input,
+				getValue: function () { return input.value; },
+				focus:    function () { input.focus(); input.select(); }
 			};
 		}
 
@@ -563,6 +592,7 @@
 			// data-value; everything else uses the cell text.
 			var typedInput = td.dataset.input === 'checkbox'
 				|| td.dataset.input === 'date'
+				|| td.dataset.input === 'number'
 				|| td.dataset.input === 'select';
 			var original = typedInput ? (td.dataset.value || '') : td.textContent;
 			var batch    = isBatchEdit(td);
