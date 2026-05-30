@@ -889,11 +889,18 @@
 								flashCell(c, false);
 							}
 						});
-						// Bulk inline save doesn't change basenames, so
-						// the selection keys are still valid — just
-						// re-sync the checkbox state across the swap.
-						// Defer re-render so the flash plays first,
-						// matching the single inline save's rhythm.
+						// Match-aware (parity with the single inline save):
+						// drop rows the server says no longer pass the active
+						// filter from the persistent selection, so they don't
+						// silently re-tick when they reappear in another view.
+						if (ok && result && result.data && Array.isArray(result.data.vanished)) {
+							result.data.vanished.forEach(function (k) { selection.delete(k); });
+						}
+						// Bulk inline save doesn't change basenames, so the
+						// surviving selection keys are still valid — re-sync
+						// the checkbox state across the swap. Defer re-render
+						// so the flash plays first, matching the single inline
+						// save's rhythm.
 						setTimeout(function () {
 							replaceFromQs(location.search, false);
 						}, ok ? 1400 : 0);
@@ -1528,8 +1535,14 @@
 				return res.text();
 			}).then(function (html) {
 				results.innerHTML = html;
+				// Navigation (filter / reset / sort / page / page-size /
+				// bookmark — all push=true) starts a fresh selection: clear
+				// it before re-syncing so the new view comes up unchecked.
+				// In-place refreshes (push=false: after bulk / rename /
+				// import / image-editor close) keep the selection.
+				if (push) selection.clear();
 				// New rows = new checkboxes; restore checked state from the
-				// persistent selection Set so it survives the swap.
+				// persistent selection Set so it survives an in-place swap.
 				syncCheckboxes();
 				// New cells = lost ml-col-hidden classes; re-apply the
 				// user's column visibility prefs to the swapped DOM.
@@ -1592,6 +1605,10 @@
 			var fd = new FormData();
 			fd.append('action', action);
 			fd.append('items', JSON.stringify(items));
+			// Current filter URL so the server can report which saved rows
+			// dropped out of the active filter (vanished) — parity with
+			// the single-save postSave() path.
+			fd.append('filterQs', location.search || '');
 			if (extra) Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
 			if (config.csrf && config.csrf.name) {
 				fd.append(config.csrf.name, config.csrf.value);
@@ -1748,12 +1765,22 @@
 					else selection.delete(key);
 					syncSelectAllHeader();
 				} else if (t.classList.contains('ml-select-all')) {
-					var checked = t.checked;
-					results.querySelectorAll('.ml-select-row').forEach(function (cb) {
-						cb.checked = checked;
-						if (checked) selection.add(cb.dataset.key);
-						else selection.delete(cb.dataset.key);
-					});
+					if (t.checked) {
+						// Check all rows on the current page.
+						results.querySelectorAll('.ml-select-row').forEach(function (cb) {
+							cb.checked = true;
+							selection.add(cb.dataset.key);
+						});
+					} else {
+						// Deselect clears the ENTIRE selection — including
+						// rows ticked on other pages / now filtered out — so
+						// the master checkbox is the real "select nothing"
+						// control (there's no separate clear button).
+						selection.clear();
+						results.querySelectorAll('.ml-select-row').forEach(function (cb) {
+							cb.checked = false;
+						});
+					}
 					syncSelectAllHeader();
 				} else if (t.classList.contains('ml-page-size-picker')) {
 					// Drop ?p — the current page number rarely makes
