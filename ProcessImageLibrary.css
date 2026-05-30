@@ -345,6 +345,20 @@
 	content: "—";
 	color: var(--pw-muted-color, #ccc);
 }
+/* Typed custom cells (checkbox / date / select / page) display their
+   value and open the native per-image editor on click — same hover
+   affordance + "—" empty placeholder as the inline-editable cells. */
+.ml-cell-native[data-file-hash] {
+	cursor: pointer;
+	touch-action: manipulation;
+}
+.ml-cell-native[data-file-hash]:hover {
+	background: var(--pw-notes-background, #fffbe6);
+}
+.ml-cell-native:empty::before {
+	content: "—";
+	color: var(--pw-muted-color, #ccc);
+}
 .ml-editing {
 	background: var(--pw-notes-background, #fffce8);
 	padding: 4px;

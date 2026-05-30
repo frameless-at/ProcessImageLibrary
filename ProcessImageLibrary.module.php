@@ -302,6 +302,14 @@ class ProcessImageLibrary extends Process {
 	protected $customByFieldCache = null;
 
 	/**
+	 * Lazily-built map of custom subfield name => editor type
+	 * (text / textarea / checkbox / date / select / page). Built once
+	 * per request; see getCustomTypes().
+	 * @var array<string,string>|null
+	 */
+	protected $customTypesCache = null;
+
+	/**
 	 * Module bootstrap — autoloaded on admin pages so the renderItem
 	 * hook below fires while ProcessPageEdit is rendering an
 	 * InputfieldImage. The hook is the heart of the "edit one image
@@ -2616,6 +2624,125 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Map a custom-fields-on-images subfield to the editor type the
+	 * table uses: textarea / text get inline widgets; checkbox / date /
+	 * select (single-value FieldtypeOptions) get type-specific inline
+	 * widgets; page (and multi-value Options) route to the native
+	 * per-image editor. Drives both the cell display and the inline
+	 * editor dispatch.
+	 */
+	protected function customEditorType(Field $f): string {
+		$t = $f->type;
+		if ($t instanceof FieldtypeTextarea) return 'textarea';
+		if ($t instanceof FieldtypeCheckbox) return 'checkbox';
+		if ($t instanceof FieldtypeDatetime) return 'date';
+		if ($t instanceof FieldtypePage)     return 'page';
+		if ($t instanceof FieldtypeOptions) {
+			return $this->isSingleValueInput($f) ? 'select' : 'page';
+		}
+		return 'text';
+	}
+
+	/**
+	 * True when a FieldtypeOptions field renders a single-value input
+	 * (plain select / radios) rather than a multi-select. Multi-value
+	 * inputs don't fit the one-string inline editor, so they fall back
+	 * to the native editor.
+	 */
+	protected function isSingleValueInput(Field $f): bool {
+		$cls = (string) $f->get('inputfieldClass');
+		return $cls === '' || in_array($cls, ['InputfieldSelect', 'InputfieldRadios'], true);
+	}
+
+	/**
+	 * Custom subfield name => editor type, computed once per request
+	 * across every image field's declared subfields. Shared by the
+	 * table render (cell + editor dispatch) and the read pipeline
+	 * (typed display in hydrateSlice / bulkHydrateCustomFields).
+	 *
+	 * @return array<string,string>
+	 */
+	protected function getCustomTypes(): array {
+		if ($this->customTypesCache === null) {
+			$map = [];
+			foreach ($this->getCustomByField() as $names) {
+				foreach ($names as $n) {
+					if (isset($map[$n])) continue;
+					$f = $this->wire('fields')->get($n);
+					$map[$n] = $f instanceof Field ? $this->customEditorType($f) : 'text';
+				}
+			}
+			$this->customTypesCache = $map;
+		}
+		return $this->customTypesCache;
+	}
+
+	/**
+	 * Human-readable label for a typed custom value — page title(s) for
+	 * Page references, option title(s) for Select Options — so the cell
+	 * shows something meaningful instead of an id or an object dump.
+	 *
+	 * @param mixed $val
+	 */
+	protected function customLabel($val): string {
+		if ($val instanceof Page) {
+			return (string) (((string) $val->title !== '') ? $val->title : $val->name);
+		}
+		if ($val instanceof PageArray) {
+			$t = [];
+			foreach ($val as $p) {
+				$t[] = (string) (((string) $p->title !== '') ? $p->title : $p->name);
+			}
+			return implode(', ', array_filter($t, fn($s) => $s !== ''));
+		}
+		// SelectableOptionArray (FieldtypeOptions) and any other WireArray
+		// of title-bearing items.
+		if (is_object($val) && $val instanceof \IteratorAggregate) {
+			$t = [];
+			foreach ($val as $opt) {
+				$t[] = (is_object($opt) && (string) $opt->title !== '')
+					? (string) $opt->title
+					: (string) $opt;
+			}
+			$t = array_filter($t, fn($s) => $s !== '');
+			if ($t) return implode(', ', $t);
+		}
+		if (is_object($val) && isset($val->title) && (string) $val->title !== '') {
+			return (string) $val->title;
+		}
+		return $this->normalizeDescription($val);
+	}
+
+	/**
+	 * Read a custom subfield off a Pageimage as a DISPLAY value for the
+	 * table, typed by the subfield's editor type:
+	 *   - text / textarea → langValueToStorable (keeps the {langId:value}
+	 *     shape the multilang editor tabs read)
+	 *   - checkbox → "✓" or "" (empty renders the cell's "—" placeholder)
+	 *   - date → formatted via formatTimestamp
+	 *   - select / page / other → human label(s)
+	 * Returns null when the image has no value for the subfield.
+	 *
+	 * @return mixed
+	 */
+	protected function readCustomValue(Pageimage $img, string $name) {
+		$val = $img->get($name);
+		if ($val === null) return null;
+		switch ($this->getCustomTypes()[$name] ?? 'text') {
+			case 'text':
+			case 'textarea':
+				return $this->langValueToStorable($val);
+			case 'checkbox':
+				return ((int) (string) $val) ? '✓' : '';
+			case 'date':
+				$ts = is_numeric($val) ? (int) $val : @strtotime((string) $val);
+				return $ts ? $this->formatTimestamp($ts) : '';
+			default:
+				return $this->customLabel($val);
+		}
+	}
+
+	/**
 	 * Hydrate the visible row slice with thumbnail URLs and page links.
 	 *
 	 * Only this slice triggers Pageimage hydration — the bulk row list stays
@@ -2688,13 +2815,14 @@ class ProcessImageLibrary extends Process {
 			$row['variationsCount'] = $variations ? $variations->count() : 0;
 
 			// Custom-field hydration: read each declared custom subfield off
-			// the Pageimage. Phase 6 will handle type-specific edit semantics;
-			// here we normalize to a displayable scalar.
+			// the Pageimage as a typed DISPLAY value (checkbox glyph, date
+			// formatted, page / option labels; text/textarea keep their
+			// multilang shape). See readCustomValue().
 			foreach ($customByField[$row['fieldName']] ?? [] as $customName) {
 				if (isset($row['custom'][$customName])) continue; // already filled by bulk pass
-				$val = $img->get($customName);
-				if ($val === null || $val === '') continue;
-				$row['custom'][$customName] = $this->langValueToStorable($val);
+				$v = $this->readCustomValue($img, $customName);
+				if ($v === null || $v === '') continue;
+				$row['custom'][$customName] = $v;
 			}
 		}
 		unset($row);
@@ -2736,13 +2864,13 @@ class ProcessImageLibrary extends Process {
 			if (!$img) continue;
 
 			foreach ($customNames as $name) {
-				$val = $img->get($name);
-				if ($val === null) continue;
-				// Keep the raw shape — multilang LanguagesPageFieldValue
-				// objects get flattened to a cacheable {langId: value}
-				// array so the popup's tabs UI can read every language
-				// straight off the row without a follow-up fetch.
-				$row['custom'][$name] = $this->langValueToStorable($val);
+				// Typed display value (same as hydrateSlice): text/textarea
+				// keep their multilang {langId:value} shape for the editor
+				// tabs; checkbox/date/select/page collapse to a label so
+				// search + "missing X" operate on something meaningful.
+				$v = $this->readCustomValue($img, $name);
+				if ($v === null) continue;
+				$row['custom'][$name] = $v;
 			}
 		}
 		unset($row);
@@ -3273,21 +3401,12 @@ class ProcessImageLibrary extends Process {
 		$san = $this->wire('sanitizer');
 		$thumb = $this->getThumbDims();
 
-		// Per-subfield editor type — Textarea-backed customs render a
-		// <textarea> in the inline editor, everything else falls back to
-		// <input type="text">. Built once across every image field's
-		// declared subfields so the per-row loop is just a lookup.
-		$fieldsApi  = $this->wire('fields');
+		// Per-subfield editor type (text / textarea / checkbox / date /
+		// select / page), keyed by subfield name so the per-row loop is
+		// just a lookup. text + textarea are inline-editable; the typed
+		// ones open the native per-image editor for now (Phase 1).
 		$customByField = $this->getCustomByField();
-		$customInputTypes = [];
-		foreach ($customByField as $names) {
-			foreach ($names as $n) {
-				if (isset($customInputTypes[$n])) continue;
-				$f = $fieldsApi->get($n);
-				$customInputTypes[$n] = ($f && $f->type instanceof FieldtypeTextarea)
-					? 'textarea' : 'text';
-			}
-		}
+		$customInputTypes = $this->getCustomTypes();
 
 		if (!$slice) {
 			return '<p class="ml-empty">'
@@ -3601,19 +3720,39 @@ class ProcessImageLibrary extends Process {
 				}
 				$raw = $row['custom'][$name] ?? '';
 				$val = $this->normalizeDescription($raw);
-				$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-					$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
-				)));
-				// Only textarea-backed customs get the clamp box; single-
-				// line text customs are short and stay a plain text node.
-				$customInner = $inputType === 'textarea'
-					? $this->clampCell((string) $val)
-					: $san->entities((string) $val);
-				$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
-					. ' data-subfield="' . $san->entities($name) . '"'
-					. ' data-input="' . $san->entities($inputType) . '"'
-					. $this->buildLangAttrs($raw) . '>'
-					. $customInner . '</td>';
+				if (in_array($inputType, ['text', 'textarea'], true)) {
+					// Inline-editable prose cell.
+					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+					)));
+					// Only textarea-backed customs get the clamp box; single-
+					// line text customs are short and stay a plain text node.
+					$customInner = $inputType === 'textarea'
+						? $this->clampCell((string) $val)
+						: $san->entities((string) $val);
+					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+						. ' data-subfield="' . $san->entities($name) . '"'
+						. ' data-input="' . $san->entities($inputType) . '"'
+						. $this->buildLangAttrs($raw) . '>'
+						. $customInner . '</td>';
+				} elseif (!empty($row['pageEditUrl'])) {
+					// Typed subfield (checkbox / date / select / page):
+					// show the value; clicking opens the native per-image
+					// editor (same file-hash target as the thumbnail).
+					// Phase 2 swaps checkbox / date / select to inline
+					// widgets; page stays on the native editor.
+					$nativeAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+						$this->_('Edit %1$s of %2$s in the image editor'), $name, (string) $row['basename']
+					)));
+					$out .= '<td class="ml-cell-native ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . ' role="button" tabindex="0"' . $nativeAria
+						. ' data-subfield="' . $san->entities($name) . '"'
+						. ' data-input="' . $san->entities($inputType) . '">'
+						. $san->entities((string) $val) . '</td>';
+				} else {
+					// Typed subfield on a non-editable page → display only.
+					$out .= '<td class="' . $typeClass . '"' . $colAttr . '>'
+						. $san->entities((string) $val) . '</td>';
+				}
 			}
 
 			$out .= '</tr>';

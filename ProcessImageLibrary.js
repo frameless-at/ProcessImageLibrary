@@ -1720,10 +1720,10 @@
 					// the page-edit data attrs when the host page is
 					// editable, so unauthorised users just see the thumb
 					// without a clickable cursor.
-					var thumbTd = e.target.closest('.ml-cell-thumb[data-file-hash]');
-					if (thumbTd) {
+					var nativeTd = e.target.closest('.ml-cell-thumb[data-file-hash], .ml-cell-native[data-file-hash]');
+					if (nativeTd) {
 						e.preventDefault();
-						openImageEditor(thumbTd);
+						openImageEditor(nativeTd);
 						return;
 					}
 					// Editable cell — but ignore clicks that landed on an
@@ -1741,10 +1741,10 @@
 			// them; Enter / Space here mirrors a mouse click.
 			results.addEventListener('keydown', function (e) {
 				if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-				var thumbTd = e.target.closest && e.target.closest('.ml-cell-thumb[data-file-hash]');
-				if (thumbTd && e.target === thumbTd) {
+				var nativeTd = e.target.closest && e.target.closest('.ml-cell-thumb[data-file-hash], .ml-cell-native[data-file-hash]');
+				if (nativeTd && e.target === nativeTd) {
 					e.preventDefault();
-					openImageEditor(thumbTd);
+					openImageEditor(nativeTd);
 					return;
 				}
 				var editTd = e.target.closest && e.target.closest('.ml-cell-editable');
