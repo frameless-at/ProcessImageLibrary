@@ -1177,12 +1177,14 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Subfield not found');
 		}
 
-		// Custom-fields-page on Pagefile = the hidden Page that holds
-		// the subfield values. Pagefile::pagefiles->getFieldsPage()
-		// returns it. Pass it as the Inputfield's context so any
-		// per-page selectors (parent_id, find code) resolve against
-		// the right scope. Set the current value so the widget shows
-		// the existing selection on open.
+		// getFieldsPage() returns a SHARED template Page used as the
+		// context for custom-field machinery — it doesn't carry the
+		// per-image value. The actual stored value lives on the
+		// Pagefile itself; $img->get($subfield) returns it. Use the
+		// shared customsPage as the Inputfield's selector context
+		// (parent_id / find code resolve against it), but pull the
+		// value from the image so the widget reflects the existing
+		// selection on open.
 		$customsPage = method_exists($img->pagefiles, 'getFieldsPage')
 			? $img->pagefiles->getFieldsPage()
 			: $page;
@@ -1204,7 +1206,11 @@ class ProcessImageLibrary extends Process {
 		}
 		$inputfield->attr('name', $subfield);
 		$inputfield->attr('id',   'ml_widget_' . $subfield);
-		$inputfield->attr('value', $customsPage->get($subfield));
+		// Per-image value — the shared customsPage doesn't carry this,
+		// only the Pagefile itself does. Goes through the Inputfield's
+		// own value setter so it converts Page / PageArray / id-array
+		// into whatever internal shape it needs.
+		$inputfield->setAttribute('value', $img->get($subfield));
 
 		// Render via an InputfieldWrapper so the .Inputfield <li>
 		// wrapping (which inputfield JS expects to scan for) is in
