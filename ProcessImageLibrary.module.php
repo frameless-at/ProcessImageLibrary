@@ -960,6 +960,22 @@ class ProcessImageLibrary extends Process {
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
 
+		// The client packs all save params into one base64'd JSON field
+		// ("mlp") to slip past content-inspecting proxies / WAFs that
+		// would otherwise turn this POST into a GET. Decode it back into
+		// the post input so the rest of this method (and matchTouchedRows,
+		// which reads post('filterQs')) reads it transparently. Falls back
+		// to plain post fields when absent (older cached client).
+		$mlp = (string) $input->post('mlp');
+		if ($mlp !== '') {
+			$decoded = json_decode((string) base64_decode($mlp, true), true);
+			if (is_array($decoded)) {
+				foreach ($decoded as $k => $v) {
+					$input->post->set((string) $k, is_scalar($v) ? (string) $v : json_encode($v));
+				}
+			}
+		}
+
 		$pageId    = (int) $input->post('pageId');
 		$fieldName = $sanitizer->fieldName((string) $input->post('fieldName'));
 		$basename  = basename((string) $input->post('basename'));

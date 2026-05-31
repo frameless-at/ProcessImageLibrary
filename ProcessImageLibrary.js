@@ -89,12 +89,22 @@
 			return next;
 		}
 
+		// UTF-8-safe base64 of a string.
+		function b64utf8(str) {
+			return btoa(unescape(encodeURIComponent(String(str))));
+		}
+
 		function postSave(payload) {
+			// Send the current filter URL state so the server can tell us
+			// whether the saved row still belongs in this view.
+			payload = Object.assign({}, payload, { filterQs: location.search || '' });
 			var fd = new FormData();
-			Object.keys(payload).forEach(function (k) { fd.append(k, payload[k]); });
-			// Send the current filter URL state so the server can
-			// tell us whether the saved row still belongs in this view.
-			fd.append('filterQs', location.search || '');
+			// Pack the whole payload into ONE base64'd JSON field ("mlp")
+			// so a content-inspecting reverse proxy / WAF can't react to
+			// individual field names or values (some setups silently turn
+			// such a POST into a GET → 405). The CSRF token stays a plain
+			// field for ProcessWire's token check.
+			fd.append('mlp', b64utf8(JSON.stringify(payload)));
 			appendCsrf(fd);
 			return fetch(config.saveUrl, {
 				method: 'POST',
