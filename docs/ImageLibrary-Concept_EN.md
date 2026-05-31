@@ -72,13 +72,14 @@ The `src/` traits keep the main module file focused on AJAX endpoints + renderin
 - `___execute()` — renders the table and filter UI (server-rendered HTML; JS hydrates for interaction). Columns picker lives as a sibling `<dialog>` next to `.ml-results` so AJAX swaps leave drag/toggle handlers intact.
 - `___executeData()` — AJAX GET, returns only the `.ml-results` block (table + pagination) for filter/sort/page swaps.
 - `___executeSave()` — AJAX POST, validates + saves a cell change, returns JSON. Multilang-aware: the payload can carry a `langValues` JSON map (`{langId: value}`), in which case every language slot is written in one POST via `applyLangValues()` (single-language installs just send `value`). Reads `filterQs` from POST and returns `stillMatches` + `newTotal` so the client can fade rows that fell out of scope.
-- `___executeBulk()` — AJAX POST: apply an identical cell save to a selection (Add / Replace mode, plus a tags-only Remove mode). Returns `vanished` (list of selection keys that dropped out of the filter) + `newTotal` alongside the success / failure counts.
+- `___executeBulk()` — AJAX POST: apply an identical cell save to a selection (Add / Replace mode, plus a tags-only Remove mode). Returns `vanished` (list of selection keys that dropped out of the filter) + `newTotal` alongside the success / failure counts. Rows whose image field doesn't carry the broadcast subfield silently succeed as no-ops instead of being counted as failures — a paintbrush hitting heterogeneous selections (e.g. "author" across rows from `images` + `lead_image` where only one carries it) is an editorial reality, not a user error.
 - `___executeRename()` — AJAX POST, renames a single image's file (or every selected image in batch mode) via `Pagefile::rename()` after expanding placeholders and clearing old variation files.
 - `___executeReplace()` — AJAX POST, replaces an image's file bytes via `move_uploaded_file()` onto the existing path, drops old variations, re-generates the thumb variation, returns the refreshed cell payload (thumb URL, dimensions, filesize, modified, variations count). Extension match enforced so the basename stays valid.
 - `___executeDelete()` — AJAX POST with an `items` array; single + batch share the path. Per page `$page->editable()`, then `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed lists so the JS can fade rows out and surface partial failures through the bulk-result dialog.
 - `___executeExport()` — direct download of JSON or CSV honoring the active filters. Reads `urlVariant` (`original` default; `260` / `512` / `1024` for same-axis variations) and emits the matching URL in the `url` column; the chosen variant is recorded in `meta.urlVariant`.
 - `___executeImport()` — AJAX POST, accepts a previously-exported (and externally edited) JSON / CSV file and writes it back; idempotent (unchanged items are skipped).
 - `___executeUserPrefs()` — AJAX POST, persists columns + page size + bookmarks into `$user->meta('imageLibraryPrefs')` (debounced). Bookmarks are validated via `$sanitizer->text(maxLength: 80)` for the name and `canonicalizeBookmarkQs()` for the querystring, so saved + loaded shapes stay in lockstep.
+- `___executeWidget()` — AJAX GET, renders PW's configured Inputfield for a page-reference custom subfield (PageAutocomplete / PageListSelect / ASMSelect / etc.). Captures `$config->scripts` / `$config->styles` snapshots before + after the render so only the NEW asset URLs go back to the client. The popup injects the HTML, lazy-loads any new scripts / styles, fires the `'reloaded'` DOM event on each `.Inputfield` so PW's delegated init handlers wire up. Save flows back through `___executeSave`; `coerceCustomValue()` shapes `[id]` into a single int (single-page fields) or a fresh `PageArray` (multi-page) — the second form is what gives `FieldtypePage::sanitizeValuePageArray()` its REPLACE-instead-of-merge semantics.
 - `___install()` / `___uninstall()` — admin-page lifecycle + `image-library-access` permission.
 
 ## Data model (PW-native)
@@ -230,13 +231,14 @@ Visible by default / editable:
 - **Dimensions** (`{w}×{h}`) — read-only
 - **Filesize** — read-only
 
-Auto-discovered (every custom-field subfield of the `field-{fieldname}` template):
+Auto-discovered (every custom-field subfield of the `field-{fieldname}` template). The cell display and the inline editor are typed by the subfield's Fieldtype:
 
-- Input-type mapping based on the Inputfield class:
-  - Text / Textarea → editable text / textarea
-  - Checkbox → checkbox
-  - Page reference → select / multi-select
-  - Datetime → date picker
+- **Text / Textarea** → text input / textarea (Textarea cells share the description clamp)
+- **Checkbox** (`FieldtypeCheckbox`) → display `✓` / `—` (empty); inline editor is a single checkbox
+- **Datetime** (`FieldtypeDatetime`) → display via the field's own `dateOutputFormat`; inline editor is a native `<input type="date">` or `datetime-local` depending on whether the format carries a time component
+- **Integer** (`FieldtypeInteger`) → numeric input
+- **FieldtypeOptions** (single + multi) → display the option label(s); inline editor is a native `<select>` (single) or a touch-friendly checkbox list (multi)
+- **FieldtypePage** (single + multi) → display the page title(s); inline editor renders **PW's actually-configured Inputfield** for that field — PageAutocomplete / PageListSelect / PageListSelectMultiple / ASMSelect / whatever the field's own config picks — via `___executeWidget`, so 1000s of selectable pages get the proper search / hierarchy / sort UX with zero re-implementation
 
 **Config:** Per user in `$user->meta('imageLibraryPrefs')` — cross-device persisted via `___executeUserPrefs`. Shape: `{columns: {visible: {col: bool}, order: [col]}, pageSize: int|null}`. Default set: mandatory + description + tags + custom fields (admin can preset a default-hidden list in the module config).
 
@@ -251,6 +253,8 @@ Auto-discovered (every custom-field subfield of the `field-{fieldname}` template
 5. Cache is invalidated both explicitly and via the `Pages::saved` hook.
 
 **Bulk edit (selection as paintbrush):** When the edited cell belongs to an active selection, an "Add / Replace" picker appears on save (tags additionally offer "Remove", which drops the listed tag tokens from each selected row). Choice + commit distributes the new value to all selected rows with the same subfield addressing.
+
+**Selection key + survival across view changes.** Each ticked row is stored client-side under the tuple key `pageId:fieldName:basename`, not by DOM position. Filter swaps, sort flips and pagination re-issue the AJAX data fetch and rebuild the `<tbody>`; the JS then re-checks any tick whose key is still in the set. Rename returns a `renamed{oldKey: newKey}` map so the selection follows the file. Delete drops the deleted keys. The set survives every view operation that doesn't itself drop the row.
 
 **Save queue:** Multiple edits get serialized per pageId — no parallel `$page->save()` calls against the same page (avoids ChangeTracker races).
 
@@ -274,7 +278,7 @@ Filters are URL-state persisted and bookmarkable. Tags are emitted as a comma-se
 
 ## Sorting
 
-Column-header click toggles ascending/descending. Sortable fields: page title, field, filename, description, tags, width, filesize, `created` (Uploaded), `modified`, and every custom subfield via `custom:<name>`.
+Column-header click toggles ascending/descending. Sortable fields: page title, field, filename, description, tags, width, filesize, `created` (Uploaded), `modified`, and every custom subfield via `custom:<name>`. Sorting by `custom:<name>` triggers a bulk hydration pass before `applySort` so the column has values to compare — without it, every row would tie and the list would stay in `pageId:basename` tiebreaker order.
 
 **Default:** selectable in the module config (fieldset "Default sort") — column + direction. Built-in default is `pageTitle asc`. URL overrides (`?sort=basename&dir=desc`) win; URLs omit sort/dir when they match the configured default so shared links stay clean.
 

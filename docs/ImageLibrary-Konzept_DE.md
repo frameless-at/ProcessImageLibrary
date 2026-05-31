@@ -72,13 +72,14 @@ Die `src/`-Traits halten das Main-Modul-File auf AJAX-Endpoints + Rendering foku
 - `___execute()` — Tabelle + Filter-UI rendern (Server-rendered HTML; JS hydratisiert für Interaktion). Spalten-Picker liegt als sibling-`<dialog>` neben `.ml-results` damit AJAX-Swaps Drag/Toggle-Handler intakt lassen.
 - `___executeData()` — AJAX-GET, returnt nur den `.ml-results`-Block (Tabelle + Pagination) für Filter/Sort/Page-Swaps.
 - `___executeSave()` — AJAX-POST, validiert + speichert eine Cell-Änderung, gibt JSON zurück. Multilang-aware: payload kann eine `langValues`-JSON-Map (`{langId: value}`) tragen, dann wird jeder Sprach-Slot in einem POST via `applyLangValues()` geschrieben (Single-Language-Installs schicken nur `value`). Liest `filterQs` aus dem POST und gibt `stillMatches` + `newTotal` zurück, damit der Client Rows ausfaden kann, die aus dem Scope gefallen sind.
-- `___executeBulk()` — AJAX-POST: identische Cell-Save auf eine Selektion anwenden (Add-/Replace-Mode, plus ein Tags-only Remove-Mode). Liefert `vanished` (Liste der Selection-Keys, die aus dem Filter gefallen sind) + `newTotal` zusätzlich zu den Succeed/Fail-Counts.
+- `___executeBulk()` — AJAX-POST: identische Cell-Save auf eine Selektion anwenden (Add-/Replace-Mode, plus ein Tags-only Remove-Mode). Liefert `vanished` (Liste der Selection-Keys, die aus dem Filter gefallen sind) + `newTotal` zusätzlich zu den Succeed/Fail-Counts. Rows deren Image-Field das Broadcast-Subfield nicht trägt zählen als stiller Success (No-op) statt als Failure — eine Paintbrush-Aktion über heterogene Selektionen (z. B. „author" über Rows aus `images` + `lead_image`, wo nur eines davon das Subfield hat) ist redaktioneller Alltag, kein User-Fehler.
 - `___executeRename()` — AJAX-POST, benennt das File eines einzelnen Bildes um (oder im Batch-Modus jedes selektierte Bild) via `Pagefile::rename()` nach Platzhalter-Expansion und Bereinigung alter Variations-Files.
 - `___executeReplace()` — AJAX-POST, ersetzt die File-Bytes eines Bildes via `move_uploaded_file()` auf den existierenden Pfad, droppt alte Variations, regeneriert das Thumb-Variation und gibt den aktualisierten Cell-Payload zurück (Thumb-URL, Dimensions, Filesize, Modified, Variations-Zähler). Extension-Match wird erzwungen, damit der Basename gültig bleibt.
 - `___executeDelete()` — AJAX-POST mit einem `items`-Array; Einzel + Batch teilen denselben Pfad. Pro Page `$page->editable()`, dann `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed-Listen, damit JS die Rows ausfaden lassen und Partial-Failures via Bulk-Result-Dialog reporten kann.
 - `___executeExport()` — Direct-Download von JSON oder CSV unter Berücksichtigung der aktiven Filter. Liest `urlVariant` (`original` Default; `260` / `512` / `1024` für same-axis Variations) und emittiert die passende URL in der `url`-Spalte; die gewählte Variante wird in `meta.urlVariant` festgehalten.
 - `___executeImport()` — AJAX-POST, akzeptiert eine vorher exportierte (und extern bearbeitete) JSON/CSV-Datei und schreibt zurück; idempotent (unverändert gebliebene Items werden geskippt).
 - `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size + Bookmarks in `$user->meta('imageLibraryPrefs')` (debounced). Bookmarks werden via `$sanitizer->text(maxLength: 80)` für den Namen und `canonicalizeBookmarkQs()` für den Querystring validiert, damit Save- und Load-Shape konsistent bleiben.
+- `___executeWidget()` — AJAX-GET, rendert das von PW konfigurierte Inputfield für ein Page-Reference-Custom-Subfield (PageAutocomplete / PageListSelect / ASMSelect / etc.). Snapshotted `$config->scripts` / `$config->styles` vor + nach dem Render, damit nur die NEUEN Asset-URLs zurück zum Client gehen. Das Popup injiziert das HTML, lazy-loaded neue Scripts / Styles und feuert das `'reloaded'`-DOM-Event auf jedes `.Inputfield`, damit PWs delegierte Init-Handler die UI hochziehen. Save läuft über `___executeSave`; `coerceCustomValue()` formt `[id]` zu einem int (Single-Page-Feld) oder zu einem frischen `PageArray` (Multi-Page) — letzteres ist nötig, damit `FieldtypePage::sanitizeValuePageArray()` REPLACE statt MERGE macht.
 - `___install()` / `___uninstall()` — Admin-Page-Lifecycle + Permission `image-library-access`.
 
 ## Datenmodell (PW-nativ)
@@ -230,13 +231,14 @@ Default-sichtbar / editable:
 - **Dimensions** (`{w}×{h}`) — read-only
 - **Filesize** — read-only
 
-Auto-entdeckt (alle Custom-Field-Subfields des `field-{fieldname}`-Templates):
+Auto-entdeckt (jedes Custom-Field-Subfield des `field-{fieldname}`-Templates). Cell-Display + Inline-Editor werden vom Fieldtype des Subfields typisiert:
 
-- Input-Typ-Mapping basierend auf der Inputfield-Klasse:
-  - Text/Textarea → editable text/textarea
-  - Checkbox → Checkbox
-  - Page-Reference → Select / Multi-Select
-  - Datetime → Date-Picker
+- **Text / Textarea** → Text-Input / Textarea (Textarea-Cells teilen den Description-Clamp)
+- **Checkbox** (`FieldtypeCheckbox`) → Display `✓` / `—` (leer); Inline-Editor ist eine einzelne Checkbox
+- **Datetime** (`FieldtypeDatetime`) → Display über das `dateOutputFormat` des Feldes; Inline-Editor ist ein natives `<input type="date">` oder `datetime-local`, je nach Format-String
+- **Integer** (`FieldtypeInteger`) → numerisches Input
+- **FieldtypeOptions** (single + multi) → Display der Option-Label(s); Inline-Editor ist ein natives `<select>` (single) bzw. eine touch-freundliche Checkbox-Liste (multi)
+- **FieldtypePage** (single + multi) → Display der Page-Title(s); Inline-Editor rendert **das von PW tatsächlich konfigurierte Inputfield** für dieses Feld — PageAutocomplete / PageListSelect / PageListSelectMultiple / ASMSelect / was auch immer die Field-Config wählt — via `___executeWidget`, damit 1000e wählbare Pages die korrekte Search / Hierarchy / Sort-UX bekommen, ohne dass das Modul irgendwas davon nachbaut
 
 **Konfig:** Per User in `$user->meta('imageLibraryPrefs')` — Cross-device-persistiert via `___executeUserPrefs`. Struktur: `{columns: {visible: {col: bool}, order: [col]}, pageSize: int|null}`. Default-Set: Pflicht + Description + Tags + Custom-Fields (Admin kann eine Default-Hidden-Liste in der Module-Config setzen).
 
@@ -251,6 +253,8 @@ Auto-entdeckt (alle Custom-Field-Subfields des `field-{fieldname}`-Templates):
 5. Cache wird sowohl explicit als auch durch den `Pages::saved`-Hook invalidiert.
 
 **Bulk-Edit (Selection als Pinsel):** Wenn die editierte Zelle zu einer aktiven Selektion gehört, blendet sich beim Save ein „Add / Replace"-Picker ein (Tags bieten zusätzlich „Remove", das die genannten Tag-Tokens aus jeder selektierten Row entfernt). Auswahl + Commit verteilt die neue Value auf alle selektierten Rows mit derselben Subfield-Adressierung.
+
+**Selection-Key + Survival über View-Wechsel.** Jede getickte Row liegt Client-seitig unter dem Tupel-Key `pageId:fieldName:basename`, nicht über DOM-Position. Filter-Wechsel, Sort-Flips und Pagination feuern den AJAX-Data-Fetch und bauen das `<tbody>` neu auf; die JS hakt anschließend jede Row wieder an, deren Key noch im Set steht. Rename liefert eine `renamed{oldKey: newKey}`-Map mit zurück, damit die Selection dem File folgt. Delete dropt die gelöschten Keys. Das Set überlebt jede View-Operation, die nicht selbst die Row entfernt.
 
 **Save-Queue:** Mehrere Edits werden pro PageId seriell geschickt — keine parallelen `$page->save()`-Aufrufe auf derselben Page (vermeidet ChangeTracker-Races).
 
@@ -274,7 +278,7 @@ Filter werden URL-state-persisted und sind bookmarkbar. Tags werden als komma-se
 
 ## Sortierung
 
-Spalten-Klick toggelt ascending/descending. Sortierbare Felder: Page-Title, Field, Filename, Description, Tags, Width, Filesize, `created` (Uploaded), `modified` sowie alle Custom-Subfields via `custom:<name>`.
+Spalten-Klick toggelt ascending/descending. Sortierbare Felder: Page-Title, Field, Filename, Description, Tags, Width, Filesize, `created` (Uploaded), `modified` sowie alle Custom-Subfields via `custom:<name>`. Sort nach `custom:<name>` triggert vor `applySort` einen Bulk-Hydration-Pass, damit die Spalte überhaupt Werte zum Vergleichen hat — ohne den Hydrate würden alle Rows tied sein und in `pageId:basename`-Tiebreaker-Order bleiben.
 
 **Default**: in der Module-Config (Fieldset „Default sort") wählbar — Column + Direction. Built-in-Default ist `pageTitle asc`. URL-Override (`?sort=basename&dir=desc`) gewinnt; URLs lassen sort/dir weg wenn sie dem konfigurierten Default entsprechen, damit geteilte Links übersichtlich bleiben.
 

@@ -151,7 +151,12 @@ Click any cell with a hover highlight. A modal popup opens with the widget appro
 - **Tags (free-form)** — text input with native `<datalist>` autocomplete pulled from tags actually in use on rows of that field
 - **Tags (whitelist, `useTags=2`)** — checkbox grid limited to the configured `tagsList`
 - **Custom text / textarea** — text input or textarea matching the subfield's PW Inputfield type
-- **Multilang** — any of the above gets language tabs when the install has &gt;1 language and the value is multilang-shaped. Each tab edits one language; save commits all in one POST.
+- **Custom checkbox** — single checkbox; cell shows `✓` / `—`
+- **Custom datetime** — native `<input type="date">` or `datetime-local` depending on whether the field's `dateOutputFormat` carries a time component
+- **Custom integer** — numeric input
+- **Custom options (single / multi)** — native `<select>` (single) or a touch-friendly checkbox list (multi); cell shows the option label(s)
+- **Custom page reference** — PW's actually-configured Inputfield for that field (PageAutocomplete / PageListSelect / ASMSelect / etc.), rendered through `___executeWidget` so the editor inherits the field's search, hierarchy and sort UX. Cell shows the referenced page title(s).
+- **Multilang** — any of the text-shaped widgets above gets language tabs when the install has &gt;1 language and the value is multilang-shaped. Each tab edits one language; save commits all in one POST.
 
 ![Inline edit popup for a Description cell, showing the textarea, multilang tabs across the top, Save / Cancel buttons](docs/screenshots/07-inline-edit-popup.png)
 
