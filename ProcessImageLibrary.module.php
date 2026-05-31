@@ -2916,18 +2916,42 @@ class ProcessImageLibrary extends Process {
 			$ts = strtotime($value);
 			return $ts !== false ? $ts : '';
 		}
-		if ($type === 'select' || $type === 'page') {
-			// Comma-separated selected option / page id(s). Set them
-			// directly — a custom field on an image behaves exactly like
-			// the same field on a page, so Pageimage::set() routes the
-			// id(s) through the subfield's own Fieldtype on save. (Pre-
-			// sanitizing here with the host-page context made FieldtypePage
-			// reject the ids and silently clear the value.) Empty array
-			// clears.
-			return array_values(array_filter(
-				array_map('intval', explode(',', $value)),
-				fn($i) => $i > 0
-			));
+		$ids = array_values(array_filter(
+			array_map('intval', explode(',', $value)),
+			fn($i) => $i > 0
+		));
+		if ($type === 'select') {
+			// FieldtypeOptions accepts an array of option ids and routes
+			// it through its own sanitizeValue on Pagefile::setFieldValue.
+			return $ids;
+		}
+		if ($type === 'page') {
+			// FieldtypePage is shape-sensitive:
+			//
+			//  - Single-value (derefAsPage > 0): sanitizeValuePage accepts
+			//    Page / PageArray / string / int, but NOT a raw int array;
+			//    the raw-array path falls through every branch and returns
+			//    the blank value. That's the "save returns ok but the new
+			//    value never lands" bug — we were silently clearing the
+			//    field. Pass a single int id (or '' to clear).
+			//
+			//  - Multi-value (derefAsPage == 0): sanitizeValuePageArray
+			//    treats an int array as ADDITIVE — it loads the existing
+			//    PageArray and adds the new ids to it, so deselections
+			//    silently survive. Build a fresh PageArray ourselves so
+			//    line 778 of FieldtypePage takes the early-return branch
+			//    and we get REPLACE semantics.
+			$pages   = $this->wire('pages');
+			$isMulti = $field instanceof Field && ((int) $field->get('derefAsPage') === 0);
+			if (!$isMulti) {
+				return $ids ? $ids[0] : '';
+			}
+			$pa = $pages->newPageArray();
+			foreach ($ids as $id) {
+				$p = $pages->get($id);
+				if ($p && $p->id) $pa->add($p);
+			}
+			return $pa;
 		}
 		// number: let the Fieldtype validate + coerce.
 		if ($field instanceof Field) {
