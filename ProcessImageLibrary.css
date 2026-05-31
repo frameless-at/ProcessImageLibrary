@@ -631,6 +631,23 @@ textarea.ml-cell-input {
 	font: inherit;
 }
 
+/* Page-reference widget container — PW's configured Inputfield
+   gets rendered into here by ___executeWidget. The "loading" stub
+   is a single muted line; once the HTML lands it lives in
+   .ml-popup-pageref-holder and PW's own inputfield CSS does the
+   heavy lifting (we don't try to re-style PageAutocomplete etc.). */
+.ml-popup-pageref {
+	min-height: 3rem;
+}
+.ml-popup-pageref-loading {
+	color: var(--pw-muted-color, #777);
+	font-size: 0.9em;
+	padding: 0.5rem 0;
+}
+.ml-popup-pageref-holder {
+	font-size: inherit;
+}
+
 /* Multi-select via checkbox list — used for multi-value page-ref
    and FieldtypeOptions customs. <select multiple> is hostile UX
    (ctrl/cmd-click, no touch behaviour, uk-select's appearance:none

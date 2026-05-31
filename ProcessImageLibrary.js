@@ -296,10 +296,136 @@
 			if (td.dataset.input === 'select') {
 				return buildPopupSelect(td, original);
 			}
+			if (td.dataset.input === 'page') {
+				return buildPopupPageRef(td, original);
+			}
 			if (td.dataset.input === 'textarea') {
 				return buildPopupTextarea(original);
 			}
 			return buildPopupTextInput(original, '');
+		}
+
+		// Page-reference widget: ask the server to render whatever
+		// Inputfield the field's own config specifies (PageAutocomplete /
+		// PageListSelect / ASMSelect / …), inject the HTML, load any
+		// new scripts / styles the render added, then fire the
+		// 'reloaded' DOM event so each inputfield's own JS module
+		// initialises on the new nodes. getValue() walks every input
+		// inside the container and joins the values it finds — the
+		// shape works for hidden-input-based pickers (PageAutocomplete),
+		// <select multiple> (ASM), and single <select> alike.
+		function buildPopupPageRef(td, original) {
+			var wrap = document.createElement('div');
+			wrap.className = 'ml-popup-pageref';
+			var status = document.createElement('div');
+			status.className = 'ml-popup-pageref-loading';
+			status.textContent = labels.loading || 'Loading…';
+			wrap.appendChild(status);
+
+			function loadAsset(url, kind) {
+				return new Promise(function (resolve) {
+					if (kind === 'script') {
+						if (document.querySelector('script[src="' + url + '"]')) return resolve();
+						var s = document.createElement('script');
+						s.src = url;
+						s.onload  = resolve;
+						s.onerror = resolve;
+						document.head.appendChild(s);
+					} else {
+						if (document.querySelector('link[href="' + url + '"]')) return resolve();
+						var l = document.createElement('link');
+						l.rel  = 'stylesheet';
+						l.href = url;
+						l.onload  = resolve;
+						l.onerror = resolve;
+						document.head.appendChild(l);
+					}
+				});
+			}
+
+			if (!config.widgetUrl) {
+				status.textContent = 'No widget endpoint configured.';
+				return {
+					element: wrap,
+					getValue: function () { return original; },
+					focus: function () {}
+				};
+			}
+
+			var url = config.widgetUrl
+				+ '?pageId='   + encodeURIComponent(td.dataset.pageId   || '')
+				+ '&fieldName='+ encodeURIComponent(td.dataset.field    || '')
+				+ '&basename=' + encodeURIComponent(td.dataset.basename || '')
+				+ '&subfield=' + encodeURIComponent(td.dataset.subfield || '');
+
+			fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+				.then(function (r) { return r.json(); })
+				.then(function (data) {
+					if (!data || !data.ok || !data.html) {
+						status.textContent = (data && data.error) || 'Widget load failed.';
+						return;
+					}
+					var styleLoads  = (data.styles  || []).map(function (u) { return loadAsset(u, 'style');  });
+					var scriptLoads = (data.scripts || []).map(function (u) { return loadAsset(u, 'script'); });
+					return Promise.all(styleLoads.concat(scriptLoads)).then(function () {
+						status.remove();
+						var holder = document.createElement('div');
+						holder.className = 'ml-popup-pageref-holder';
+						holder.innerHTML = data.html;
+						wrap.appendChild(holder);
+						// PW's inputfield JS modules hook the 'reloaded'
+						// DOM event so they initialise on AJAX-loaded
+						// nodes — match what ProcessPageEdit does.
+						if (window.jQuery) {
+							window.jQuery(holder).trigger('reloaded', ['ml-widget']);
+						} else {
+							var ev = new CustomEvent('reloaded', { bubbles: true, detail: ['ml-widget'] });
+							holder.dispatchEvent(ev);
+						}
+						wrap._mlWidgetName = data.name || (td.dataset.subfield || '');
+						wrap._mlWidgetId   = data.id   || '';
+					});
+				})
+				.catch(function () { status.textContent = 'Widget load failed.'; });
+
+			return {
+				element: wrap,
+				getValue: function () {
+					// Collect every input value inside the widget holder
+					// whose name starts with the subfield name. Covers
+					// hidden-input pickers, multi-selects and singles.
+					var subfield = td.dataset.subfield || '';
+					var ids = [];
+					wrap.querySelectorAll('input, select').forEach(function (el) {
+						var name = el.name || '';
+						if (!name) return;
+						if (name !== subfield && name.indexOf(subfield) !== 0) return;
+						if (el.type === 'checkbox' || el.type === 'radio') {
+							if (el.checked && el.value) ids.push(el.value);
+							return;
+						}
+						if (el.tagName === 'SELECT' && el.multiple) {
+							Array.prototype.forEach.call(el.options, function (o) {
+								if (o.selected && o.value) ids.push(o.value);
+							});
+							return;
+						}
+						if (el.value) ids.push(el.value);
+					});
+					// Dedup + drop blanks; comma-join for the save path.
+					var seen = Object.create(null);
+					return ids.filter(function (v) {
+						v = String(v).trim();
+						if (!v || seen[v]) return false;
+						seen[v] = true;
+						return true;
+					}).join(',');
+				},
+				focus: function () {
+					var first = wrap.querySelector('input, select, button');
+					if (first) first.focus();
+				}
+			};
 		}
 
 		// Tabbed-textarea widget for multilang subfields. Reads each
@@ -616,7 +742,8 @@
 			var typedInput = td.dataset.input === 'checkbox'
 				|| td.dataset.input === 'date'
 				|| td.dataset.input === 'number'
-				|| td.dataset.input === 'select';
+				|| td.dataset.input === 'select'
+				|| td.dataset.input === 'page';
 			var original = typedInput ? (td.dataset.value || '') : td.textContent;
 			var batch    = isBatchEdit(td);
 			var widget   = buildPopupWidget(td, original);

@@ -1127,6 +1127,111 @@ class ProcessImageLibrary extends Process {
 	 * client can either replace the row in-place or re-render the
 	 * results region.
 	 */
+	/**
+	 * AJAX endpoint: render PW's configured Inputfield for a custom
+	 * subfield (currently used for page-references so PageAutocomplete
+	 * / PageListSelect / ASMSelect / etc. work natively in our popup
+	 * instead of being approximated by a checkbox list).
+	 *
+	 * Returns { html, scripts, styles, name, id } — the client injects
+	 * the HTML, loads any new scripts / styles, fires the 'reloaded'
+	 * DOM event so the inputfield's own JS initialises on the new
+	 * nodes. On save the client collects every input[name^="<subfield>"]
+	 * value from inside the widget container and submits to the
+	 * existing /save/ endpoint as a comma-joined string — coerceCustom-
+	 * Value already shapes that into a Page / PageArray for the
+	 * Fieldtype.
+	 */
+	public function ___executeWidget() {
+		$config = $this->wire('config');
+		header('Content-Type: application/json');
+		ob_start();
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+
+		$pageId    = (int) $input->get('pageId');
+		$fieldName = $sanitizer->fieldName((string) $input->get('fieldName'));
+		$basename  = basename((string) $input->get('basename'));
+		$subfield  = $sanitizer->fieldName((string) $input->get('subfield'));
+
+		if (!$pageId || !$fieldName || !$basename || !$subfield) {
+			return $this->jsonError('Missing required parameter');
+		}
+		if (!in_array($fieldName, $this->discoverImageFields(), true)) {
+			return $this->jsonError('Field is not a managed image field');
+		}
+		if (!in_array($subfield, $this->editableSubfields($fieldName), true)) {
+			return $this->jsonError('Subfield not editable');
+		}
+
+		$page = $this->wire('pages')->get($pageId);
+		if (!$page->id) return $this->jsonError('Page not found', 404);
+		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+
+		$img = $this->resolvePageimage($page, $fieldName, $basename);
+		if (!$img) return $this->jsonError('Image not found in field', 404);
+
+		$field = $this->wire('fields')->get($subfield);
+		if (!($field instanceof Field)) {
+			return $this->jsonError('Subfield not found');
+		}
+
+		// Custom-fields-page on Pagefile = the hidden Page that holds
+		// the subfield values. Pagefile::pagefiles->getFieldsPage()
+		// returns it. Pass it as the Inputfield's context so any
+		// per-page selectors (parent_id, find code) resolve against
+		// the right scope. Set the current value so the widget shows
+		// the existing selection on open.
+		$customsPage = method_exists($img->pagefiles, 'getFieldsPage')
+			? $img->pagefiles->getFieldsPage()
+			: $page;
+		if (!($customsPage instanceof Page) || !$customsPage->id) {
+			$customsPage = $page;
+		}
+
+		// Capture scripts / styles BEFORE rendering so we can hand the
+		// client only the NEW files this widget pulls in (PageAutocomplete
+		// loads jquery-ui, etc.). The compare is by URL string.
+		$scriptsBefore = [];
+		foreach ($config->scripts as $url) $scriptsBefore[] = (string) $url;
+		$stylesBefore = [];
+		foreach ($config->styles  as $url) $stylesBefore[]  = (string) $url;
+
+		$inputfield = $field->getInputfield($customsPage);
+		if (!$inputfield) {
+			return $this->jsonError('No inputfield resolved for ' . $subfield);
+		}
+		$inputfield->attr('name', $subfield);
+		$inputfield->attr('id',   'ml_widget_' . $subfield);
+		$inputfield->attr('value', $customsPage->get($subfield));
+
+		// Render via an InputfieldWrapper so the .Inputfield <li>
+		// wrapping (which inputfield JS expects to scan for) is in
+		// place, then drop the <ul> wrapper and keep just the
+		// rendered field block.
+		$wrap = $this->wire(new InputfieldWrapper());
+		$wrap->add($inputfield);
+		$html = $wrap->render();
+
+		$scriptsAfter = [];
+		foreach ($config->scripts as $url) $scriptsAfter[] = (string) $url;
+		$stylesAfter = [];
+		foreach ($config->styles  as $url) $stylesAfter[]  = (string) $url;
+
+		$newScripts = array_values(array_diff($scriptsAfter, $scriptsBefore));
+		$newStyles  = array_values(array_diff($stylesAfter,  $stylesBefore));
+
+		return $this->jsonResponse([
+			'ok'      => true,
+			'html'    => $html,
+			'scripts' => $newScripts,
+			'styles'  => $newStyles,
+			'name'    => $inputfield->attr('name'),
+			'id'      => $inputfield->attr('id'),
+		]);
+	}
+
 	public function ___executeRename() {
 		$config = $this->wire('config');
 		$config->ajax = true;
@@ -3268,6 +3373,7 @@ class ProcessImageLibrary extends Process {
 			'renameUrl'  => $this->wire('page')->url . 'rename/',
 			'replaceUrl' => $this->wire('page')->url . 'replace/',
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
+			'widgetUrl'  => $this->wire('page')->url . 'widget/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -3303,6 +3409,7 @@ class ProcessImageLibrary extends Process {
 			],
 			'labels' => [
 				'saving'           => $this->_('Saving…'),
+				'loading'          => $this->_('Loading…'),
 				'saved'            => $this->_('Saved'),
 				'error'            => $this->_('Save failed'),
 				'done'             => $this->_('Done'),
@@ -4061,15 +4168,13 @@ class ProcessImageLibrary extends Process {
 				}
 				$raw = $row['custom'][$name] ?? '';
 				$val = $this->normalizeDescription($raw);
-				// Page-reference subfields always route to the native PW
-				// per-image editor — the field has its own configured
-				// inputfield (PageAutocomplete, PageListSelect, ASM, …)
-				// that knows how to handle 1000s of pages, search,
-				// hierarchical pickers, etc. Replicating that inline
-				// would be a worse copy of what PW already ships, so
-				// we just open the native editor and let PW do its job.
-				$pageRefCfg = null;
-				$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select'], true);
+				// Page-reference fields render PW's configured inputfield
+				// (PageAutocomplete / PageListSelect / ASMSelect / …) in
+				// the popup — JS fetches the rendered HTML from
+				// ___executeWidget, injects it, fires the 'reloaded' DOM
+				// event so each inputfield's own JS initialises on the
+				// new nodes. No more inline checkbox-list / multi-select.
+				$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select', 'page'], true);
 				if (in_array($inputType, ['text', 'textarea'], true)) {
 					// Inline-editable prose cell.
 					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
@@ -4089,7 +4194,9 @@ class ProcessImageLibrary extends Process {
 					// Inline-editable typed cell. Display shows the typed
 					// value (glyph / date / label); data-value carries
 					// the editor-RAW value. select + date carry their
-					// type-specific config attrs.
+					// type-specific config attrs. page-ref defers the
+					// inputfield render to ___executeWidget; the cell
+					// just needs the rawVal for change-detection.
 					$rawVal = (string) ($row['customRaw'][$name] ?? '');
 					$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
 					if ($inputType === 'select') {
