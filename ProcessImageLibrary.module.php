@@ -943,7 +943,13 @@ class ProcessImageLibrary extends Process {
 		ob_start();
 
 		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
+			// Diagnostic: surface what actually arrived so a redirect
+			// (POST→GET) shows up in the error instead of being invisible.
+			return $this->jsonError('POST required [method='
+				. ($_SERVER['REQUEST_METHOD'] ?? '?')
+				. ' uri=' . ($_SERVER['REQUEST_URI'] ?? '?')
+				. ' xrw=' . ($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '-')
+				. ' ref=' . ($_SERVER['HTTP_REFERER'] ?? '-') . ']', 405);
 		}
 
 		$session = $this->wire('session');
