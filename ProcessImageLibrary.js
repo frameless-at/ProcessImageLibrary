@@ -374,13 +374,25 @@
 						holder.innerHTML = data.html;
 						wrap.appendChild(holder);
 						// PW's inputfield JS modules hook the 'reloaded'
-						// DOM event so they initialise on AJAX-loaded
-						// nodes — match what ProcessPageEdit does.
-						if (window.jQuery) {
-							window.jQuery(holder).trigger('reloaded', ['ml-widget']);
+						// DOM event via delegated jQuery handlers on
+						// document, scoped to selectors like
+						// .InputfieldPageAutocomplete / .InputfieldPage.
+						// Delegated events fire only when the event
+						// originates from a matching descendant, so we
+						// trigger 'reloaded' on EACH .Inputfield in the
+						// injected fragment (mirroring what ProcessPage-
+						// Edit does after AJAX-loading a tab). Falls
+						// back to a CustomEvent burst when jQuery isn't
+						// available, although in the PW admin it
+						// always is.
+						var jq = window.jQuery;
+						if (jq) {
+							var $fields = jq(holder).find('.Inputfield').addBack('.Inputfield');
+							$fields.trigger('reloaded', ['ml-widget']);
 						} else {
-							var ev = new CustomEvent('reloaded', { bubbles: true, detail: ['ml-widget'] });
-							holder.dispatchEvent(ev);
+							holder.querySelectorAll('.Inputfield').forEach(function (el) {
+								el.dispatchEvent(new CustomEvent('reloaded', { bubbles: true, detail: ['ml-widget'] }));
+							});
 						}
 						wrap._mlWidgetName = data.name || (td.dataset.subfield || '');
 						wrap._mlWidgetId   = data.id   || '';
