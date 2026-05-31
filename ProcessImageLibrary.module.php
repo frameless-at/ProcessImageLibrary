@@ -969,7 +969,9 @@ class ProcessImageLibrary extends Process {
 		}
 
 		if (!in_array($subfield, $this->editableSubfields($fieldName), true)) {
-			return $this->jsonError('Subfield not editable');
+			return $this->jsonError(sprintf(
+				"Image field '%s' has no subfield '%s'", $fieldName, $subfield
+			));
 		}
 
 		$page = $this->wire('pages')->get($pageId);
@@ -1162,7 +1164,9 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Field is not a managed image field');
 		}
 		if (!in_array($subfield, $this->editableSubfields($fieldName), true)) {
-			return $this->jsonError('Subfield not editable');
+			return $this->jsonError(sprintf(
+				"Image field '%s' has no subfield '%s'", $fieldName, $subfield
+			));
 		}
 
 		$page = $this->wire('pages')->get($pageId);
@@ -1174,7 +1178,7 @@ class ProcessImageLibrary extends Process {
 
 		$field = $this->wire('fields')->get($subfield);
 		if (!($field instanceof Field)) {
-			return $this->jsonError('Subfield not found');
+			return $this->jsonError(sprintf("PW field '%s' does not exist", $subfield));
 		}
 
 		// getFieldsPage() returns a SHARED template Page used as the
@@ -1931,7 +1935,13 @@ class ProcessImageLibrary extends Process {
 				}
 
 				if (!in_array($subfield, $this->editableSubfields($fn), true)) {
-					$failed[] = sprintf('Subfield %s not editable on %s', $subfield, $fn);
+					// In a batch, the broadcast can naturally hit rows
+					// whose image field doesn't carry that subfield —
+					// "author" on a "lead_image" that wasn't configured
+					// with the custom. Not a user error and not a save
+					// failure; just nothing to do for that row.
+					$succeeded++;
+					$succeededKeys[] = $this->rowKey($pid, $fn, $bn);
 					continue;
 				}
 
