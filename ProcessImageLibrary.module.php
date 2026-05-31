@@ -636,6 +636,15 @@ class ProcessImageLibrary extends Process {
 		$usedTags = $this->collectUsedTagsByField($rows);
 
 		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
+		// Sorting by a custom subfield needs the value on every row,
+		// not just the visible slice — applySort reads $row['custom']
+		// and otherwise compares empty strings, leaving the list in
+		// pageId:basename tiebreaker order. loadRows() only hydrates
+		// when filters (q / no_custom) require it; cover the sort
+		// case here so the full row set carries the column.
+		if (strncmp($sort, 'custom:', 7) === 0 && $this->hasAnyCustomFields()) {
+			$rows = $this->bulkHydrateCustomFields($rows);
+		}
 		$this->applySort($rows, $sort, $dir);
 
 		$pageSize   = $this->readPageSize();
