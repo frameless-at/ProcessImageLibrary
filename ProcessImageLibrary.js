@@ -99,7 +99,8 @@
 			return fetch(config.saveUrl, {
 				method: 'POST',
 				body: fd,
-				credentials: 'same-origin'
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' }
 			}).then(function (res) {
 				return res.json().then(function (data) { return { status: res.status, data: data }; });
 			});
