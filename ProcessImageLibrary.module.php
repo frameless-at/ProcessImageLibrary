@@ -302,6 +302,22 @@ class ProcessImageLibrary extends Process {
 	protected $customByFieldCache = null;
 
 	/**
+	 * Lazily-built map of custom subfield name => editor type
+	 * (text / textarea / checkbox / date / number / select / page).
+	 * Built once per request; see getCustomTypes().
+	 * @var array<string,string>|null
+	 */
+	protected $customTypesCache = null;
+
+	/**
+	 * Per-field cache of resolved Page-reference inline-select config
+	 * (or null when the field's selectable set can't be a bounded
+	 * inline select). Keyed by subfield name; see getPageRefConfig().
+	 * @var array<string,array{multiple:bool,options:array}|null>
+	 */
+	protected $pageRefConfigCache = [];
+
+	/**
 	 * Module bootstrap — autoloaded on admin pages so the renderItem
 	 * hook below fires while ProcessPageEdit is rendering an
 	 * InputfieldImage. The hook is the heart of the "edit one image
@@ -836,6 +852,38 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 
+		// Page-reference resolution diagnostics — why a page-ref custom
+		// subfield renders inline (select) vs falls back to the native
+		// editor. Shows the field config + the resolved option count.
+		$pageRefDiag = [];
+		foreach ($this->getCustomTypes() as $cname => $ctype) {
+			if ($ctype !== 'page') continue;
+			$cf  = $this->wire('fields')->get($cname);
+			$cfg = $this->getPageRefConfig($cname);
+			$selPa = ($cf instanceof Field) ? $this->resolvePageRefPages($cf) : null;
+			$pageRefDiag[$cname] = [
+				'fieldtype'         => ($cf instanceof Field) ? (string) $cf->type : null,
+				'inputfield'        => ($cf instanceof Field) ? (string) $cf->get('inputfield') : null,
+				'derefAsPage'       => ($cf instanceof Field) ? (int) $cf->get('derefAsPage') : null,
+				'parent_id'         => ($cf instanceof Field) ? (int) $cf->get('parent_id') : null,
+				'template_id'       => ($cf instanceof Field) ? (int) $cf->get('template_id') : null,
+				'template_ids'      => ($cf instanceof Field) ? $cf->get('template_ids') : null,
+				'findPagesSelector' => ($cf instanceof Field) ? (string) $cf->get('findPagesSelector') : null,
+				'findPagesCode'     => ($cf instanceof Field) ? ((string) $cf->get('findPagesCode') !== '' ? '(set)' : '') : null,
+				'configSelector'    => ($cf instanceof Field) ? $this->pageRefSelector($cf) : '',
+				'resolvedPages'     => $selPa instanceof PageArray ? $selPa->count() : 'null',
+				'inlineCap'         => self::PAGEREF_INLINE_CAP,
+				'decision'          => $cfg
+					? ('inline select, ' . count($cfg['options']) . ' options' . ($cfg['multiple'] ? ', multiple' : ', single'))
+					: 'NULL → native editor',
+			];
+		}
+		if ($pageRefDiag) {
+			$out .= '<dt>Page-reference resolution</dt><dd><pre>'
+				. $sanitizer->entities(json_encode($pageRefDiag, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE))
+				. '</pre></dd>';
+		}
+
 		$out .= '</dl>';
 		$out .= '</div>';
 		return $out;
@@ -921,7 +969,9 @@ class ProcessImageLibrary extends Process {
 		}
 
 		if (!in_array($subfield, $this->editableSubfields($fieldName), true)) {
-			return $this->jsonError('Subfield not editable');
+			return $this->jsonError(sprintf(
+				"Image field '%s' has no subfield '%s'", $fieldName, $subfield
+			));
 		}
 
 		$page = $this->wire('pages')->get($pageId);
@@ -934,6 +984,36 @@ class ProcessImageLibrary extends Process {
 		// Output formatting off before mutating: setters work on the raw value
 		// and avoid double-encoding for fields like description.
 		$page->of(false);
+
+		// Typed custom subfields (checkbox / date / select): coerce to
+		// the Fieldtype's stored shape, set directly, and return the
+		// typed display + editor-raw value. No placeholder / multilang
+		// / tag handling applies to these.
+		$customType = $this->getCustomTypes()[$subfield] ?? null;
+		if (in_array($customType, ['checkbox', 'date', 'number', 'select', 'page'], true)) {
+			$field   = $this->wire('fields')->get($subfield);
+			$coerced = $this->coerceCustomValue($page, $field, $customType, $value);
+			try {
+				$img->set($subfield, $coerced);
+				$saved = $page->save($fieldName);
+			} catch (\Throwable $e) {
+				return $this->jsonError('Save error: ' . $e->getMessage());
+			}
+			if (!$saved) {
+				return $this->jsonError('Save returned false — value may not have persisted');
+			}
+			$this->wire('cache')->deleteFor($this);
+
+			$key   = $this->rowKey($pageId, $fieldName, $basename);
+			$match = $this->matchTouchedRows([$key]);
+			return $this->jsonResponse([
+				'ok'           => true,
+				'value'        => (string) $this->readCustomValue($img, $subfield),
+				'rawValue'     => $this->readCustomRaw($img, $subfield),
+				'stillMatches' => !in_array($key, $match['vanished'], true),
+				'newTotal'     => $match['newTotal'],
+			]);
+		}
 
 		// Multilang popup ships a per-language map alongside the
 		// primary value. When that's present, write each language
@@ -1049,6 +1129,119 @@ class ProcessImageLibrary extends Process {
 	 * client can either replace the row in-place or re-render the
 	 * results region.
 	 */
+	/**
+	 * AJAX endpoint: render PW's configured Inputfield for a custom
+	 * subfield (currently used for page-references so PageAutocomplete
+	 * / PageListSelect / ASMSelect / etc. work natively in our popup
+	 * instead of being approximated by a checkbox list).
+	 *
+	 * Returns { html, scripts, styles, name, id } — the client injects
+	 * the HTML, loads any new scripts / styles, fires the 'reloaded'
+	 * DOM event so the inputfield's own JS initialises on the new
+	 * nodes. On save the client collects every input[name^="<subfield>"]
+	 * value from inside the widget container and submits to the
+	 * existing /save/ endpoint as a comma-joined string — coerceCustom-
+	 * Value already shapes that into a Page / PageArray for the
+	 * Fieldtype.
+	 */
+	public function ___executeWidget() {
+		$config = $this->wire('config');
+		header('Content-Type: application/json');
+		ob_start();
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+
+		$pageId    = (int) $input->get('pageId');
+		$fieldName = $sanitizer->fieldName((string) $input->get('fieldName'));
+		$basename  = basename((string) $input->get('basename'));
+		$subfield  = $sanitizer->fieldName((string) $input->get('subfield'));
+
+		if (!$pageId || !$fieldName || !$basename || !$subfield) {
+			return $this->jsonError('Missing required parameter');
+		}
+		if (!in_array($fieldName, $this->discoverImageFields(), true)) {
+			return $this->jsonError('Field is not a managed image field');
+		}
+		if (!in_array($subfield, $this->editableSubfields($fieldName), true)) {
+			return $this->jsonError(sprintf(
+				"Image field '%s' has no subfield '%s'", $fieldName, $subfield
+			));
+		}
+
+		$page = $this->wire('pages')->get($pageId);
+		if (!$page->id) return $this->jsonError('Page not found', 404);
+		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+
+		$img = $this->resolvePageimage($page, $fieldName, $basename);
+		if (!$img) return $this->jsonError('Image not found in field', 404);
+
+		$field = $this->wire('fields')->get($subfield);
+		if (!($field instanceof Field)) {
+			return $this->jsonError(sprintf("PW field '%s' does not exist", $subfield));
+		}
+
+		// getFieldsPage() returns a SHARED template Page used as the
+		// context for custom-field machinery — it doesn't carry the
+		// per-image value. The actual stored value lives on the
+		// Pagefile itself; $img->get($subfield) returns it. Use the
+		// shared customsPage as the Inputfield's selector context
+		// (parent_id / find code resolve against it), but pull the
+		// value from the image so the widget reflects the existing
+		// selection on open.
+		$customsPage = method_exists($img->pagefiles, 'getFieldsPage')
+			? $img->pagefiles->getFieldsPage()
+			: $page;
+		if (!($customsPage instanceof Page) || !$customsPage->id) {
+			$customsPage = $page;
+		}
+
+		// Capture scripts / styles BEFORE rendering so we can hand the
+		// client only the NEW files this widget pulls in (PageAutocomplete
+		// loads jquery-ui, etc.). The compare is by URL string.
+		$scriptsBefore = [];
+		foreach ($config->scripts as $url) $scriptsBefore[] = (string) $url;
+		$stylesBefore = [];
+		foreach ($config->styles  as $url) $stylesBefore[]  = (string) $url;
+
+		$inputfield = $field->getInputfield($customsPage);
+		if (!$inputfield) {
+			return $this->jsonError('No inputfield resolved for ' . $subfield);
+		}
+		$inputfield->attr('name', $subfield);
+		$inputfield->attr('id',   'ml_widget_' . $subfield);
+		// Per-image value — the shared customsPage doesn't carry this,
+		// only the Pagefile itself does. Goes through the Inputfield's
+		// own value setter so it converts Page / PageArray / id-array
+		// into whatever internal shape it needs.
+		$inputfield->setAttribute('value', $img->get($subfield));
+
+		// Render via an InputfieldWrapper so the .Inputfield <li>
+		// wrapping (which inputfield JS expects to scan for) is in
+		// place, then drop the <ul> wrapper and keep just the
+		// rendered field block.
+		$wrap = $this->wire(new InputfieldWrapper());
+		$wrap->add($inputfield);
+		$html = $wrap->render();
+
+		$scriptsAfter = [];
+		foreach ($config->scripts as $url) $scriptsAfter[] = (string) $url;
+		$stylesAfter = [];
+		foreach ($config->styles  as $url) $stylesAfter[]  = (string) $url;
+
+		$newScripts = array_values(array_diff($scriptsAfter, $scriptsBefore));
+		$newStyles  = array_values(array_diff($stylesAfter,  $stylesBefore));
+
+		return $this->jsonResponse([
+			'ok'      => true,
+			'html'    => $html,
+			'scripts' => $newScripts,
+			'styles'  => $newStyles,
+			'name'    => $inputfield->attr('name'),
+			'id'      => $inputfield->attr('id'),
+		]);
+	}
+
 	public function ___executeRename() {
 		$config = $this->wire('config');
 		$config->ajax = true;
@@ -1742,13 +1935,32 @@ class ProcessImageLibrary extends Process {
 				}
 
 				if (!in_array($subfield, $this->editableSubfields($fn), true)) {
-					$failed[] = sprintf('Subfield %s not editable on %s', $subfield, $fn);
+					// In a batch, the broadcast can naturally hit rows
+					// whose image field doesn't carry that subfield —
+					// "author" on a "lead_image" that wasn't configured
+					// with the custom. Not a user error and not a save
+					// failure; just nothing to do for that row.
+					$succeeded++;
+					$succeededKeys[] = $this->rowKey($pid, $fn, $bn);
 					continue;
 				}
 
 				$img = $this->resolvePageimage($page, $fn, $bn);
 				if (!$img) {
 					$failed[] = sprintf('Image %s not found in %d.%s', $bn, $pid, $fn);
+					continue;
+				}
+
+				// Typed custom subfields (checkbox / date / select):
+				// coerce + set directly. Replace-only — the client sends a
+				// single scalar, no Add / Remove for these.
+				$customTypeBulk = $this->getCustomTypes()[$subfield] ?? null;
+				if (in_array($customTypeBulk, ['checkbox', 'date', 'number', 'select', 'page'], true)) {
+					$field = $this->wire('fields')->get($subfield);
+					$img->set($subfield, $this->coerceCustomValue($page, $field, $customTypeBulk, (string) $value));
+					$fieldsTouched[$fn] = true;
+					$succeeded++;
+					$succeededKeys[] = $this->rowKey($pid, $fn, $bn);
 					continue;
 				}
 
@@ -2616,6 +2828,375 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Map a custom-fields-on-images subfield to the editor type the
+	 * table uses: textarea / text get inline widgets; checkbox / date /
+	 * select (single-value FieldtypeOptions) get type-specific inline
+	 * widgets; page (and multi-value Options) route to the native
+	 * per-image editor. Drives both the cell display and the inline
+	 * editor dispatch.
+	 */
+	protected function customEditorType(Field $f): string {
+		$t = $f->type;
+		// Order matters: FieldtypeDatetime / Checkbox / Float extend
+		// FieldtypeInteger, so the Integer check has to come last.
+		if ($t instanceof FieldtypeTextarea) return 'textarea';
+		if ($t instanceof FieldtypeCheckbox) return 'checkbox';
+		if ($t instanceof FieldtypeDatetime) return 'date';
+		if ($t instanceof FieldtypePage)     return 'page';
+		if ($t instanceof FieldtypeOptions)  return 'select'; // single + multi
+		if ($t instanceof FieldtypeInteger) return 'number';
+		return 'text';
+	}
+
+	/**
+	 * True when a FieldtypeOptions field renders a single-value input
+	 * (plain select / radios) rather than a multi-select. Multi-value
+	 * inputs don't fit the one-string inline editor, so they fall back
+	 * to the native editor.
+	 */
+	protected function isSingleValueInput(Field $f): bool {
+		$cls = (string) $f->get('inputfieldClass');
+		return $cls === '' || in_array($cls, ['InputfieldSelect', 'InputfieldRadios'], true);
+	}
+
+	/**
+	 * Custom subfield name => editor type, computed once per request
+	 * across every image field's declared subfields. Shared by the
+	 * table render (cell + editor dispatch) and the read pipeline
+	 * (typed display in hydrateSlice / bulkHydrateCustomFields).
+	 *
+	 * @return array<string,string>
+	 */
+	protected function getCustomTypes(): array {
+		if ($this->customTypesCache === null) {
+			$map = [];
+			foreach ($this->getCustomByField() as $names) {
+				foreach ($names as $n) {
+					if (isset($map[$n])) continue;
+					$f = $this->wire('fields')->get($n);
+					$map[$n] = $f instanceof Field ? $this->customEditorType($f) : 'text';
+				}
+			}
+			$this->customTypesCache = $map;
+		}
+		return $this->customTypesCache;
+	}
+
+	/**
+	 * Human-readable label for a typed custom value — page title(s) for
+	 * Page references, option title(s) for Select Options — so the cell
+	 * shows something meaningful instead of an id or an object dump.
+	 *
+	 * @param mixed $val
+	 */
+	protected function customLabel($val): string {
+		if ($val instanceof Page) {
+			return (string) (((string) $val->title !== '') ? $val->title : $val->name);
+		}
+		if ($val instanceof PageArray) {
+			$t = [];
+			foreach ($val as $p) {
+				$t[] = (string) (((string) $p->title !== '') ? $p->title : $p->name);
+			}
+			return implode(', ', array_filter($t, fn($s) => $s !== ''));
+		}
+		// SelectableOptionArray (FieldtypeOptions) and any other WireArray
+		// of title-bearing items.
+		if (is_object($val) && $val instanceof \IteratorAggregate) {
+			$t = [];
+			foreach ($val as $opt) {
+				$t[] = (is_object($opt) && (string) $opt->title !== '')
+					? (string) $opt->title
+					: (string) $opt;
+			}
+			$t = array_filter($t, fn($s) => $s !== '');
+			if ($t) return implode(', ', $t);
+		}
+		if (is_object($val) && isset($val->title) && (string) $val->title !== '') {
+			return (string) $val->title;
+		}
+		return $this->normalizeDescription($val);
+	}
+
+	/**
+	 * Read a custom subfield off a Pageimage as a DISPLAY value for the
+	 * table, typed by the subfield's editor type:
+	 *   - text / textarea → langValueToStorable (keeps the {langId:value}
+	 *     shape the multilang editor tabs read)
+	 *   - checkbox → "✓" or "" (empty renders the cell's "—" placeholder)
+	 *   - date → formatted via formatTimestamp
+	 *   - select / page / other → human label(s)
+	 * Returns null when the image has no value for the subfield.
+	 *
+	 * @return mixed
+	 */
+	protected function readCustomValue(Pageimage $img, string $name) {
+		$val = $img->get($name);
+		if ($val === null) return null;
+		switch ($this->getCustomTypes()[$name] ?? 'text') {
+			case 'text':
+			case 'textarea':
+				return $this->langValueToStorable($val);
+			case 'checkbox':
+				return ((int) (string) $val) ? '✓' : '';
+			case 'number':
+				return (string) $val;
+			case 'date':
+				$ts = is_numeric($val) ? (int) $val : @strtotime((string) $val);
+				if (!$ts) return '';
+				$f = $this->wire('fields')->get($name);
+				// Use the field's OWN output format so a date-only field
+				// doesn't show a spurious 00:00 time.
+				return ($f instanceof Field) ? $this->formatCustomDate($f, $ts) : $this->formatTimestamp($ts);
+			default:
+				return $this->customLabel($val);
+		}
+	}
+
+	/**
+	 * Editor-RAW value for an inline-editable typed custom subfield —
+	 * the value the popup widget round-trips, distinct from the display
+	 * label: checkbox → "1"/"0", date → "Y-m-d", select → option id.
+	 * Only meaningful for checkbox / date / select.
+	 */
+	protected function readCustomRaw(Pageimage $img, string $name): string {
+		$val = $img->get($name);
+		if ($val === null) return '';
+		switch ($this->getCustomTypes()[$name] ?? 'text') {
+			case 'checkbox':
+				return ((int) (string) $val) ? '1' : '0';
+			case 'number':
+				return (string) $val;
+			case 'date':
+				$ts = is_numeric($val) ? (int) $val : @strtotime((string) $val);
+				if (!$ts) return '';
+				$f = $this->wire('fields')->get($name);
+				// datetime-local needs the time component; a date-only
+				// field uses the bare date.
+				return ($f instanceof Field && $this->dateHasTime($f))
+					? date('Y-m-d\TH:i', $ts)
+					: date('Y-m-d', $ts);
+			case 'select':
+				// FieldtypeOptions stores a SelectableOptionArray; the
+				// widget keys on the option id(s), comma-joined for multi.
+				if (is_object($val) && $val instanceof \IteratorAggregate) {
+					$ids = [];
+					foreach ($val as $o) {
+						if (is_object($o) && isset($o->id)) $ids[] = (int) $o->id;
+					}
+					return implode(',', $ids);
+				}
+				return (string) $val;
+			case 'page':
+				// Selected page id(s), comma-joined for the <select>.
+				if ($val instanceof Page) return (string) $val->id;
+				if ($val instanceof PageArray) {
+					$ids = [];
+					foreach ($val as $p) $ids[] = (int) $p->id;
+					return implode(',', $ids);
+				}
+				return (string) $val;
+			default:
+				return '';
+		}
+	}
+
+	/**
+	 * Selectable options for a FieldtypeOptions custom subfield, as a
+	 * [{value:id,label:title}] list for the inline <select> widget.
+	 *
+	 * @return array<int,array{value:int,label:string}>
+	 */
+	protected function getCustomOptions(string $name): array {
+		$f = $this->wire('fields')->get($name);
+		if (!($f instanceof Field) || !($f->type instanceof FieldtypeOptions)) return [];
+		$out = [];
+		$opts = $f->type->getOptions($f);
+		if ($opts) {
+			foreach ($opts as $o) {
+				$out[] = ['value' => (int) $o->id, 'label' => (string) $o->title];
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Coerce an inline-typed-custom string value from the editor into
+	 * the shape the Fieldtype stores: checkbox → 0/1, date → timestamp,
+	 * select → SelectableOptionArray (via the Fieldtype's own
+	 * sanitizeValue, which rejects non-allowed ids). Empty string clears.
+	 *
+	 * @param mixed return type varies by Fieldtype
+	 */
+	protected function coerceCustomValue(Page $page, ?Field $field, string $type, string $value) {
+		if ($type === 'checkbox') {
+			return ($value === '1' || $value === 'on' || $value === 'true') ? 1 : 0;
+		}
+		if ($value === '') return '';
+		if ($type === 'date') {
+			$ts = strtotime($value);
+			return $ts !== false ? $ts : '';
+		}
+		$ids = array_values(array_filter(
+			array_map('intval', explode(',', $value)),
+			fn($i) => $i > 0
+		));
+		if ($type === 'select') {
+			// FieldtypeOptions accepts an array of option ids and routes
+			// it through its own sanitizeValue on Pagefile::setFieldValue.
+			return $ids;
+		}
+		if ($type === 'page') {
+			// FieldtypePage is shape-sensitive:
+			//
+			//  - Single-value (derefAsPage > 0): sanitizeValuePage accepts
+			//    Page / PageArray / string / int, but NOT a raw int array;
+			//    the raw-array path falls through every branch and returns
+			//    the blank value. That's the "save returns ok but the new
+			//    value never lands" bug — we were silently clearing the
+			//    field. Pass a single int id (or '' to clear).
+			//
+			//  - Multi-value (derefAsPage == 0): sanitizeValuePageArray
+			//    treats an int array as ADDITIVE — it loads the existing
+			//    PageArray and adds the new ids to it, so deselections
+			//    silently survive. Build a fresh PageArray ourselves so
+			//    line 778 of FieldtypePage takes the early-return branch
+			//    and we get REPLACE semantics.
+			$pages   = $this->wire('pages');
+			$isMulti = $field instanceof Field && ((int) $field->get('derefAsPage') === 0);
+			if (!$isMulti) {
+				return $ids ? $ids[0] : '';
+			}
+			$pa = $pages->newPageArray();
+			foreach ($ids as $id) {
+				$p = $pages->get($id);
+				if ($p && $p->id) $pa->add($p);
+			}
+			return $pa;
+		}
+		// number: let the Fieldtype validate + coerce.
+		if ($field instanceof Field) {
+			try { return $field->type->sanitizeValue($page, $field, $value); }
+			catch (\Throwable $e) { /* fall through */ }
+		}
+		return $value;
+	}
+
+	/**
+	 * True if a FieldtypeDatetime field's output format carries a time
+	 * component (so the editor uses datetime-local instead of date, and
+	 * the display keeps the time).
+	 */
+	protected function dateHasTime(Field $f): bool {
+		$fmt = (string) $f->get('dateOutputFormat');
+		// date() time tokens, plus the common strftime time tokens.
+		return $fmt !== '' && (bool) preg_match('/[aAgGhHisuv]|%[HIklMpPrRSTX]/', $fmt);
+	}
+
+	/**
+	 * Format a timestamp with a Datetime field's own output format
+	 * (falling back to the module's generic timestamp format). wireDate()
+	 * handles both date() and legacy strftime formats safely.
+	 */
+	protected function formatCustomDate(Field $f, int $ts): string {
+		$fmt = (string) $f->get('dateOutputFormat');
+		if ($fmt === '') return $this->formatTimestamp($ts);
+		if (function_exists('ProcessWire\\wireDate')) {
+			$out = \ProcessWire\wireDate($fmt, $ts);
+			if (is_string($out) && $out !== '') return $out;
+		}
+		return date($fmt, $ts);
+	}
+
+	/**
+	 * Resolve a Page-reference custom subfield to a bounded inline-select
+	 * config: { multiple: bool, options: [{value:id,label:title}] }.
+	 * Returns null when the selectable set can't be a sane inline select
+	 * (autocomplete / huge / unresolvable) — those keep the native editor.
+	 *
+	 * @return array{multiple:bool,options:array<int,array{value:int,label:string}>}|null
+	 */
+	const PAGEREF_INLINE_CAP = 2000;
+
+	protected function getPageRefConfig(string $name): ?array {
+		if (array_key_exists($name, $this->pageRefConfigCache)) {
+			return $this->pageRefConfigCache[$name];
+		}
+		$result = null;
+		$f = $this->wire('fields')->get($name);
+		if ($f instanceof Field && $f->type instanceof FieldtypePage) {
+			$pa = $this->resolvePageRefPages($f);
+			if ($pa instanceof PageArray && $pa->count() > 0 && $pa->count() <= self::PAGEREF_INLINE_CAP) {
+				$opts = [];
+				foreach ($pa as $p) {
+					$opts[] = [
+						'value' => (int) $p->id,
+						'label' => (string) (((string) $p->title !== '') ? $p->title : $p->name),
+					];
+				}
+				$result = [
+					'multiple' => ((int) $f->get('derefAsPage') === 0),
+					'options'  => $opts,
+				];
+			}
+		}
+		$this->pageRefConfigCache[$name] = $result;
+		return $result;
+	}
+
+	/**
+	 * Resolve a Page-reference field's selectable pages. Tries the
+	 * InputfieldPage's own getSelectablePages() first (honours every
+	 * config incl. custom find code); falls back to a selector built
+	 * straight from the field config when that yields nothing — more
+	 * robust across the various page inputs (Select, AsmSelect,
+	 * PageListSelect, …). Returns null when nothing bounded resolves.
+	 */
+	protected function resolvePageRefPages(Field $f): ?PageArray {
+		try {
+			$inputfield = $f->getInputfield($this->wire('page'));
+			if ($inputfield && method_exists($inputfield, 'getSelectablePages')) {
+				$pa = $inputfield->getSelectablePages($this->wire('page'));
+				if ($pa instanceof PageArray && $pa->count() > 0) return $pa;
+			}
+		} catch (\Throwable $e) { /* fall through to config selector */ }
+
+		$selector = $this->pageRefSelector($f);
+		if ($selector === '') return null;
+		try {
+			$pa = $this->wire('pages')->find($selector . ', limit=' . (self::PAGEREF_INLINE_CAP + 1));
+			return $pa instanceof PageArray ? $pa : null;
+		} catch (\Throwable $e) {
+			return null;
+		}
+	}
+
+	/**
+	 * Build a find selector from a Page-reference field's config
+	 * (findPagesSelector / parent_id / template_id(s)). Returns '' when
+	 * the field relies on custom find code (can't be resolved safely) or
+	 * has no usable constraint.
+	 */
+	protected function pageRefSelector(Field $f): string {
+		if ((string) $f->get('findPagesCode') !== '') return '';
+		$sel = trim((string) $f->get('findPagesSelector'));
+		if ($sel !== '') return $sel . ', include=hidden';
+		$parts = [];
+		$parent = (int) $f->get('parent_id');
+		if ($parent) $parts[] = 'parent_id=' . $parent;
+		$tplIds = $f->get('template_ids');
+		$tplId  = (int) $f->get('template_id');
+		if (is_array($tplIds) && $tplIds) {
+			$parts[] = 'template=' . implode('|', array_map('intval', $tplIds));
+		} elseif ($tplId) {
+			$parts[] = 'template=' . $tplId;
+		}
+		if (!$parts) return '';
+		$parts[] = 'include=hidden';
+		return implode(', ', $parts);
+	}
+
+	/**
 	 * Hydrate the visible row slice with thumbnail URLs and page links.
 	 *
 	 * Only this slice triggers Pageimage hydration — the bulk row list stays
@@ -2688,13 +3269,20 @@ class ProcessImageLibrary extends Process {
 			$row['variationsCount'] = $variations ? $variations->count() : 0;
 
 			// Custom-field hydration: read each declared custom subfield off
-			// the Pageimage. Phase 6 will handle type-specific edit semantics;
-			// here we normalize to a displayable scalar.
+			// the Pageimage as a typed DISPLAY value (checkbox glyph, date
+			// formatted, page / option labels; text/textarea keep their
+			// multilang shape). See readCustomValue().
 			foreach ($customByField[$row['fieldName']] ?? [] as $customName) {
+				// Editor-RAW value for inline-editable typed cells — set on
+				// every visible-slice row (even when the display value was
+				// already filled by the bulk-hydrate pass).
+				if (in_array($this->getCustomTypes()[$customName] ?? 'text', ['checkbox', 'date', 'number', 'select', 'page'], true)) {
+					$row['customRaw'][$customName] = $this->readCustomRaw($img, $customName);
+				}
 				if (isset($row['custom'][$customName])) continue; // already filled by bulk pass
-				$val = $img->get($customName);
-				if ($val === null || $val === '') continue;
-				$row['custom'][$customName] = $this->langValueToStorable($val);
+				$v = $this->readCustomValue($img, $customName);
+				if ($v === null || $v === '') continue;
+				$row['custom'][$customName] = $v;
 			}
 		}
 		unset($row);
@@ -2736,13 +3324,13 @@ class ProcessImageLibrary extends Process {
 			if (!$img) continue;
 
 			foreach ($customNames as $name) {
-				$val = $img->get($name);
-				if ($val === null) continue;
-				// Keep the raw shape — multilang LanguagesPageFieldValue
-				// objects get flattened to a cacheable {langId: value}
-				// array so the popup's tabs UI can read every language
-				// straight off the row without a follow-up fetch.
-				$row['custom'][$name] = $this->langValueToStorable($val);
+				// Typed display value (same as hydrateSlice): text/textarea
+				// keep their multilang {langId:value} shape for the editor
+				// tabs; checkbox/date/select/page collapse to a label so
+				// search + "missing X" operate on something meaningful.
+				$v = $this->readCustomValue($img, $name);
+				if ($v === null) continue;
+				$row['custom'][$name] = $v;
 			}
 		}
 		unset($row);
@@ -2801,6 +3389,7 @@ class ProcessImageLibrary extends Process {
 			'renameUrl'  => $this->wire('page')->url . 'rename/',
 			'replaceUrl' => $this->wire('page')->url . 'replace/',
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
+			'widgetUrl'  => $this->wire('page')->url . 'widget/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -2836,6 +3425,7 @@ class ProcessImageLibrary extends Process {
 			],
 			'labels' => [
 				'saving'           => $this->_('Saving…'),
+				'loading'          => $this->_('Loading…'),
 				'saved'            => $this->_('Saved'),
 				'error'            => $this->_('Save failed'),
 				'done'             => $this->_('Done'),
@@ -2845,6 +3435,8 @@ class ProcessImageLibrary extends Process {
 				'save'             => $this->_('Save'),
 				'cancel'           => $this->_('Cancel'),
 				'close'            => $this->_('Close'),
+				// Label next to the checkbox widget for a boolean custom subfield.
+				'enabled'          => $this->_('Enabled'),
 				'rename'           => $this->_('New filename'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
@@ -3273,21 +3865,12 @@ class ProcessImageLibrary extends Process {
 		$san = $this->wire('sanitizer');
 		$thumb = $this->getThumbDims();
 
-		// Per-subfield editor type — Textarea-backed customs render a
-		// <textarea> in the inline editor, everything else falls back to
-		// <input type="text">. Built once across every image field's
-		// declared subfields so the per-row loop is just a lookup.
-		$fieldsApi  = $this->wire('fields');
+		// Per-subfield editor type (text / textarea / checkbox / date /
+		// select / page), keyed by subfield name so the per-row loop is
+		// just a lookup. text + textarea are inline-editable; the typed
+		// ones open the native per-image editor for now (Phase 1).
 		$customByField = $this->getCustomByField();
-		$customInputTypes = [];
-		foreach ($customByField as $names) {
-			foreach ($names as $n) {
-				if (isset($customInputTypes[$n])) continue;
-				$f = $fieldsApi->get($n);
-				$customInputTypes[$n] = ($f && $f->type instanceof FieldtypeTextarea)
-					? 'textarea' : 'text';
-			}
-		}
+		$customInputTypes = $this->getCustomTypes();
 
 		if (!$slice) {
 			return '<p class="ml-empty">'
@@ -3601,19 +4184,72 @@ class ProcessImageLibrary extends Process {
 				}
 				$raw = $row['custom'][$name] ?? '';
 				$val = $this->normalizeDescription($raw);
-				$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-					$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
-				)));
-				// Only textarea-backed customs get the clamp box; single-
-				// line text customs are short and stay a plain text node.
-				$customInner = $inputType === 'textarea'
-					? $this->clampCell((string) $val)
-					: $san->entities((string) $val);
-				$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
-					. ' data-subfield="' . $san->entities($name) . '"'
-					. ' data-input="' . $san->entities($inputType) . '"'
-					. $this->buildLangAttrs($raw) . '>'
-					. $customInner . '</td>';
+				// Page-reference fields render PW's configured inputfield
+				// (PageAutocomplete / PageListSelect / ASMSelect / …) in
+				// the popup — JS fetches the rendered HTML from
+				// ___executeWidget, injects it, fires the 'reloaded' DOM
+				// event so each inputfield's own JS initialises on the
+				// new nodes. No more inline checkbox-list / multi-select.
+				$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select', 'page'], true);
+				if (in_array($inputType, ['text', 'textarea'], true)) {
+					// Inline-editable prose cell.
+					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+					)));
+					// Only textarea-backed customs get the clamp box; single-
+					// line text customs are short and stay a plain text node.
+					$customInner = $inputType === 'textarea'
+						? $this->clampCell((string) $val)
+						: $san->entities((string) $val);
+					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+						. ' data-subfield="' . $san->entities($name) . '"'
+						. ' data-input="' . $san->entities($inputType) . '"'
+						. $this->buildLangAttrs($raw) . '>'
+						. $customInner . '</td>';
+				} elseif ($inlineTyped && !empty($row['pageEditUrl'])) {
+					// Inline-editable typed cell. Display shows the typed
+					// value (glyph / date / label); data-value carries
+					// the editor-RAW value. select + date carry their
+					// type-specific config attrs. page-ref defers the
+					// inputfield render to ___executeWidget; the cell
+					// just needs the rawVal for change-detection.
+					$rawVal = (string) ($row['customRaw'][$name] ?? '');
+					$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
+					if ($inputType === 'select') {
+						$typedExtra .= " data-options='" . $san->entities(
+							json_encode($this->getCustomOptions($name), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+						) . "'";
+						$sf = $this->wire('fields')->get($name);
+						if ($sf instanceof Field && !$this->isSingleValueInput($sf)) {
+							$typedExtra .= ' data-multiple="1"';
+						}
+					} elseif ($inputType === 'date') {
+						$df = $this->wire('fields')->get($name);
+						if ($df instanceof Field && $this->dateHasTime($df)) $typedExtra .= ' data-datetime="1"';
+					}
+					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+					)));
+					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+						. ' data-subfield="' . $san->entities($name) . '"'
+						. ' data-input="' . $san->entities($inputType) . '"' . $typedExtra . '>'
+						. $san->entities((string) $val) . '</td>';
+				} elseif (!empty($row['pageEditUrl'])) {
+					// Only page-refs whose selectable set can't be a bounded
+					// inline select (autocomplete / huge / custom find code)
+					// fall back to the native per-image editor.
+					$nativeAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+						$this->_('Edit %1$s of %2$s in the image editor'), $name, (string) $row['basename']
+					)));
+					$out .= '<td class="ml-cell-native ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . ' role="button" tabindex="0"' . $nativeAria
+						. ' data-subfield="' . $san->entities($name) . '"'
+						. ' data-input="' . $san->entities($inputType) . '">'
+						. $san->entities((string) $val) . '</td>';
+				} else {
+					// Typed subfield on a non-editable page → display only.
+					$out .= '<td class="' . $typeClass . '"' . $colAttr . '>'
+						. $san->entities((string) $val) . '</td>';
+				}
 			}
 
 			$out .= '</tr>';

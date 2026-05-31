@@ -99,7 +99,8 @@
 			return fetch(config.saveUrl, {
 				method: 'POST',
 				body: fd,
-				credentials: 'same-origin'
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' }
 			}).then(function (res) {
 				return res.json().then(function (data) { return { status: res.status, data: data }; });
 			});
@@ -283,10 +284,160 @@
 				return buildPopupMultilang(td, original, td.dataset.input === 'textarea');
 			}
 
+			if (td.dataset.input === 'checkbox') {
+				return buildPopupCheckbox(original);
+			}
+			if (td.dataset.input === 'date') {
+				return buildPopupDate(td, original);
+			}
+			if (td.dataset.input === 'number') {
+				return buildPopupNumber(original);
+			}
+			if (td.dataset.input === 'select') {
+				return buildPopupSelect(td, original);
+			}
+			if (td.dataset.input === 'page') {
+				return buildPopupPageRef(td, original);
+			}
 			if (td.dataset.input === 'textarea') {
 				return buildPopupTextarea(original);
 			}
 			return buildPopupTextInput(original, '');
+		}
+
+		// Page-reference widget: ask the server to render whatever
+		// Inputfield the field's own config specifies (PageAutocomplete /
+		// PageListSelect / ASMSelect / …), inject the HTML, load any
+		// new scripts / styles the render added, then fire the
+		// 'reloaded' DOM event so each inputfield's own JS module
+		// initialises on the new nodes. getValue() walks every input
+		// inside the container and joins the values it finds — the
+		// shape works for hidden-input-based pickers (PageAutocomplete),
+		// <select multiple> (ASM), and single <select> alike.
+		function buildPopupPageRef(td, original) {
+			var wrap = document.createElement('div');
+			wrap.className = 'ml-popup-pageref';
+			var status = document.createElement('div');
+			status.className = 'ml-popup-pageref-loading';
+			status.textContent = labels.loading || 'Loading…';
+			wrap.appendChild(status);
+
+			function loadAsset(url, kind) {
+				return new Promise(function (resolve) {
+					if (kind === 'script') {
+						if (document.querySelector('script[src="' + url + '"]')) return resolve();
+						var s = document.createElement('script');
+						s.src = url;
+						s.onload  = resolve;
+						s.onerror = resolve;
+						document.head.appendChild(s);
+					} else {
+						if (document.querySelector('link[href="' + url + '"]')) return resolve();
+						var l = document.createElement('link');
+						l.rel  = 'stylesheet';
+						l.href = url;
+						l.onload  = resolve;
+						l.onerror = resolve;
+						document.head.appendChild(l);
+					}
+				});
+			}
+
+			if (!config.widgetUrl) {
+				status.textContent = 'No widget endpoint configured.';
+				return {
+					element: wrap,
+					getValue: function () { return original; },
+					focus: function () {}
+				};
+			}
+
+			var url = config.widgetUrl
+				+ '?pageId='   + encodeURIComponent(td.dataset.pageId   || '')
+				+ '&fieldName='+ encodeURIComponent(td.dataset.field    || '')
+				+ '&basename=' + encodeURIComponent(td.dataset.basename || '')
+				+ '&subfield=' + encodeURIComponent(td.dataset.subfield || '');
+
+			fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+				.then(function (r) { return r.json(); })
+				.then(function (data) {
+					if (!data || !data.ok || !data.html) {
+						status.textContent = (data && data.error) || 'Widget load failed.';
+						return;
+					}
+					var styleLoads  = (data.styles  || []).map(function (u) { return loadAsset(u, 'style');  });
+					var scriptLoads = (data.scripts || []).map(function (u) { return loadAsset(u, 'script'); });
+					return Promise.all(styleLoads.concat(scriptLoads)).then(function () {
+						status.remove();
+						var holder = document.createElement('div');
+						holder.className = 'ml-popup-pageref-holder';
+						holder.innerHTML = data.html;
+						wrap.appendChild(holder);
+						// PW's inputfield JS modules hook the 'reloaded'
+						// DOM event via delegated jQuery handlers on
+						// document, scoped to selectors like
+						// .InputfieldPageAutocomplete / .InputfieldPage.
+						// Delegated events fire only when the event
+						// originates from a matching descendant, so we
+						// trigger 'reloaded' on EACH .Inputfield in the
+						// injected fragment (mirroring what ProcessPage-
+						// Edit does after AJAX-loading a tab). Falls
+						// back to a CustomEvent burst when jQuery isn't
+						// available, although in the PW admin it
+						// always is.
+						var jq = window.jQuery;
+						if (jq) {
+							var $fields = jq(holder).find('.Inputfield').addBack('.Inputfield');
+							$fields.trigger('reloaded', ['ml-widget']);
+						} else {
+							holder.querySelectorAll('.Inputfield').forEach(function (el) {
+								el.dispatchEvent(new CustomEvent('reloaded', { bubbles: true, detail: ['ml-widget'] }));
+							});
+						}
+						wrap._mlWidgetName = data.name || (td.dataset.subfield || '');
+						wrap._mlWidgetId   = data.id   || '';
+					});
+				})
+				.catch(function () { status.textContent = 'Widget load failed.'; });
+
+			return {
+				element: wrap,
+				getValue: function () {
+					// Collect every input value inside the widget holder
+					// whose name starts with the subfield name. Covers
+					// hidden-input pickers, multi-selects and singles.
+					var subfield = td.dataset.subfield || '';
+					var ids = [];
+					wrap.querySelectorAll('input, select').forEach(function (el) {
+						var name = el.name || '';
+						if (!name) return;
+						if (name !== subfield && name.indexOf(subfield) !== 0) return;
+						if (el.type === 'checkbox' || el.type === 'radio') {
+							if (el.checked && el.value) ids.push(el.value);
+							return;
+						}
+						if (el.tagName === 'SELECT' && el.multiple) {
+							Array.prototype.forEach.call(el.options, function (o) {
+								if (o.selected && o.value) ids.push(o.value);
+							});
+							return;
+						}
+						if (el.value) ids.push(el.value);
+					});
+					// Dedup + drop blanks; comma-join for the save path.
+					var seen = Object.create(null);
+					return ids.filter(function (v) {
+						v = String(v).trim();
+						if (!v || seen[v]) return false;
+						seen[v] = true;
+						return true;
+					}).join(',');
+				},
+				focus: function () {
+					var first = wrap.querySelector('input, select, button');
+					if (first) first.focus();
+				}
+			};
 		}
 
 		// Tabbed-textarea widget for multilang subfields. Reads each
@@ -420,6 +571,110 @@
 			};
 		}
 
+		// Typed custom-subfield widgets. They round-trip the editor-RAW
+		// value (data-value): checkbox → "1"/"0", date → "Y-m-d", select
+		// → option id. The cell's visible text is a glyph / label, not
+		// the value, so these never read it.
+		function buildPopupCheckbox(original) {
+			var label = document.createElement('label');
+			label.className = 'ml-popup-checkbox';
+			var cb = document.createElement('input');
+			cb.type = 'checkbox';
+			cb.className = 'uk-checkbox';
+			cb.checked = (original === '1' || original === 'on' || original === 'true');
+			label.appendChild(cb);
+			label.appendChild(document.createTextNode(' ' + (labels.enabled || 'Enabled')));
+			return {
+				element: label,
+				getValue: function () { return cb.checked ? '1' : '0'; },
+				focus:    function () { cb.focus(); }
+			};
+		}
+
+		function buildPopupDate(td, original) {
+			var input = document.createElement('input');
+			input.type = (td && td.dataset.datetime === '1') ? 'datetime-local' : 'date';
+			input.className = 'ml-popup-input';
+			input.value = original || '';
+			return {
+				element: input,
+				getValue: function () { return input.value; },
+				focus:    function () { input.focus(); }
+			};
+		}
+
+		function buildPopupSelect(td, original) {
+			var options = [];
+			try { options = JSON.parse(td.dataset.options || '[]'); }
+			catch (e) { options = []; }
+			var multiple = td.dataset.multiple === '1';
+			var current = String(original || '').split(',').filter(Boolean);
+			// Multi-select renders as a checkbox list — <select multiple>
+			// is a UX nightmare (ctrl/cmd-click discoverability, no
+			// touch-friendly behaviour, broken under uk-select's
+			// appearance:none reset). Single keeps the native <select>.
+			if (multiple) {
+				var wrap = document.createElement('div');
+				wrap.className = 'ml-popup-checklist';
+				options.forEach(function (o) {
+					var lbl = document.createElement('label');
+					lbl.className = 'ml-popup-checklist-item';
+					var cb = document.createElement('input');
+					cb.type = 'checkbox';
+					cb.className = 'uk-checkbox';
+					cb.value = String(o.value);
+					if (current.indexOf(String(o.value)) !== -1) cb.checked = true;
+					lbl.appendChild(cb);
+					lbl.appendChild(document.createTextNode(' ' + o.label));
+					wrap.appendChild(lbl);
+				});
+				return {
+					element: wrap,
+					getValue: function () {
+						return Array.prototype.filter
+							.call(wrap.querySelectorAll('input[type="checkbox"]'), function (cb) { return cb.checked; })
+							.map(function (cb) { return cb.value; })
+							.join(',');
+					},
+					focus: function () {
+						var first = wrap.querySelector('input[type="checkbox"]');
+						if (first) first.focus();
+					}
+				};
+			}
+			var select = document.createElement('select');
+			select.className = 'ml-popup-input uk-select';
+			var blank = document.createElement('option');
+			blank.value = '';
+			blank.textContent = '—';
+			select.appendChild(blank);
+			options.forEach(function (o) {
+				var opt = document.createElement('option');
+				opt.value = String(o.value);
+				opt.textContent = o.label;
+				if (current.indexOf(String(o.value)) !== -1) opt.selected = true;
+				select.appendChild(opt);
+			});
+			return {
+				element: select,
+				getValue: function () { return select.value; },
+				focus:    function () { select.focus(); }
+			};
+		}
+
+		function buildPopupNumber(original) {
+			var input = document.createElement('input');
+			input.type = 'number';
+			input.className = 'ml-popup-input';
+			input.step = 'any';
+			input.value = original || '';
+			return {
+				element: input,
+				getValue: function () { return input.value; },
+				focus:    function () { input.focus(); input.select(); }
+			};
+		}
+
 		// Filename rename: text input for the stem with the original
 		// extension visible-but-locked beside it. The widget only ever
 		// reports the stem back; commit() reattaches the extension on
@@ -493,7 +748,15 @@
 			if (td.classList.contains('ml-editing')) return;
 			td.classList.add('ml-editing');
 
-			var original = td.textContent;
+			// Typed cells (checkbox / date / select) display a glyph /
+			// label, not the value — the editor reads the raw value from
+			// data-value; everything else uses the cell text.
+			var typedInput = td.dataset.input === 'checkbox'
+				|| td.dataset.input === 'date'
+				|| td.dataset.input === 'number'
+				|| td.dataset.input === 'select'
+				|| td.dataset.input === 'page';
+			var original = typedInput ? (td.dataset.value || '') : td.textContent;
 			var batch    = isBatchEdit(td);
 			var widget   = buildPopupWidget(td, original);
 
@@ -538,7 +801,12 @@
 			// land). Batch rename has just one mode (apply the
 			// pattern with its (n) counter), so the radios stay
 			// hidden there.
-			if (batch && td.dataset.input !== 'filename') {
+			// Add / Replace (+ Remove for tags) only make sense for
+			// token / prose subfields. Filename and the typed widgets
+			// (checkbox / date / select) are Replace-only → no radios.
+			if (batch && (td.dataset.subfield === 'tags'
+				|| td.dataset.input === 'text'
+				|| td.dataset.input === 'textarea')) {
 				batchBar = document.createElement('div');
 				batchBar.className = 'ml-batch-mode';
 				var radioName = 'mlBatchMode-' + Math.random().toString(36).slice(2, 8);
@@ -796,6 +1064,41 @@
 					: raw;
 				var langValuesJson = isMultilang ? JSON.stringify(raw) : '';
 
+				// Typed widgets (checkbox / date / select) broadcast their
+				// raw value as Replace to every selected row, then re-render
+				// (the server produces the correct typed display). No
+				// per-cell optimistic display, no Add/merge logic.
+				if (batch && typedInput) {
+					teardown();
+					var typedCells = batchCellsForSubfield(td.dataset.subfield);
+					typedCells.forEach(function (c) { c.classList.add('ml-cell-saving'); });
+					runBulk('set', { subfield: td.dataset.subfield, value: primaryValue, mode: 'replace' })
+						.then(function (result) {
+							var ok = reportBulk(result);
+							if (ok && result && result.data && Array.isArray(result.data.vanished)) {
+								result.data.vanished.forEach(function (k) { selection.delete(k); });
+							}
+							typedCells.forEach(function (c) {
+								if (!c.isConnected) return;
+								c.classList.remove('ml-cell-saving');
+								flashCell(c, ok);
+							});
+							setTimeout(function () {
+								replaceFromQs(location.search, false);
+							}, ok ? 1400 : 0);
+						}).catch(function (err) {
+							typedCells.forEach(function (c) {
+								if (!c.isConnected) return;
+								c.classList.remove('ml-cell-saving');
+								flashCell(c, false);
+							});
+							if (td.isConnected) {
+								td.title = (err && err.message) || labels.error || 'Network error';
+							}
+						});
+					return;
+				}
+
 				if (batch) {
 					var sendValue = primaryValue;
 					if ((mode || 'replace') === 'add' && !isMultilang) {
@@ -939,9 +1242,14 @@
 					date:      todayIso,
 					field:     td.dataset.field || ''
 				};
-				setCellText(td, (td.dataset.subfield === 'tags')
-					? primaryValue
-					: resolveTemplateClient(primaryValue, singleCtx));
+				if (!typedInput) {
+					// Typed cells display a glyph / label, not the raw value
+					// — skip the optimistic text and let the save response
+					// set the real display.
+					setCellText(td, (td.dataset.subfield === 'tags')
+						? primaryValue
+						: resolveTemplateClient(primaryValue, singleCtx));
+				}
 				td.classList.add('ml-cell-saving');
 				td.title = labels.saving || 'Saving…';
 
@@ -960,6 +1268,11 @@
 					td.classList.remove('ml-cell-saving');
 					if (result && result.data && result.data.ok) {
 						setCellText(td, result.data.value);
+						// Typed cells: refresh data-value so reopening the
+						// editor shows the freshly-stored raw value.
+						if (typedInput && result.data.rawValue !== undefined) {
+							td.dataset.value = String(result.data.rawValue);
+						}
 						// Refresh the per-language data attrs from the
 						// post-save state so reopening the popup shows
 						// the fresh value in every tab, not the stale
@@ -973,7 +1286,7 @@
 						flashCell(td, true);
 						fadeRowIfMismatched(td, result.data);
 					} else {
-						setCellText(td, original);
+						if (!typedInput) setCellText(td, original);
 						var reason = (result && result.data && result.data.error)
 							|| ('HTTP ' + (result && result.status));
 						console.error('[ImageLibrary] save failed:', result);
@@ -983,7 +1296,7 @@
 				}).catch(function (err) {
 					if (!td.isConnected) return;
 					td.classList.remove('ml-cell-saving');
-					setCellText(td, original);
+					if (!typedInput) setCellText(td, original);
 					console.error('[ImageLibrary] save errored:', err);
 					td.title = (err && err.message) || labels.error || 'Network error';
 					flashCell(td, false);
@@ -1720,10 +2033,10 @@
 					// the page-edit data attrs when the host page is
 					// editable, so unauthorised users just see the thumb
 					// without a clickable cursor.
-					var thumbTd = e.target.closest('.ml-cell-thumb[data-file-hash]');
-					if (thumbTd) {
+					var nativeTd = e.target.closest('.ml-cell-thumb[data-file-hash], .ml-cell-native[data-file-hash]');
+					if (nativeTd) {
 						e.preventDefault();
-						openImageEditor(thumbTd);
+						openImageEditor(nativeTd);
 						return;
 					}
 					// Editable cell — but ignore clicks that landed on an
@@ -1741,10 +2054,10 @@
 			// them; Enter / Space here mirrors a mouse click.
 			results.addEventListener('keydown', function (e) {
 				if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
-				var thumbTd = e.target.closest && e.target.closest('.ml-cell-thumb[data-file-hash]');
-				if (thumbTd && e.target === thumbTd) {
+				var nativeTd = e.target.closest && e.target.closest('.ml-cell-thumb[data-file-hash], .ml-cell-native[data-file-hash]');
+				if (nativeTd && e.target === nativeTd) {
 					e.preventDefault();
-					openImageEditor(thumbTd);
+					openImageEditor(nativeTd);
 					return;
 				}
 				var editTd = e.target.closest && e.target.closest('.ml-cell-editable');

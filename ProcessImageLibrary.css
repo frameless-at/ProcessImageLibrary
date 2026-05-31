@@ -345,6 +345,20 @@
 	content: "—";
 	color: var(--pw-muted-color, #ccc);
 }
+/* Typed custom cells (checkbox / date / select / page) display their
+   value and open the native per-image editor on click — same hover
+   affordance + "—" empty placeholder as the inline-editable cells. */
+.ml-cell-native[data-file-hash] {
+	cursor: pointer;
+	touch-action: manipulation;
+}
+.ml-cell-native[data-file-hash]:hover {
+	background: var(--pw-notes-background, #fffbe6);
+}
+.ml-cell-native:empty::before {
+	content: "—";
+	color: var(--pw-muted-color, #ccc);
+}
 .ml-editing {
 	background: var(--pw-notes-background, #fffce8);
 	padding: 4px;
@@ -593,7 +607,11 @@ textarea.ml-cell-input {
 	outline: none !important;
 	box-shadow: none !important;
 }
-.ml-popup-editor input[type="text"] {
+.ml-popup-editor input[type="text"],
+.ml-popup-editor input[type="date"],
+.ml-popup-editor input[type="datetime-local"],
+.ml-popup-editor input[type="number"],
+.ml-popup-editor select.ml-popup-input {
 	display: block;
 	width: 100%;
 	box-sizing: border-box;
@@ -603,6 +621,55 @@ textarea.ml-cell-input {
 	border-radius: 3px;
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, inherit);
+}
+/* Boolean custom subfield — checkbox + label on one line. */
+.ml-popup-checkbox {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.5rem;
+	cursor: pointer;
+	font: inherit;
+}
+
+/* Page-reference widget container — PW's configured Inputfield
+   gets rendered into here by ___executeWidget. The "loading" stub
+   is a single muted line; once the HTML lands it lives in
+   .ml-popup-pageref-holder and PW's own inputfield CSS does the
+   heavy lifting (we don't try to re-style PageAutocomplete etc.). */
+.ml-popup-pageref {
+	min-height: 3rem;
+}
+.ml-popup-pageref-loading {
+	color: var(--pw-muted-color, #777);
+	font-size: 0.9em;
+	padding: 0.5rem 0;
+}
+.ml-popup-pageref-holder {
+	font-size: inherit;
+}
+
+/* Multi-select via checkbox list — used for multi-value page-ref
+   and FieldtypeOptions customs. <select multiple> is hostile UX
+   (ctrl/cmd-click, no touch behaviour, uk-select's appearance:none
+   hides the option list); a checkbox column is honest, scrollable
+   on large sets, touch-friendly. */
+.ml-popup-checklist {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	max-height: 18rem;
+	overflow-y: auto;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--pw-border-color, #c0c0c0);
+	border-radius: 3px;
+	background: var(--pw-inputs-background, #fff);
+}
+.ml-popup-checklist-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	cursor: pointer;
+	font: inherit;
 }
 
 /* Rename popup: stem input + locked extension chip side by side.
