@@ -4061,11 +4061,15 @@ class ProcessImageLibrary extends Process {
 				}
 				$raw = $row['custom'][$name] ?? '';
 				$val = $this->normalizeDescription($raw);
-				// Page-reference resolves to an inline <select> when its
-				// selectable set is bounded; otherwise null → native editor.
-				$pageRefCfg = $inputType === 'page' ? $this->getPageRefConfig($name) : null;
-				$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select'], true)
-					|| ($inputType === 'page' && $pageRefCfg !== null);
+				// Page-reference subfields always route to the native PW
+				// per-image editor — the field has its own configured
+				// inputfield (PageAutocomplete, PageListSelect, ASM, …)
+				// that knows how to handle 1000s of pages, search,
+				// hierarchical pickers, etc. Replicating that inline
+				// would be a worse copy of what PW already ships, so
+				// we just open the native editor and let PW do its job.
+				$pageRefCfg = null;
+				$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select'], true);
 				if (in_array($inputType, ['text', 'textarea'], true)) {
 					// Inline-editable prose cell.
 					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
@@ -4083,11 +4087,10 @@ class ProcessImageLibrary extends Process {
 						. $customInner . '</td>';
 				} elseif ($inlineTyped && !empty($row['pageEditUrl'])) {
 					// Inline-editable typed cell. Display shows the typed
-					// value (glyph / date / label); data-value carries the
-					// editor-RAW value. select + page ship their options;
-					// page-ref reuses the select widget (data-input="select").
+					// value (glyph / date / label); data-value carries
+					// the editor-RAW value. select + date carry their
+					// type-specific config attrs.
 					$rawVal = (string) ($row['customRaw'][$name] ?? '');
-					$widgetInput = $inputType === 'page' ? 'select' : $inputType;
 					$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
 					if ($inputType === 'select') {
 						$typedExtra .= " data-options='" . $san->entities(
@@ -4097,11 +4100,6 @@ class ProcessImageLibrary extends Process {
 						if ($sf instanceof Field && !$this->isSingleValueInput($sf)) {
 							$typedExtra .= ' data-multiple="1"';
 						}
-					} elseif ($inputType === 'page') {
-						$typedExtra .= " data-options='" . $san->entities(
-							json_encode($pageRefCfg['options'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-						) . "'";
-						if (!empty($pageRefCfg['multiple'])) $typedExtra .= ' data-multiple="1"';
 					} elseif ($inputType === 'date') {
 						$df = $this->wire('fields')->get($name);
 						if ($df instanceof Field && $this->dateHasTime($df)) $typedExtra .= ' data-datetime="1"';
@@ -4111,7 +4109,7 @@ class ProcessImageLibrary extends Process {
 					)));
 					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
 						. ' data-subfield="' . $san->entities($name) . '"'
-						. ' data-input="' . $san->entities($widgetInput) . '"' . $typedExtra . '>'
+						. ' data-input="' . $san->entities($inputType) . '"' . $typedExtra . '>'
 						. $san->entities((string) $val) . '</td>';
 				} elseif (!empty($row['pageEditUrl'])) {
 					// Only page-refs whose selectable set can't be a bounded
