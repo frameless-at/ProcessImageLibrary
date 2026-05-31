@@ -631,6 +631,30 @@ textarea.ml-cell-input {
 	font: inherit;
 }
 
+/* Multi-select via checkbox list — used for multi-value page-ref
+   and FieldtypeOptions customs. <select multiple> is hostile UX
+   (ctrl/cmd-click, no touch behaviour, uk-select's appearance:none
+   hides the option list); a checkbox column is honest, scrollable
+   on large sets, touch-friendly. */
+.ml-popup-checklist {
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+	max-height: 18rem;
+	overflow-y: auto;
+	padding: 0.5rem 0.75rem;
+	border: 1px solid var(--pw-border-color, #c0c0c0);
+	border-radius: 3px;
+	background: var(--pw-inputs-background, #fff);
+}
+.ml-popup-checklist-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	cursor: pointer;
+	font: inherit;
+}
+
 /* Rename popup: stem input + locked extension chip side by side.
    The extension stays inert (no focus, no editing) and visually
    tags itself as immutable so the user doesn't try to type into it. */

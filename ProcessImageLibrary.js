@@ -471,17 +471,45 @@
 			catch (e) { options = []; }
 			var multiple = td.dataset.multiple === '1';
 			var current = String(original || '').split(',').filter(Boolean);
+			// Multi-select renders as a checkbox list — <select multiple>
+			// is a UX nightmare (ctrl/cmd-click discoverability, no
+			// touch-friendly behaviour, broken under uk-select's
+			// appearance:none reset). Single keeps the native <select>.
+			if (multiple) {
+				var wrap = document.createElement('div');
+				wrap.className = 'ml-popup-checklist';
+				options.forEach(function (o) {
+					var lbl = document.createElement('label');
+					lbl.className = 'ml-popup-checklist-item';
+					var cb = document.createElement('input');
+					cb.type = 'checkbox';
+					cb.className = 'uk-checkbox';
+					cb.value = String(o.value);
+					if (current.indexOf(String(o.value)) !== -1) cb.checked = true;
+					lbl.appendChild(cb);
+					lbl.appendChild(document.createTextNode(' ' + o.label));
+					wrap.appendChild(lbl);
+				});
+				return {
+					element: wrap,
+					getValue: function () {
+						return Array.prototype.filter
+							.call(wrap.querySelectorAll('input[type="checkbox"]'), function (cb) { return cb.checked; })
+							.map(function (cb) { return cb.value; })
+							.join(',');
+					},
+					focus: function () {
+						var first = wrap.querySelector('input[type="checkbox"]');
+						if (first) first.focus();
+					}
+				};
+			}
 			var select = document.createElement('select');
 			select.className = 'ml-popup-input uk-select';
-			if (multiple) {
-				select.multiple = true;
-				select.size = Math.min(Math.max(options.length, 3), 10);
-			} else {
-				var blank = document.createElement('option');
-				blank.value = '';
-				blank.textContent = '—';
-				select.appendChild(blank);
-			}
+			var blank = document.createElement('option');
+			blank.value = '';
+			blank.textContent = '—';
+			select.appendChild(blank);
 			options.forEach(function (o) {
 				var opt = document.createElement('option');
 				opt.value = String(o.value);
@@ -491,14 +519,8 @@
 			});
 			return {
 				element: select,
-				getValue: function () {
-					if (multiple) {
-						return Array.prototype.filter.call(select.options, function (o) { return o.selected; })
-							.map(function (o) { return o.value; }).join(',');
-					}
-					return select.value;
-				},
-				focus: function () { select.focus(); }
+				getValue: function () { return select.value; },
+				focus:    function () { select.focus(); }
 			};
 		}
 
