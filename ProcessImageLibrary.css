@@ -275,15 +275,11 @@
 	border-radius: 3px;
 	display: inline-block;
 }
-.ml-delete-confirm-warn {
-	margin-top: 0.4rem;
-	font-size: 0.95em;
-	font-weight: 600;
-	color: var(--pw-error-inline-text-color, #c33);
-}
-/* Where-used section in the delete-confirm dialog. Heading sits on
-   the same warning-tinted color so it reads as a "before you confirm"
-   beat; the page list itself stays neutral so it's scannable. */
+/* Tail block under the file chip — a single slot that resolves to
+   either the "still referenced in" list (when refs exist) or the
+   bare "this cannot be undone" warning (when none do). Both take
+   the same red 600-weight heading style so the urgency reads the
+   same regardless of which one fills the slot. */
 .ml-delete-confirm-usage {
 	margin-top: 1rem;
 	padding-top: 0.75rem;

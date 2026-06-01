@@ -1699,25 +1699,17 @@
 				dialog.appendChild(list);
 			}
 
-			// "This cannot be undone." sits tight to the file chip so
-			// the no-undo beat stays glued to the "will be permanently
-			// removed" statement. The where-used block lands AFTER
-			// it as a separate advisory ("by the way, here's what
-			// else breaks") with its own visual separator.
-			var warn = document.createElement('p');
-			warn.className = 'ml-delete-confirm-warn';
-			warn.textContent = labels.deleteWarn || 'This cannot be undone.';
-			dialog.appendChild(warn);
-
-			// Where-used: rendered after the warning once the usage
-			// preflight resolves. Server runs $pages->findIDs over every
-			// FieldtypeTextarea with the `%=` substring selector so
-			// CKEditor + TinyMCE references are caught uniformly,
-			// multilang + repeater scopes included.
-			var usageBlock = document.createElement('div');
-			usageBlock.className = 'ml-delete-confirm-usage';
-			usageBlock.hidden = true;
-			dialog.appendChild(usageBlock);
+			// One slot below a divider that resolves to EITHER the
+			// where-used list (when refs exist) OR the "this cannot
+			// be undone" warning (when none do). The two carry the
+			// same urgency — refs are inherently a "by the way, this
+			// will break" message — so they take turns in the same
+			// position rather than stacking on each other. Filled
+			// once the usage preflight resolves; hidden until then.
+			var tailBlock = document.createElement('div');
+			tailBlock.className = 'ml-delete-confirm-usage';
+			tailBlock.hidden = true;
+			dialog.appendChild(tailBlock);
 
 			var footer = document.createElement('footer');
 			var cancelBtn = document.createElement('button');
@@ -1749,7 +1741,7 @@
 			okBtn.focus();
 
 			fetchUsage(items).then(function (usage) {
-				renderUsageBlock(usageBlock, items, usage);
+				renderUsageBlock(tailBlock, items, usage);
 			});
 		}
 
@@ -1784,7 +1776,18 @@
 				var refs = usage[key] || [];
 				if (refs.length) groups.push({ item: it, refs: refs });
 			});
-			if (!groups.length) return;
+
+			// No refs → fall back to the bare "this cannot be undone"
+			// warning in the same slot. Same red 600-weight heading
+			// style as the usage-h so the urgency reads consistently.
+			if (!groups.length) {
+				var w = document.createElement('p');
+				w.className = 'ml-delete-confirm-usage-h';
+				w.textContent = labels.deleteWarn || 'This cannot be undone.';
+				holder.appendChild(w);
+				holder.hidden = false;
+				return;
+			}
 
 			var h = document.createElement('p');
 			h.className = 'ml-delete-confirm-usage-h';
