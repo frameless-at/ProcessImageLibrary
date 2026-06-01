@@ -1715,16 +1715,23 @@ class ProcessImageLibrary extends Process {
 			}
 			if (!$cols) continue;
 
-			$whereCols = array_map(static function ($c) {
-				return '`' . $c . '` LIKE :needle';
-			}, $cols);
-			$sql = "SELECT DISTINCT pages_id FROM `$table` WHERE " . implode(' OR ', $whereCols);
+			// Positional `?` placeholders rather than a single named
+			// `:needle` reused across the OR list — WireDatabasePDO
+			// runs with native prepares, where MySQL doesn't allow the
+			// same named placeholder twice in one statement. Each
+			// data{langId} column gets its own slot bound to the same
+			// needle value at execute time.
+			$whereSql = [];
+			foreach ($cols as $c) {
+				$whereSql[] = '`' . $c . '` LIKE ?';
+			}
+			$sql = "SELECT DISTINCT pages_id FROM `$table` WHERE " . implode(' OR ', $whereSql);
 
 			foreach ($needles as $key => $needle) {
 				try {
 					$stmt = $db->prepare($sql);
-					$stmt->bindValue(':needle', '%' . $needle . '%', \PDO::PARAM_STR);
-					$stmt->execute();
+					$params = array_fill(0, count($cols), '%' . $needle . '%');
+					$stmt->execute($params);
 					while (($refId = $stmt->fetchColumn()) !== false) {
 						$byKey[$key][] = [
 							'refPageId'    => (int) $refId,
