@@ -1598,7 +1598,7 @@ class ProcessImageLibrary extends Process {
 	 *   {assets}/files/{pageId}/{stem}.WxH.{ext} (resized variation)
 	 *   {assets}/files/{pageId}/{stem}.WxH-…{ext} (cropped / hidpi)
 	 * which makes the reverse query an editor-agnostic SQL LIKE on
-	 * every contentType=html FieldtypeTextarea field's data column(s).
+	 * every FieldtypeTextarea field's data column(s).
 	 * We match on `/{pageId}/{stem}.` so the same scan catches both
 	 * the original AND every PW-derived variation — picking the user-
 	 * selected size at insert time would otherwise be the most common
@@ -1694,10 +1694,12 @@ class ProcessImageLibrary extends Process {
 
 		foreach ($fields as $field) {
 			if (!($field->type instanceof FieldtypeTextarea)) continue;
-			$contentType = (int) $field->get('contentType');
-			// 1 = HTML, 2 = HTML w/ image processing — both insert via
-			// pwimage so both can hold image references.
-			if ($contentType < FieldtypeTextarea::contentTypeHTML) continue;
+			// We deliberately don't filter on contentType: CKEditor /
+			// TinyMCE fields often run with the Textarea default
+			// (contentType=0) even though they emit HTML, which would
+			// silently skip the very fields most likely to hold
+			// pwimage inserts. The needle is specific enough that
+			// scanning every textarea is a non-issue performance-wise.
 
 			$table = $db->escapeTable('field_' . $field->name);
 
