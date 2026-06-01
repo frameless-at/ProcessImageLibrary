@@ -1597,14 +1597,12 @@ class ProcessImageLibrary extends Process {
 	 *   {assets}/files/{pageId}/{stem}.{ext}     (original)
 	 *   {assets}/files/{pageId}/{stem}.WxH.{ext} (resized variation)
 	 *   {assets}/files/{pageId}/{stem}.WxH-…{ext} (cropped / hidpi)
-	 * which makes the reverse query an editor-agnostic SQL LIKE on
-	 * every FieldtypeTextarea field's data column(s).
-	 * We match on `/{pageId}/{stem}.` so the same scan catches both
-	 * the original AND every PW-derived variation — picking the user-
-	 * selected size at insert time would otherwise be the most common
-	 * way for a reference to look "different" than the stored basename.
-	 * Multilang values live in suffixed data{langId} columns, so we
-	 * sweep every data* column of the field's table.
+	 * which makes the reverse query an editor-agnostic substring
+	 * search on every FieldtypeTextarea field. We match on the stem
+	 * prefix `/{pageId}/{stem}.` so a single needle catches the
+	 * original AND every PW-derived variation — pwimage picks a
+	 * user-selected size at insert time, so requiring the basename to
+	 * match exactly would miss the typical case.
 	 *
 	 * Returns { ok, usage: { "pid:basename": [ { pageId, pageTitle,
 	 * editUrl, fieldName }, … ] } } so the client can render a
@@ -1640,31 +1638,30 @@ class ProcessImageLibrary extends Process {
 		}
 		if (!$clean) return $this->jsonError('No valid items');
 
-		$debug = [];
-		$usage = $this->findImageReferences($clean, $debug);
-		return $this->jsonResponse(['ok' => true, 'usage' => $usage, '_debug' => $debug]);
+		$usage = $this->findImageReferences($clean);
+		return $this->jsonResponse(['ok' => true, 'usage' => $usage]);
 	}
 
 	/**
 	 * Reverse-lookup: which rich-text fields reference each of the
 	 * given (pageId, basename) pairs.
 	 *
-	 * One DB query per (textarea field × needle) pair — typical N is
-	 * small (one paintbrush selection × a handful of html textareas
-	 * on the site), so we keep it readable rather than fold needles
-	 * into a single OR query. Multilang data{langId} columns are
-	 * detected via SHOW COLUMNS and included in the OR list so an
-	 * image inserted in a non-default language still surfaces.
+	 * Goes through PW's selector API (`%=` substring-LIKE) rather than
+	 * raw SQL — selectors are multilang-, repeater- and access-aware,
+	 * which a hand-rolled `LIKE` over `field_*.data` is not. One
+	 * `findIDs()` call per (textarea field × needle) pair.
 	 *
-	 * Page titles + edit URLs are resolved once per ref-page-id via
-	 * a tiny in-method cache. Pages the current user can't view are
-	 * dropped silently — leaking titles via the delete dialog would
-	 * cross access boundaries.
+	 * Page titles + edit URLs are resolved once per ref-page-id via a
+	 * tiny in-method cache. We gate on existence + editability of the
+	 * referencing page — NOT on viewable(), because an admin user with
+	 * image-library-access plus per-page edit rights legitimately
+	 * needs to know about embeds even in pages they can't see on the
+	 * front-end (unpublished / hidden / access-restricted templates).
 	 *
 	 * @param array<int, array{pageId:int, basename:string}> $items
 	 * @return array<string, array<int, array{pageId:int,pageTitle:string,editUrl:string,fieldName:string}>>
 	 */
-	protected function findImageReferences(array $items, array &$debug = []): array {
+	protected function findImageReferences(array $items): array {
 		if (!$items) return [];
 
 		$needles = [];
@@ -1688,79 +1685,36 @@ class ProcessImageLibrary extends Process {
 		}
 		if (!$needles) return [];
 
-		$db      = $this->wire('database');
-		$fields  = $this->wire('fields');
-		$pages   = $this->wire('pages');
-		$user    = $this->wire('user');
+		$pages     = $this->wire('pages');
+		$sanitizer = $this->wire('sanitizer');
 
-		$debug['needles'] = $needles;
-		$debug['fields']  = [];
-
-		foreach ($fields as $field) {
-			if (!($field->type instanceof FieldtypeTextarea)) continue;
-			// We deliberately don't filter on contentType: CKEditor /
-			// TinyMCE fields often run with the Textarea default
-			// (contentType=0) even though they emit HTML, which would
-			// silently skip the very fields most likely to hold
-			// pwimage inserts. The needle is specific enough that
-			// scanning every textarea is a non-issue performance-wise.
-
-			$table = $db->escapeTable('field_' . $field->name);
-			$entry = ['field' => $field->name, 'fieldType' => get_class($field->type), 'cols' => [], 'hits' => []];
-
-			try {
-				$colsStmt = $db->query("SHOW COLUMNS FROM `$table` LIKE 'data%'");
-				$cols = [];
-				while ($row = $colsStmt->fetch(\PDO::FETCH_ASSOC)) {
-					$col = (string) ($row['Field'] ?? '');
-					if ($col === '') continue;
-					$cols[] = $col;
-				}
-				$colsStmt->closeCursor();
-				$entry['cols'] = $cols;
-			} catch (\Throwable $e) {
-				$entry['error'] = 'SHOW COLUMNS: ' . $e->getMessage();
-				$debug['fields'][] = $entry;
-				continue;
+		$textareaFields = [];
+		foreach ($this->wire('fields') as $field) {
+			if ($field->type instanceof FieldtypeTextarea) {
+				$textareaFields[] = $field->name;
 			}
-			if (!$cols) {
-				$debug['fields'][] = $entry;
-				continue;
-			}
+		}
+		if (!$textareaFields) return $byKey;
 
-			// Positional `?` placeholders rather than a single named
-			// `:needle` reused across the OR list — WireDatabasePDO
-			// runs with native prepares, where MySQL doesn't allow the
-			// same named placeholder twice in one statement. Each
-			// data{langId} column gets its own slot bound to the same
-			// needle value at execute time.
-			$whereSql = [];
-			foreach ($cols as $c) {
-				$whereSql[] = '`' . $c . '` LIKE ?';
-			}
-			$sql = "SELECT DISTINCT pages_id FROM `$table` WHERE " . implode(' OR ', $whereSql);
-
-			foreach ($needles as $key => $needle) {
+		foreach ($needles as $key => $needle) {
+			$escaped = $sanitizer->selectorValue($needle);
+			foreach ($textareaFields as $name) {
+				// %= is PW's substring-LIKE operator. include=all so
+				// hidden / unpublished pages are reached too — embeds
+				// live in admin content regardless of front-end state.
+				$selector = $name . '%=' . $escaped . ', include=all';
 				try {
-					$stmt = $db->prepare($sql);
-					$params = array_fill(0, count($cols), '%' . $needle . '%');
-					$stmt->execute($params);
-					$hits = [];
-					while (($refId = $stmt->fetchColumn()) !== false) {
-						$hits[] = (int) $refId;
-						$byKey[$key][] = [
-							'refPageId'    => (int) $refId,
-							'refFieldName' => $field->name,
-						];
-					}
-					$stmt->closeCursor();
-					if ($hits) $entry['hits'][$key] = $hits;
+					$ids = $pages->findIDs($selector);
 				} catch (\Throwable $e) {
-					$entry['error'] = 'LIKE: ' . $e->getMessage();
+					continue;
+				}
+				foreach ($ids as $refId) {
+					$byKey[$key][] = [
+						'refPageId'    => (int) $refId,
+						'refFieldName' => $name,
+					];
 				}
 			}
-			$entry['sql'] = $sql;
-			$debug['fields'][] = $entry;
 		}
 
 		$cache = [];
@@ -1776,14 +1730,10 @@ class ProcessImageLibrary extends Process {
 
 				if (!array_key_exists($pid, $cache)) {
 					$p = $pages->get($pid);
-					if ($p->id && $p->viewable()) {
-						$cache[$pid] = [
-							'title' => (string) $p->get('title|name'),
-							'edit'  => $p->editable() ? (string) $p->editUrl() : '',
-						];
-					} else {
-						$cache[$pid] = null;
-					}
+					$cache[$pid] = $p->id ? [
+						'title' => (string) $p->get('title|name'),
+						'edit'  => $p->editable() ? (string) $p->editUrl() : '',
+					] : null;
 				}
 				if (!$cache[$pid]) continue;
 
