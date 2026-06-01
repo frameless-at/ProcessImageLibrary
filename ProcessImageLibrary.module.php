@@ -1590,6 +1590,177 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Where-used preflight for the delete confirm dialog.
+	 *
+	 * Both pwimage plugins (CKEditor + TinyMCE) insert images via the
+	 * same backend selector and the same URL shape:
+	 *   {assets}/files/{pageId}/{basename}
+	 * which makes the reverse query an editor-agnostic SQL LIKE on
+	 * every contentType=html FieldtypeTextarea field's data column(s).
+	 * Multilang values live in suffixed data{langId} columns, so we
+	 * sweep every data* column of the field's table.
+	 *
+	 * Returns { ok, usage: { "pid:basename": [ { pageId, pageTitle,
+	 * editUrl, fieldName }, … ] } } so the client can render a
+	 * grouped reference list. Empty keys are omitted; the caller
+	 * treats absence as "no references found".
+	 */
+	public function ___executeUsage() {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input     = $this->wire('input');
+		$itemsJson = (string) $input->post('items');
+		$items     = json_decode($itemsJson, true);
+		if (!is_array($items) || !$items) {
+			return $this->jsonError('No items provided');
+		}
+
+		$clean = [];
+		foreach ($items as $item) {
+			if (!is_array($item)) continue;
+			$pid = (int) ($item['pageId'] ?? 0);
+			$bn  = basename((string) ($item['basename'] ?? ''));
+			if ($pid && $bn) $clean[] = ['pageId' => $pid, 'basename' => $bn];
+		}
+		if (!$clean) return $this->jsonError('No valid items');
+
+		$usage = $this->findImageReferences($clean);
+		return $this->jsonResponse(['ok' => true, 'usage' => $usage]);
+	}
+
+	/**
+	 * Reverse-lookup: which rich-text fields reference each of the
+	 * given (pageId, basename) pairs.
+	 *
+	 * One DB query per (textarea field × needle) pair — typical N is
+	 * small (one paintbrush selection × a handful of html textareas
+	 * on the site), so we keep it readable rather than fold needles
+	 * into a single OR query. Multilang data{langId} columns are
+	 * detected via SHOW COLUMNS and included in the OR list so an
+	 * image inserted in a non-default language still surfaces.
+	 *
+	 * Page titles + edit URLs are resolved once per ref-page-id via
+	 * a tiny in-method cache. Pages the current user can't view are
+	 * dropped silently — leaking titles via the delete dialog would
+	 * cross access boundaries.
+	 *
+	 * @param array<int, array{pageId:int, basename:string}> $items
+	 * @return array<string, array<int, array{pageId:int,pageTitle:string,editUrl:string,fieldName:string}>>
+	 */
+	protected function findImageReferences(array $items): array {
+		if (!$items) return [];
+
+		$needles = [];
+		$byKey   = [];
+		foreach ($items as $item) {
+			$pid = (int) $item['pageId'];
+			$bn  = (string) $item['basename'];
+			if (!$pid || $bn === '') continue;
+			$key = $pid . ':' . $bn;
+			$needles[$key] = '/' . $pid . '/' . $bn;
+			$byKey[$key]   = [];
+		}
+		if (!$needles) return [];
+
+		$db      = $this->wire('database');
+		$fields  = $this->wire('fields');
+		$pages   = $this->wire('pages');
+		$user    = $this->wire('user');
+
+		foreach ($fields as $field) {
+			if (!($field->type instanceof FieldtypeTextarea)) continue;
+			$contentType = (int) $field->get('contentType');
+			// 1 = HTML, 2 = HTML w/ image processing — both insert via
+			// pwimage so both can hold image references.
+			if ($contentType < FieldtypeTextarea::contentTypeHTML) continue;
+
+			$table = $db->escapeTable('field_' . $field->name);
+
+			try {
+				$colsStmt = $db->query("SHOW COLUMNS FROM `$table` LIKE 'data%'");
+				$cols = [];
+				while ($row = $colsStmt->fetch(\PDO::FETCH_ASSOC)) {
+					$col = (string) ($row['Field'] ?? '');
+					if ($col === '') continue;
+					$cols[] = $col;
+				}
+				$colsStmt->closeCursor();
+			} catch (\Throwable $e) {
+				continue;
+			}
+			if (!$cols) continue;
+
+			$whereCols = array_map(static function ($c) {
+				return '`' . $c . '` LIKE :needle';
+			}, $cols);
+			$sql = "SELECT DISTINCT pages_id FROM `$table` WHERE " . implode(' OR ', $whereCols);
+
+			foreach ($needles as $key => $needle) {
+				try {
+					$stmt = $db->prepare($sql);
+					$stmt->bindValue(':needle', '%' . $needle . '%', \PDO::PARAM_STR);
+					$stmt->execute();
+					while (($refId = $stmt->fetchColumn()) !== false) {
+						$byKey[$key][] = [
+							'refPageId'    => (int) $refId,
+							'refFieldName' => $field->name,
+						];
+					}
+					$stmt->closeCursor();
+				} catch (\Throwable $e) {
+					// Table missing / schema oddity — skip silently.
+				}
+			}
+		}
+
+		$cache = [];
+		foreach ($byKey as $key => $refs) {
+			$out  = [];
+			$seen = [];
+			foreach ($refs as $r) {
+				$pid = $r['refPageId'];
+				$fn  = $r['refFieldName'];
+				$dedup = $pid . ':' . $fn;
+				if (isset($seen[$dedup])) continue;
+				$seen[$dedup] = true;
+
+				if (!array_key_exists($pid, $cache)) {
+					$p = $pages->get($pid);
+					if ($p->id && $p->viewable()) {
+						$cache[$pid] = [
+							'title' => (string) $p->get('title|name'),
+							'edit'  => $p->editable() ? (string) $p->editUrl() : '',
+						];
+					} else {
+						$cache[$pid] = null;
+					}
+				}
+				if (!$cache[$pid]) continue;
+
+				$out[] = [
+					'pageId'    => $pid,
+					'pageTitle' => $cache[$pid]['title'],
+					'editUrl'   => $cache[$pid]['edit'],
+					'fieldName' => $fn,
+				];
+			}
+			$byKey[$key] = $out;
+		}
+
+		return $byKey;
+	}
+
+	/**
 	 * Core rename routine — shared by ___executeRename (single) and
 	 * ___executeBulk's basename branch (batch). Resolves placeholders
 	 * in $pattern using $n + the image's page / field context,
@@ -3398,6 +3569,7 @@ class ProcessImageLibrary extends Process {
 			'renameUrl'  => $this->wire('page')->url . 'rename/',
 			'replaceUrl' => $this->wire('page')->url . 'replace/',
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
+			'usageUrl'   => $this->wire('page')->url . 'usage/',
 			'widgetUrl'  => $this->wire('page')->url . 'widget/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
@@ -3478,6 +3650,12 @@ class ProcessImageLibrary extends Process {
 				'deleteOk'         => $this->_('Delete'),
 				'deleted'          => $this->_('Deleted %d'),
 				'deletePartial'    => $this->_('Deleted %d, %d failed'),
+				// Where-used preflight on the delete confirm dialog: the
+				// %d / %s placeholders stay literal in translations.
+				'usageHeading'     => $this->_('Still referenced in rich-text fields:'),
+				'usageScanning'    => $this->_('Checking references…'),
+				'usageFieldFmt'    => $this->_('“%1$s” · %2$s'),
+				'usageCountFmt'    => $this->_('used in %d page(s)'),
 				// Field-dropdown label when a template is active — %s is
 				// the template name. The JS swaps "All image fields" for
 				// this so the user isn't told "all" while non-template

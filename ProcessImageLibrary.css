@@ -269,6 +269,39 @@
 	font-size: 0.85em;
 	color: var(--pw-error-inline-text-color, #c33);
 }
+/* Where-used section in the delete-confirm dialog. Heading sits on
+   the same warning-tinted color so it reads as a "before you confirm"
+   beat; the page list itself stays neutral so it's scannable. */
+.ml-delete-confirm-usage {
+	margin-top: 0.75rem;
+	padding-top: 0.5rem;
+	border-top: 1px solid var(--pw-secondary-background, #eee);
+}
+.ml-delete-confirm-usage-h {
+	margin: 0 0 0.25rem;
+	font-size: 0.85em;
+	color: var(--pw-error-inline-text-color, #c33);
+}
+.ml-delete-confirm-usage-list,
+.ml-delete-confirm-usage-list ul {
+	margin: 0;
+	padding: 0 0 0 1.1rem;
+	font-size: 0.85em;
+	color: var(--pw-text-color, #333);
+	list-style: disc;
+}
+.ml-delete-confirm-usage-list {
+	max-height: 180px;
+	overflow: auto;
+}
+.ml-delete-confirm-usage-list > li > strong {
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-weight: 600;
+}
+.ml-delete-confirm-usage-list a {
+	color: inherit;
+	text-decoration: underline;
+}
 /* Drop-target highlight: the single row currently under the file
    drag pointer. Uses the same soft tint as inline-edit hover so the
    visual language matches the rest of the editor. */

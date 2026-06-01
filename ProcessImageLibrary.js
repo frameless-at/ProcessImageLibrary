@@ -1689,6 +1689,15 @@
 			}
 			dialog.appendChild(list);
 
+			// Where-used: rendered after the file list once the usage
+			// preflight resolves. Server scans every contentType=html
+			// FieldtypeTextarea via SQL LIKE on /{pageId}/{basename}, so
+			// CKEditor + TinyMCE references are caught uniformly.
+			var usageBlock = document.createElement('div');
+			usageBlock.className = 'ml-delete-confirm-usage';
+			usageBlock.hidden = true;
+			dialog.appendChild(usageBlock);
+
 			var warn = document.createElement('p');
 			warn.className = 'ml-delete-confirm-warn';
 			warn.textContent = labels.deleteWarn || 'This cannot be undone.';
@@ -1722,6 +1731,79 @@
 
 			dialog.showModal();
 			okBtn.focus();
+
+			fetchUsage(items).then(function (usage) {
+				renderUsageBlock(usageBlock, items, usage);
+			});
+		}
+
+		// POST the (pageId, basename) tuples to /usage/, return the
+		// { "pid:basename": [refs] } map. On any failure resolves to
+		// {} so the dialog still works — usage is advisory, not a gate.
+		function fetchUsage(items) {
+			if (!config.usageUrl) return Promise.resolve({});
+			var payload = items.map(function (i) {
+				return { pageId: i.pageId, basename: i.basename };
+			});
+			var fd = new FormData();
+			fd.append('items', JSON.stringify(payload));
+			appendCsrf(fd);
+			return fetch(config.usageUrl, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' },
+				body: fd
+			}).then(function (res) {
+				return res.json().catch(function () { return null; });
+			}).then(function (data) {
+				return (data && data.ok && data.usage) ? data.usage : {};
+			}).catch(function () { return {}; });
+		}
+
+		function renderUsageBlock(holder, items, usage) {
+			holder.textContent = '';
+			var groups = [];
+			items.forEach(function (it) {
+				var key  = it.pageId + ':' + it.basename;
+				var refs = usage[key] || [];
+				if (refs.length) groups.push({ item: it, refs: refs });
+			});
+			if (!groups.length) return;
+
+			var h = document.createElement('p');
+			h.className = 'ml-delete-confirm-usage-h';
+			h.textContent = labels.usageHeading || 'Still referenced in rich-text fields:';
+			holder.appendChild(h);
+
+			var ul = document.createElement('ul');
+			ul.className = 'ml-delete-confirm-usage-list';
+			groups.forEach(function (g) {
+				var li = document.createElement('li');
+				var b  = document.createElement('strong');
+				b.textContent = g.item.basename;
+				li.appendChild(b);
+				var sub = document.createElement('ul');
+				g.refs.forEach(function (r) {
+					var sli = document.createElement('li');
+					var fmt = labels.usageFieldFmt || '“%1$s” · %2$s';
+					var label = fmt.replace('%1$s', r.pageTitle).replace('%2$s', r.fieldName);
+					if (r.editUrl) {
+						var a = document.createElement('a');
+						a.href   = r.editUrl;
+						a.target = '_blank';
+						a.rel    = 'noopener';
+						a.textContent = label;
+						sli.appendChild(a);
+					} else {
+						sli.textContent = label;
+					}
+					sub.appendChild(sli);
+				});
+				li.appendChild(sub);
+				ul.appendChild(li);
+			});
+			holder.appendChild(ul);
+			holder.hidden = false;
 		}
 
 		// Build a (data-key → <tr>) map once so we don't have to escape

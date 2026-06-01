@@ -227,6 +227,8 @@ The trash icon hangs in the **top-left** corner of each thumb cell — opposite 
 
 A confirm dialog always intervenes — count in the header, first eight filenames listed inline, `+N more` if the batch is larger, plus a hard warning that the operation can't be undone. Successful rows fade out then drop from the DOM; the persistent selection set follows. Per-row failures (page no longer editable, file already gone) surface through the same result modal the bulk edits use.
 
+**Where-used preflight.** Before you confirm, the dialog runs a server-side scan over every `contentType=html` Textarea field and lists the pages that still embed each image in their rich text. CKEditor and TinyMCE both insert images through the same `pwimage` plugin with the deterministic URL shape `/site/assets/files/{pageId}/{basename}`, so a single SQL `LIKE` per field is editor-agnostic — multilang `data{langId}` columns are scanned too. Each reference is rendered as a link straight to that page's edit screen (new tab) so you can fix the embed before — or instead of — deleting. The list is advisory; you can still confirm the delete. Pages the current user can't view are silently omitted (no title leak).
+
 ## Export / Import
 
 Bottom of the page — a collapsible fieldset with Export buttons and an Import form.
