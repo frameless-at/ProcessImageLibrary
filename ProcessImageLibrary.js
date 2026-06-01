@@ -1691,12 +1691,17 @@
 					li.textContent = items[i].basename;
 					list.appendChild(li);
 				}
-				if (items.length > show) {
-					var more = document.createElement('li');
-					more.textContent = '… +' + (items.length - show) + ' more';
-					list.appendChild(more);
-				}
 				dialog.appendChild(list);
+				// "+N more" is a sibling of the <ul>, never an <li>
+				// inside it — otherwise the list's overflow scroll
+				// can hide the line behind the scrollbar (the whole
+				// point of the indicator is to STAY visible).
+				if (items.length > show) {
+					var more = document.createElement('p');
+					more.className = 'ml-delete-confirm-list-more';
+					more.textContent = '… +' + (items.length - show) + ' more';
+					dialog.appendChild(more);
+				}
 			}
 
 			// One slot below a divider that resolves to EITHER the

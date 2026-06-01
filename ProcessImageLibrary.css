@@ -267,6 +267,13 @@
 	max-height: 180px;
 	overflow: auto;
 }
+.ml-delete-confirm-list-more {
+	margin: 0.25rem 0 0;
+	padding-left: 1.25rem;
+	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-size: 0.95em;
+	color: var(--pw-muted-color, #666);
+}
 /* Single-file delete — bullet on a one-item list is daft. Render
    the basename indented as a code-style line instead. */
 .ml-delete-confirm-solo {
