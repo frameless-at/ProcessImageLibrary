@@ -1674,25 +1674,36 @@
 				: (labels.deleteManyIntro || 'The following files will be permanently removed:');
 			dialog.appendChild(intro);
 
-			var list = document.createElement('ul');
-			list.className = 'ml-delete-confirm-list';
-			var show = Math.min(items.length, 8);
-			for (var i = 0; i < show; i++) {
-				var li = document.createElement('li');
-				li.textContent = items[i].basename;
-				list.appendChild(li);
+			// One file → render the basename inline as a code block,
+			// no list bullet (a single-item bulleted list looks daft).
+			// Many files → bulleted list, capped at 8 with "+N more".
+			if (items.length === 1) {
+				var solo = document.createElement('p');
+				solo.className = 'ml-delete-confirm-solo';
+				solo.textContent = items[0].basename;
+				dialog.appendChild(solo);
+			} else {
+				var list = document.createElement('ul');
+				list.className = 'ml-delete-confirm-list';
+				var show = Math.min(items.length, 8);
+				for (var i = 0; i < show; i++) {
+					var li = document.createElement('li');
+					li.textContent = items[i].basename;
+					list.appendChild(li);
+				}
+				if (items.length > show) {
+					var more = document.createElement('li');
+					more.textContent = '… +' + (items.length - show) + ' more';
+					list.appendChild(more);
+				}
+				dialog.appendChild(list);
 			}
-			if (items.length > show) {
-				var more = document.createElement('li');
-				more.textContent = '… +' + (items.length - show) + ' more';
-				list.appendChild(more);
-			}
-			dialog.appendChild(list);
 
 			// Where-used: rendered after the file list once the usage
-			// preflight resolves. Server scans every contentType=html
-			// FieldtypeTextarea via SQL LIKE on /{pageId}/{basename}, so
-			// CKEditor + TinyMCE references are caught uniformly.
+			// preflight resolves. Server runs $pages->findIDs over every
+			// FieldtypeTextarea with the `%=` substring selector so
+			// CKEditor + TinyMCE references are caught uniformly,
+			// multilang + repeater scopes included.
 			var usageBlock = document.createElement('div');
 			usageBlock.className = 'ml-delete-confirm-usage';
 			usageBlock.hidden = true;
@@ -1777,33 +1788,52 @@
 
 			var ul = document.createElement('ul');
 			ul.className = 'ml-delete-confirm-usage-list';
-			groups.forEach(function (g) {
-				var li = document.createElement('li');
-				var b  = document.createElement('strong');
-				b.textContent = g.item.basename;
-				li.appendChild(b);
-				var sub = document.createElement('ul');
-				g.refs.forEach(function (r) {
-					var sli = document.createElement('li');
-					var fmt = labels.usageFieldFmt || '“%1$s” · %2$s';
-					var label = fmt.replace('%1$s', r.pageTitle).replace('%2$s', r.fieldName);
-					if (r.editUrl) {
-						var a = document.createElement('a');
-						a.href   = r.editUrl;
-						a.target = '_blank';
-						a.rel    = 'noopener';
-						a.textContent = label;
-						sli.appendChild(a);
-					} else {
-						sli.textContent = label;
-					}
-					sub.appendChild(sli);
+
+			// Single-item delete → the dialog already names the file
+			// above, so the refs render as a flat list with no per-file
+			// header (otherwise the basename appears twice for no
+			// reason). Multi-item delete keeps the per-file grouping so
+			// the editor can tell which broadcast target carries which
+			// embed.
+			if (items.length === 1) {
+				groups[0].refs.forEach(function (r) {
+					var li = document.createElement('li');
+					li.appendChild(buildUsageRef(r));
+					ul.appendChild(li);
 				});
-				li.appendChild(sub);
-				ul.appendChild(li);
-			});
+			} else {
+				ul.classList.add('ml-delete-confirm-usage-list-grouped');
+				groups.forEach(function (g) {
+					var li = document.createElement('li');
+					var b  = document.createElement('strong');
+					b.textContent = g.item.basename;
+					li.appendChild(b);
+					var sub = document.createElement('ul');
+					g.refs.forEach(function (r) {
+						var sli = document.createElement('li');
+						sli.appendChild(buildUsageRef(r));
+						sub.appendChild(sli);
+					});
+					li.appendChild(sub);
+					ul.appendChild(li);
+				});
+			}
 			holder.appendChild(ul);
 			holder.hidden = false;
+		}
+
+		function buildUsageRef(r) {
+			var fmt = labels.usageFieldFmt || '“%1$s” · %2$s';
+			var label = fmt.replace('%1$s', r.pageTitle).replace('%2$s', r.fieldName);
+			if (r.editUrl) {
+				var a = document.createElement('a');
+				a.href   = r.editUrl;
+				a.target = '_blank';
+				a.rel    = 'noopener';
+				a.textContent = label;
+				return a;
+			}
+			return document.createTextNode(label);
 		}
 
 		// Build a (data-key → <tr>) map once so we don't have to escape
