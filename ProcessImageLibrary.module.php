@@ -1640,8 +1640,9 @@ class ProcessImageLibrary extends Process {
 		}
 		if (!$clean) return $this->jsonError('No valid items');
 
-		$usage = $this->findImageReferences($clean);
-		return $this->jsonResponse(['ok' => true, 'usage' => $usage]);
+		$debug = [];
+		$usage = $this->findImageReferences($clean, $debug);
+		return $this->jsonResponse(['ok' => true, 'usage' => $usage, '_debug' => $debug]);
 	}
 
 	/**
@@ -1663,7 +1664,7 @@ class ProcessImageLibrary extends Process {
 	 * @param array<int, array{pageId:int, basename:string}> $items
 	 * @return array<string, array<int, array{pageId:int,pageTitle:string,editUrl:string,fieldName:string}>>
 	 */
-	protected function findImageReferences(array $items): array {
+	protected function findImageReferences(array $items, array &$debug = []): array {
 		if (!$items) return [];
 
 		$needles = [];
@@ -1692,6 +1693,9 @@ class ProcessImageLibrary extends Process {
 		$pages   = $this->wire('pages');
 		$user    = $this->wire('user');
 
+		$debug['needles'] = $needles;
+		$debug['fields']  = [];
+
 		foreach ($fields as $field) {
 			if (!($field->type instanceof FieldtypeTextarea)) continue;
 			// We deliberately don't filter on contentType: CKEditor /
@@ -1702,6 +1706,7 @@ class ProcessImageLibrary extends Process {
 			// scanning every textarea is a non-issue performance-wise.
 
 			$table = $db->escapeTable('field_' . $field->name);
+			$entry = ['field' => $field->name, 'fieldType' => get_class($field->type), 'cols' => [], 'hits' => []];
 
 			try {
 				$colsStmt = $db->query("SHOW COLUMNS FROM `$table` LIKE 'data%'");
@@ -1712,10 +1717,16 @@ class ProcessImageLibrary extends Process {
 					$cols[] = $col;
 				}
 				$colsStmt->closeCursor();
+				$entry['cols'] = $cols;
 			} catch (\Throwable $e) {
+				$entry['error'] = 'SHOW COLUMNS: ' . $e->getMessage();
+				$debug['fields'][] = $entry;
 				continue;
 			}
-			if (!$cols) continue;
+			if (!$cols) {
+				$debug['fields'][] = $entry;
+				continue;
+			}
 
 			// Positional `?` placeholders rather than a single named
 			// `:needle` reused across the OR list — WireDatabasePDO
@@ -1734,17 +1745,22 @@ class ProcessImageLibrary extends Process {
 					$stmt = $db->prepare($sql);
 					$params = array_fill(0, count($cols), '%' . $needle . '%');
 					$stmt->execute($params);
+					$hits = [];
 					while (($refId = $stmt->fetchColumn()) !== false) {
+						$hits[] = (int) $refId;
 						$byKey[$key][] = [
 							'refPageId'    => (int) $refId,
 							'refFieldName' => $field->name,
 						];
 					}
 					$stmt->closeCursor();
+					if ($hits) $entry['hits'][$key] = $hits;
 				} catch (\Throwable $e) {
-					// Table missing / schema oddity — skip silently.
+					$entry['error'] = 'LIKE: ' . $e->getMessage();
 				}
 			}
+			$entry['sql'] = $sql;
+			$debug['fields'][] = $entry;
 		}
 
 		$cache = [];
