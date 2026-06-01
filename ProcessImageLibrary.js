@@ -1699,7 +1699,17 @@
 				dialog.appendChild(list);
 			}
 
-			// Where-used: rendered after the file list once the usage
+			// "This cannot be undone." sits tight to the file chip so
+			// the no-undo beat stays glued to the "will be permanently
+			// removed" statement. The where-used block lands AFTER
+			// it as a separate advisory ("by the way, here's what
+			// else breaks") with its own visual separator.
+			var warn = document.createElement('p');
+			warn.className = 'ml-delete-confirm-warn';
+			warn.textContent = labels.deleteWarn || 'This cannot be undone.';
+			dialog.appendChild(warn);
+
+			// Where-used: rendered after the warning once the usage
 			// preflight resolves. Server runs $pages->findIDs over every
 			// FieldtypeTextarea with the `%=` substring selector so
 			// CKEditor + TinyMCE references are caught uniformly,
@@ -1708,11 +1718,6 @@
 			usageBlock.className = 'ml-delete-confirm-usage';
 			usageBlock.hidden = true;
 			dialog.appendChild(usageBlock);
-
-			var warn = document.createElement('p');
-			warn.className = 'ml-delete-confirm-warn';
-			warn.textContent = labels.deleteWarn || 'This cannot be undone.';
-			dialog.appendChild(warn);
 
 			var footer = document.createElement('footer');
 			var cancelBtn = document.createElement('button');

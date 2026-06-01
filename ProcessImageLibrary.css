@@ -276,7 +276,7 @@
 	display: inline-block;
 }
 .ml-delete-confirm-warn {
-	margin-top: 0.75rem;
+	margin-top: 0.4rem;
 	font-size: 0.95em;
 	font-weight: 600;
 	color: var(--pw-error-inline-text-color, #c33);
