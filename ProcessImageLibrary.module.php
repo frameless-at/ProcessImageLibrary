@@ -1594,9 +1594,15 @@ class ProcessImageLibrary extends Process {
 	 *
 	 * Both pwimage plugins (CKEditor + TinyMCE) insert images via the
 	 * same backend selector and the same URL shape:
-	 *   {assets}/files/{pageId}/{basename}
+	 *   {assets}/files/{pageId}/{stem}.{ext}     (original)
+	 *   {assets}/files/{pageId}/{stem}.WxH.{ext} (resized variation)
+	 *   {assets}/files/{pageId}/{stem}.WxH-…{ext} (cropped / hidpi)
 	 * which makes the reverse query an editor-agnostic SQL LIKE on
 	 * every contentType=html FieldtypeTextarea field's data column(s).
+	 * We match on `/{pageId}/{stem}.` so the same scan catches both
+	 * the original AND every PW-derived variation — picking the user-
+	 * selected size at insert time would otherwise be the most common
+	 * way for a reference to look "different" than the stored basename.
 	 * Multilang values live in suffixed data{langId} columns, so we
 	 * sweep every data* column of the field's table.
 	 *
@@ -1666,8 +1672,17 @@ class ProcessImageLibrary extends Process {
 			$pid = (int) $item['pageId'];
 			$bn  = (string) $item['basename'];
 			if (!$pid || $bn === '') continue;
+			// Stem only — pwimage typically inserts a sized variation
+			// (e.g. foo.500x300.jpg) rather than the original foo.jpg,
+			// so anchoring on `/pid/stem.` catches the original AND
+			// every WxH / WxH-suffix / hidpi variation in one needle.
+			// The trailing literal `.` guards against stem-prefix
+			// collisions like `foo2.jpg` matching a `foo.jpg` needle.
+			$dot  = strrpos($bn, '.');
+			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			if ($stem === '') continue;
 			$key = $pid . ':' . $bn;
-			$needles[$key] = '/' . $pid . '/' . $bn;
+			$needles[$key] = '/' . $pid . '/' . $stem . '.';
 			$byKey[$key]   = [];
 		}
 		if (!$needles) return [];
