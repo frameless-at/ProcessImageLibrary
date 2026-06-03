@@ -686,13 +686,11 @@ textarea.ml-cell-input {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 32px;
-	height: 32px;
+	padding: 3px;
 	margin: 0;
-	border: 1px solid var(--pw-border-color, #ccc);
+	border: 1px solid rgba(0, 0, 0, 0.4);
 	border-radius: 3px;
-	background: var(--pw-inputs-background, #fff);
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+	background: rgba(255, 255, 255, 0.6);
 	cursor: pointer;
 	opacity: 0;
 	transition: opacity 0.12s ease-out;
