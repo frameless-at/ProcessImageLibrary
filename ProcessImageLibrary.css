@@ -674,15 +674,6 @@ textarea.ml-cell-input {
 	outline: 2px solid var(--pw-main-color, #5b8cd6);
 	outline-offset: -2px;
 }
-/* Masonry tiles have no selection checkbox (it makes no sense in the
-   gallery) — replace stays top-right and delete moves to bottom-right
-   so the two actions never collide. */
-.ml-card .ml-delete-btn {
-	top: auto;
-	left: auto;
-	bottom: 4px;
-	right: 4px;
-}
 
 /* Variations cell renders just a count — right-align like other
    numeric cells for quick at-a-glance scanning. */
