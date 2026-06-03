@@ -830,14 +830,12 @@ class ProcessImageLibrary extends Process {
 			$out .= '<div class="ml-row ml-card" style="grid-row-end:span ' . $span . '"' . $rowAttrs . '>';
 
 			// Selection checkbox — same class/data-key as the table so the
-			// bulk machinery picks it up. Wrapped in a white chip (matching
-			// the replace / delete buttons) so it reads as a control on top
-			// of any image. Shown on hover / when checked.
+			// bulk machinery picks it up. Styled directly (no wrapper box):
+			// a semi-transparent white face + darker border so it stays
+			// visible on any image. Shown on hover / when checked.
 			$selectLabel = $san->entities(sprintf($this->_('Select %s'), (string) $row['basename']));
-			$out .= '<label class="ml-card-select-chip" title="' . $selectLabel . '">'
-				. '<input type="checkbox" class="uk-checkbox ml-select-row ml-card-select" data-key="'
-				. $san->entities($selKey) . '" aria-label="' . $selectLabel . '">'
-				. '</label>';
+			$out .= '<input type="checkbox" class="uk-checkbox ml-select-row ml-card-select" data-key="'
+				. $san->entities($selKey) . '" title="' . $selectLabel . '" aria-label="' . $selectLabel . '">';
 
 			if ($editable) {
 				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(

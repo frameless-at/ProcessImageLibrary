@@ -674,39 +674,39 @@ textarea.ml-cell-input {
 	outline: 2px solid var(--pw-main-color, #5b8cd6);
 	outline-offset: -2px;
 }
-/* Selection checkbox — wrapped in a white chip (same footprint as the
-   replace / delete buttons) pinned to the top-left corner, so it reads
-   as a control over any image. Replace stays top-right and delete moves
-   to bottom-right, so the three controls never collide. */
-.ml-card-select-chip {
+/* Selection checkbox — pinned to the top-left corner, styled directly
+   (no wrapper box): a semi-transparent white face + slightly darker
+   border so it stays visible over any image; primary fill + white tick
+   when checked. Replace stays top-right and delete moves to bottom-
+   right, so the three controls never collide. */
+.ml-card-select {
 	position: absolute;
 	top: 4px;
 	left: 4px;
 	z-index: 2;
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	padding: 3px;
+	-webkit-appearance: none;
+	appearance: none;
+	width: 18px;
+	height: 18px;
 	margin: 0;
-	border: 1px solid rgba(0, 0, 0, 0.4);
+	border: 1px solid rgba(0, 0, 0, 0.45);
 	border-radius: 3px;
 	background: rgba(255, 255, 255, 0.6);
 	cursor: pointer;
 	opacity: 0;
 	transition: opacity 0.12s ease-out;
 }
-.ml-card-select {
-	width: 18px;
-	height: 18px;
-	margin: 0;
-	cursor: pointer;
-	accent-color: var(--pw-main-color, #5b8cd6);
+.ml-card-select:checked {
+	background: var(--pw-main-color, #5b8cd6)
+		url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round' d='M3 8.5l3.2 3.2L13 4.5'/%3E%3C/svg%3E")
+		center / 12px no-repeat;
+	border-color: var(--pw-main-color, #5b8cd6);
 }
 /* Reveal on hover / keyboard focus, and keep it visible whenever the
    tile is selected so the selection state stays obvious at a glance. */
-.ml-card:hover .ml-card-select-chip,
-.ml-card:focus-within .ml-card-select-chip,
-.ml-card-select-chip:has(.ml-card-select:checked) {
+.ml-card:hover .ml-card-select,
+.ml-card:focus-within .ml-card-select,
+.ml-card-select:checked {
 	opacity: 1;
 }
 /* Selected tiles get a primary-colour ring so the selection reads even
