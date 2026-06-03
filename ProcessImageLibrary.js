@@ -879,6 +879,12 @@
 					var oldStem = td.dataset.stem || '';
 					if (newStem === '' || newStem === oldStem) { teardown(); return; }
 					teardown();
+					// Where-used preflight: if any page still embeds the file(s)
+					// by the current basename, warn before committing the rename.
+					var renameItems = batch
+						? selectionItems()
+						: [{ pageId: td.dataset.pageId, fieldName: td.dataset.field, basename: td.dataset.basename }];
+					var doRename = function () {
 					// Optimistic update — resolve placeholders on the
 					// originating cell now. For batch rename the per-row
 					// optimistic update + resolution happens below
@@ -1049,6 +1055,9 @@
 						td.title = (err && err.message) || labels.error || 'Network error';
 						flashCell(td, false);
 					});
+					return;
+					};
+					confirmRename(renameItems, doRename);
 					return;
 				}
 
@@ -1847,6 +1856,54 @@
 				return a;
 			}
 			return document.createTextNode(label);
+		}
+
+		// Where-used preflight for rename (advisory, mirrors the delete
+		// confirm). If any item is still embedded by its current basename,
+		// show a confirm dialog listing the pages so the editor knows the
+		// rename will break those embeds; with no embeds it proceeds
+		// straight away (no dialog).
+		function confirmRename(items, onConfirm) {
+			fetchUsage(items).then(function (usage) {
+				var hasRefs = items.some(function (it) {
+					return (usage[it.pageId + ':' + it.basename] || []).length > 0;
+				});
+				if (!hasRefs) { onConfirm(); return; }
+
+				var dialog = document.createElement('dialog');
+				dialog.className = 'ml-delete-confirm';
+
+				var header = document.createElement('header');
+				header.textContent = labels.renameUsageTitle
+					|| 'Heads up — still embedded in other pages';
+				dialog.appendChild(header);
+
+				var holder = document.createElement('div');
+				holder.className = 'ml-delete-confirm-usage';
+				dialog.appendChild(holder);
+				renderUsageBlock(holder, items, usage);
+
+				var footer = document.createElement('footer');
+				var cancelBtn = document.createElement('button');
+				cancelBtn.type = 'button';
+				cancelBtn.className = 'uk-button uk-button-secondary';
+				cancelBtn.textContent = labels.cancel || 'Cancel';
+				var okBtn = document.createElement('button');
+				okBtn.type = 'button';
+				okBtn.className = 'uk-button uk-button-primary';
+				okBtn.textContent = labels.renameAnyway || 'Rename anyway';
+				footer.appendChild(cancelBtn);
+				footer.appendChild(okBtn);
+				dialog.appendChild(footer);
+
+				document.body.appendChild(dialog);
+				function cleanup() { if (dialog.open) dialog.close(); dialog.remove(); }
+				cancelBtn.addEventListener('click', cleanup);
+				dialog.addEventListener('close', function () { dialog.remove(); });
+				okBtn.addEventListener('click', function () { cleanup(); onConfirm(); });
+				dialog.showModal();
+				okBtn.focus();
+			});
 		}
 
 		// Build a (data-key → <tr>) map once so we don't have to escape
