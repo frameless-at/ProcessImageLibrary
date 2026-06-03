@@ -807,12 +807,6 @@ class ProcessImageLibrary extends Process {
 				md5((string) $row['basename'])
 			);
 
-			$selKey = $this->rowKey(
-				(int) $row['pageId'],
-				(string) $row['fieldName'],
-				(string) $row['basename']
-			);
-
 			// Tile identity attrs mirror the table <tr> so replace /
 			// delete / drag-drop resolve the same target.
 			$rowAttrs = '';
@@ -828,14 +822,6 @@ class ProcessImageLibrary extends Process {
 				);
 			}
 			$out .= '<div class="ml-row ml-card" style="grid-row-end:span ' . $span . '"' . $rowAttrs . '>';
-
-			// Selection checkbox — same class/data-key as the table so the
-			// bulk machinery picks it up. Styled directly (no wrapper box):
-			// a semi-transparent white face + darker border so it stays
-			// visible on any image. Shown on hover / when checked.
-			$selectLabel = $san->entities(sprintf($this->_('Select %s'), (string) $row['basename']));
-			$out .= '<input type="checkbox" class="uk-checkbox ml-select-row ml-card-select" data-key="'
-				. $san->entities($selKey) . '" title="' . $selectLabel . '" aria-label="' . $selectLabel . '">';
 
 			if ($editable) {
 				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(

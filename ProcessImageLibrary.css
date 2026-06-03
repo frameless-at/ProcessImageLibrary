@@ -674,33 +674,9 @@ textarea.ml-cell-input {
 	outline: 2px solid var(--pw-main-color, #5b8cd6);
 	outline-offset: -2px;
 }
-/* Selection checkbox — the exact same .uk-checkbox the table rows use
-   (no custom styling); we only pin it to the top-left corner and
-   reveal it on hover / when checked. Replace stays top-right and delete
-   moves to bottom-right, so the three controls never collide. */
-.ml-card-select {
-	position: absolute;
-	top: 4px;
-	left: 4px;
-	z-index: 2;
-	margin: 0;
-	cursor: pointer;
-	opacity: 0;
-	transition: opacity 0.12s ease-out;
-}
-/* Reveal on hover / keyboard focus, and keep it visible whenever the
-   tile is selected so the selection state stays obvious at a glance. */
-.ml-card:hover .ml-card-select,
-.ml-card:focus-within .ml-card-select,
-.ml-card-select:checked {
-	opacity: 1;
-}
-/* Selected tiles get a primary-colour ring so the selection reads even
-   without hovering each chip. */
-.ml-card:has(.ml-card-select:checked) .ml-cell-thumb {
-	outline: 3px solid var(--pw-main-color, #5b8cd6);
-	outline-offset: -3px;
-}
+/* Masonry tiles have no selection checkbox (it makes no sense in the
+   gallery) — replace stays top-right and delete moves to bottom-right
+   so the two actions never collide. */
 .ml-card .ml-delete-btn {
 	top: auto;
 	left: auto;
