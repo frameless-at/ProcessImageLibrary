@@ -65,6 +65,12 @@ class ProcessImageLibrary extends Process {
 	const THUMB_SCALE_MAX     = 2.5;
 	const THUMB_SCALE_DEFAULT = 1.0;
 
+	// Result layout. 'table' is the default data-grid; 'masonry' is a
+	// thumbnail-only gallery (click a tile to open the per-image editor).
+	// Persisted per-user in $user->meta alongside the other view prefs.
+	const VIEW_TABLE   = 'table';
+	const VIEW_MASONRY = 'masonry';
+
 	/**
 	 * Admin-configurable thumbnail dimensions, JPEG quality and
 	 * crop behaviour, used for the per-row thumb in the table view.
@@ -221,6 +227,7 @@ class ProcessImageLibrary extends Process {
 		$pageSize = null;
 		$bookmarks = [];
 		$thumbScale = null;
+		$viewMode = null;
 		if (is_array($raw)) {
 			$cols = isset($raw['columns']) && is_array($raw['columns']) ? $raw['columns'] : [];
 			if (isset($cols['visible']) && is_array($cols['visible'])) {
@@ -254,13 +261,52 @@ class ProcessImageLibrary extends Process {
 					$thumbScale = $ts;
 				}
 			}
+			if (isset($raw['viewMode']) && in_array($raw['viewMode'], [self::VIEW_TABLE, self::VIEW_MASONRY], true)) {
+				$viewMode = (string) $raw['viewMode'];
+			}
 		}
 		return [
 			'columns'    => ['visible' => $visible, 'order' => $order],
 			'pageSize'   => $pageSize,
 			'bookmarks'  => $bookmarks,
 			'thumbScale' => $thumbScale,
+			'viewMode'   => $viewMode,
 		];
+	}
+
+	/**
+	 * Effective result layout. An explicit ?view= request param wins and
+	 * is persisted to the user's prefs (so the choice survives a clean
+	 * reload on any device); otherwise the stored pref, else the table
+	 * default. Reading the param here keeps the JS toggle race-free — it
+	 * just navigates the AJAX endpoint with ?view=… and the server both
+	 * honours and remembers it in one round trip.
+	 */
+	protected function getViewMode(): string {
+		$req = (string) $this->wire('input')->get('view');
+		if (in_array($req, [self::VIEW_TABLE, self::VIEW_MASONRY], true)) {
+			$prefs = $this->getUserPrefs();
+			if (($prefs['viewMode'] ?? null) !== $req) {
+				$this->persistViewMode($req);
+			}
+			return $req;
+		}
+		$stored = $this->getUserPrefs()['viewMode'];
+		return ($stored === self::VIEW_MASONRY) ? self::VIEW_MASONRY : self::VIEW_TABLE;
+	}
+
+	/**
+	 * Write just the view mode back into the merged prefs blob without
+	 * disturbing the other keys. Mirrors the read/merge/write the
+	 * executeUserPrefs endpoint does, but for the single in-request
+	 * ?view= toggle.
+	 */
+	protected function persistViewMode(string $mode): void {
+		if (!in_array($mode, [self::VIEW_TABLE, self::VIEW_MASONRY], true)) return;
+		$raw = $this->wire('user')->meta('imageLibraryPrefs');
+		if (!is_array($raw)) $raw = [];
+		$raw['viewMode'] = $mode;
+		$this->wire('user')->meta('imageLibraryPrefs', $raw);
 	}
 
 	/**
@@ -694,10 +740,127 @@ class ProcessImageLibrary extends Process {
 		$slice      = $this->hydrateSlice($slice);
 
 		$pager = $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir, $pageSize);
+
+		// Masonry is a thumbnail-only gallery — no inline-editable cells,
+		// so it skips the tag datalists (autocomplete is an editor-only
+		// concern) and the per-column custom config the table needs.
+		if ($this->getViewMode() === self::VIEW_MASONRY) {
+			return $pager
+				. $this->renderMasonry($slice)
+				. $pager;
+		}
+
 		return $pager
 			. $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
 			. $this->renderTagDatalists($usedTags)
 			. $pager;
+	}
+
+	/**
+	 * Masonry / gallery layout: a CSS-columns grid of thumbnail tiles,
+	 * nothing else. Each editable tile carries the SAME identity attrs +
+	 * .ml-cell-thumb element as a table row, so the existing JS handlers
+	 * (thumb-click → image editor, replace, delete, drag-drop, bulk
+	 * selection) work unchanged via their shared .ml-row / class-based
+	 * delegation. Tiles for non-editable host pages are display-only.
+	 */
+	protected function renderMasonry(array $slice): string {
+		$san = $this->wire('sanitizer');
+		$thumb = $this->getThumbDims();
+
+		if (!$slice) {
+			return '<p class="ml-empty">'
+				. $san->entities($this->_('No images match the current filters.')) . '</p>';
+		}
+
+		$out = '<div class="ml-masonry">';
+		foreach ($slice as $row) {
+			$editable = !empty($row['pageEditUrl']);
+
+			$editAttrs = sprintf(
+				'data-page-id="%d" data-field="%s" data-basename="%s" data-file-hash="%s"',
+				(int) $row['pageId'],
+				$san->entities((string) $row['fieldName']),
+				$san->entities((string) $row['basename']),
+				md5((string) $row['basename'])
+			);
+
+			$selKey = $this->rowKey(
+				(int) $row['pageId'],
+				(string) $row['fieldName'],
+				(string) $row['basename']
+			);
+
+			// Tile identity attrs mirror the table <tr> so replace /
+			// delete / drag-drop resolve the same target.
+			$rowAttrs = '';
+			if ($editable) {
+				$rowAttrs = sprintf(
+					' data-page-id="%d" data-field="%s" data-basename="%s"'
+					. ' data-page-title="%s" data-page-name="%s"',
+					(int) $row['pageId'],
+					$san->entities((string) $row['fieldName']),
+					$san->entities((string) $row['basename']),
+					$san->entities((string) ($row['pageTitle'] ?? '')),
+					$san->entities((string) ($row['pageName']  ?? ''))
+				);
+			}
+			$out .= '<div class="ml-row ml-card"' . $rowAttrs . '>';
+
+			// Selection checkbox — same class/data-key as the table so the
+			// bulk machinery picks it up. Shown on hover / when checked.
+			$out .= '<input type="checkbox" class="uk-checkbox ml-select-row ml-card-select" data-key="'
+				. $san->entities($selKey) . '">';
+
+			if ($editable) {
+				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+					$this->_('Open editor for %s'), (string) $row['basename']
+				)));
+				$thumbAttrs = ' ' . $editAttrs . ' role="button" tabindex="0"' . $thumbAria;
+			} else {
+				$thumbAttrs = '';
+			}
+			$out .= '<div class="ml-cell-thumb"' . $thumbAttrs . '>';
+			if (!empty($row['thumbUrl'])) {
+				$srcW = (int) ($row['thumbWidth']  ?? 0);
+				$srcH = (int) ($row['thumbHeight'] ?? 0);
+				if ($thumb['keepRatio']) {
+					$longer = (int) $thumb['longerSide'];
+					if ($srcW >= $srcH) {
+						$dispW = $srcW > 0 ? min($longer, $srcW) : $longer;
+						$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
+					} else {
+						$dispH = $srcH > 0 ? min($longer, $srcH) : $longer;
+						$dispW = $srcH > 0 ? (int) round($srcW * $dispH / $srcH) : $srcW;
+					}
+					$cls = 'ml-thumb';
+				} else {
+					$dispW = (int) $thumb['width'];
+					$dispH = (int) $thumb['height'];
+					$cls   = 'ml-thumb ml-thumb-crop';
+				}
+				$out .= '<img class="' . $cls . '"'
+					. ' src="' . $san->entities($row['thumbUrl']) . '"'
+					. ' alt="' . $san->entities($row['basename']) . '"'
+					. ' loading="lazy"'
+					. ' width="' . $dispW . '"'
+					. ' height="' . $dispH . '">';
+			}
+			if ($editable) {
+				$replaceLabel = $san->entities(sprintf($this->_('Replace %s'), (string) $row['basename']));
+				$deleteLabel  = $san->entities(sprintf($this->_('Delete %s'),  (string) $row['basename']));
+				$out .= '<button type="button" class="ml-replace-btn"'
+					. ' title="' . $replaceLabel . '" aria-label="' . $replaceLabel . '">'
+					. '<i class="fa fa-upload" aria-hidden="true"></i></button>';
+				$out .= '<button type="button" class="ml-delete-btn"'
+					. ' title="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
+					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
+			}
+			$out .= '</div>'; // .ml-cell-thumb
+			$out .= '</div>'; // .ml-card
+		}
+		$out .= '</div>';
+		return $out;
 	}
 
 	/**
@@ -2320,6 +2483,7 @@ class ProcessImageLibrary extends Process {
 			'pageSize'   => null,
 			'bookmarks'  => [],
 			'thumbScale' => null,
+			'viewMode'   => null,
 		];
 		if (isset($data['columns']) && is_array($data['columns'])) {
 			$cols = $data['columns'];
@@ -2355,6 +2519,9 @@ class ProcessImageLibrary extends Process {
 			if ($ts >= self::THUMB_SCALE_MIN && $ts <= self::THUMB_SCALE_MAX) {
 				$clean['thumbScale'] = round($ts, 2);
 			}
+		}
+		if (isset($data['viewMode']) && in_array($data['viewMode'], [self::VIEW_TABLE, self::VIEW_MASONRY], true)) {
+			$clean['viewMode'] = (string) $data['viewMode'];
 		}
 
 		$this->wire('user')->meta('imageLibraryPrefs', $clean);
@@ -4218,7 +4385,7 @@ class ProcessImageLibrary extends Process {
 					$san->entities((string) ($row['pageName']  ?? ''))
 				);
 			}
-			$out .= '<tr' . $rowAttrs . '>';
+			$out .= '<tr class="ml-row"' . $rowAttrs . '>';
 
 			$out .= '<td class="ml-cell-select">'
 				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
@@ -4593,12 +4760,38 @@ class ProcessImageLibrary extends Process {
 		// init; the JS reads them.
 		$sizeLabel = $san->entities($this->_('Thumbnail size'));
 		$out .= '<span class="ml-thumb-size" title="' . $sizeLabel . '">'
-			. '<i class="fa fa-picture-o" aria-hidden="true"></i>'
 			. '<span class="ml-thumb-size-slider"'
 			. ' data-min="' . self::THUMB_SCALE_MIN . '" data-max="' . self::THUMB_SCALE_MAX . '" data-step="0.1"'
 			. ' data-value="' . rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.') . '"'
 			. ' aria-label="' . $sizeLabel . '"></span>'
 			. '</span>';
+
+		// View-mode toggle — table (data grid) vs masonry (thumbnail
+		// gallery). Anchors carry a ?view= URL so the choice is bookmark-
+		// /reload-safe and degrades without JS; the JS intercepts the
+		// click and AJAX-swaps the results in place. The server both
+		// honours and persists the chosen mode (see getViewMode()).
+		$currentView = $this->getViewMode();
+		$viewBase = $this->buildUrl($filters, $page, $sort, $dir, $pageSize);
+		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
+		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
+		$views = [
+			[self::VIEW_TABLE,   'fa-table', $this->_('Table view')],
+			[self::VIEW_MASONRY, 'fa-th',    $this->_('Masonry view')],
+		];
+		$out .= '<span class="ml-view-toggle" role="group" aria-label="'
+			. $san->entities($this->_('Result layout')) . '">';
+		foreach ($views as [$mode, $icon, $label]) {
+			$active = ($mode === $currentView);
+			$lbl = $san->entities($label);
+			$out .= '<a class="ml-view-btn' . ($active ? ' ml-view-active' : '') . '"'
+				. ' href="' . $san->entities($viewBase . $viewSep . 'view=' . $mode) . '"'
+				. ' data-view="' . $mode . '"'
+				. ' title="' . $lbl . '" aria-label="' . $lbl . '"'
+				. ($active ? ' aria-current="true"' : '') . '>'
+				. '<i class="fa ' . $icon . '" aria-hidden="true"></i></a>';
+		}
+		$out .= '</span>';
 		// Per-page picker. Client-side JS intercepts the change event,
 		// rewrites the URL and triggers the AJAX refresh; non-JS users
 		// see the picker but it requires a manual reload to take effect.
@@ -4616,12 +4809,16 @@ class ProcessImageLibrary extends Process {
 		// the anchor itself carries the accessible name via
 		// aria-label / title. Without JS the picker is unavailable —
 		// no href, the JS click handler runs the open.
-		$colsLabel = $san->entities($this->_('Columns'));
-		$out .= '<a class="ml-columns-toggle"'
-			. ' title="' . $colsLabel . '"'
-			. ' aria-label="' . $colsLabel . '">'
-			. '<i class="fa fa-columns" aria-hidden="true"></i>'
-			. '</a>';
+		// Masonry is thumbnail-only — there are no columns to toggle, so
+		// the column-visibility opener is table-view only.
+		if ($currentView !== self::VIEW_MASONRY) {
+			$colsLabel = $san->entities($this->_('Columns'));
+			$out .= '<a class="ml-columns-toggle"'
+				. ' title="' . $colsLabel . '"'
+				. ' aria-label="' . $colsLabel . '">'
+				. '<i class="fa fa-columns" aria-hidden="true"></i>'
+				. '</a>';
+		}
 		$out .= '</div>';
 
 		$out .= '</div>';

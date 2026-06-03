@@ -177,6 +177,10 @@
 .ml-replace-btn { right: 4px; }
 .ml-table tbody tr:hover .ml-replace-btn,
 .ml-table tbody tr:hover .ml-delete-btn,
+.ml-card:hover .ml-replace-btn,
+.ml-card:hover .ml-delete-btn,
+.ml-card:focus-within .ml-replace-btn,
+.ml-card:focus-within .ml-delete-btn,
 .ml-replace-btn:focus-visible,
 .ml-delete-btn:focus-visible {
 	opacity: 1;
@@ -596,6 +600,89 @@ textarea.ml-cell-input {
 .ml-thumb-size-slider.ui-slider {
 	width: 90px;
 	margin: 0;
+}
+
+/* View-mode toggle — segmented table/masonry switch, styled to sit
+   next to the slider + per-page picker. Two icon anchors share a
+   border; the active one fills with the admin's main colour. */
+.ml-view-toggle {
+	display: inline-flex;
+	border: 1px solid var(--pw-border-color, #ccc);
+	border-radius: 3px;
+	overflow: hidden;
+}
+.ml-view-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 30px;
+	height: 26px;
+	color: var(--pw-text-color, #444);
+	background: var(--pw-inputs-background, #fff);
+	cursor: pointer;
+	text-decoration: none;
+}
+.ml-view-btn + .ml-view-btn {
+	border-left: 1px solid var(--pw-border-color, #ccc);
+}
+.ml-view-btn:hover {
+	color: var(--pw-main-color, #5b8cd6);
+}
+.ml-view-btn.ml-view-active {
+	background: var(--pw-main-color, #5b8cd6);
+	color: #fff;
+}
+
+/* Masonry / gallery view — CSS columns so tiles flow into the
+   shortest column. Keep-ratio thumbs vary in height (Pinterest
+   look); crop thumbs are uniform. Column width tracks the
+   configured thumb size × the user's zoom so the size slider works
+   here too. */
+.ml-masonry {
+	column-width: calc(var(--ml-thumb-cell-width, 100px) * var(--ml-thumb-scale, 1) * 1.6);
+	column-gap: 12px;
+	padding: 4px 0;
+}
+.ml-card {
+	position: relative;
+	break-inside: avoid;
+	margin: 0 0 12px;
+	width: 100%;
+}
+.ml-card .ml-cell-thumb {
+	width: 100%;
+}
+/* Tiles always show the image at its natural aspect ratio + full
+   column width — override both the table's keep-ratio caps and the
+   crop box so masonry stays a true gallery. */
+.ml-card .ml-cell-thumb img,
+.ml-card .ml-cell-thumb img.ml-thumb-crop {
+	width: 100%;
+	height: auto;
+	max-width: none;
+	max-height: none;
+	object-fit: initial;
+}
+/* Selection checkbox overlaid top-left; replace stays top-right and
+   delete moves to bottom-right so the three controls never collide. */
+.ml-card-select {
+	position: absolute;
+	top: 6px;
+	left: 6px;
+	z-index: 2;
+	opacity: 0;
+	transition: opacity 0.12s ease-out;
+}
+.ml-card:hover .ml-card-select,
+.ml-card:focus-within .ml-card-select,
+.ml-card-select:checked {
+	opacity: 1;
+}
+.ml-card .ml-delete-btn {
+	top: auto;
+	left: auto;
+	bottom: 4px;
+	right: 4px;
 }
 
 /* Variations cell renders just a count — right-align like other

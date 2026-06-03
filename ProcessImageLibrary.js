@@ -121,7 +121,7 @@
 		function batchCellsForSubfield(subfield) {
 			if (!results || !subfield) return [];
 			var out = [];
-			results.querySelectorAll('.ml-table tbody tr').forEach(function (tr) {
+			results.querySelectorAll('.ml-row').forEach(function (tr) {
 				var cb = tr.querySelector('.ml-select-row');
 				if (!cb || !cb.dataset.key || !selection.has(cb.dataset.key)) return;
 				var c = tr.querySelector('[data-subfield="' + subfield + '"]');
@@ -1462,8 +1462,11 @@
 		// nicer error). Editable rows only — non-editable rows have
 		// no data-page-id, so the handlers never resolve a target.
 
+		// A "row" is the table <tr> OR a masonry tile — both carry
+		// .ml-row + the identity data-attrs when the host page is
+		// editable, so replace / delete / drag resolve either the same way.
 		function isEditableRow(tr) {
-			return tr && tr.matches && tr.matches('.ml-table tbody tr[data-page-id]');
+			return tr && tr.matches && tr.matches('.ml-row[data-page-id]');
 		}
 
 		function rowExt(tr) {
@@ -1571,7 +1574,7 @@
 			// click as a thumb activation and open the image editor.
 			e.preventDefault();
 			e.stopImmediatePropagation();
-			var tr = btn.closest('tr');
+			var tr = btn.closest('.ml-row');
 			if (!isEditableRow(tr)) return;
 			// Hint to the OS picker: filter to extensions matching the
 			// row's existing file. The user can still override but it
@@ -1611,19 +1614,19 @@
 			results.addEventListener('dragover', function (e) {
 				if (!dragHasFiles(e)) return;
 				e.preventDefault();
-				var tr = e.target.closest && e.target.closest('tr');
+				var tr = e.target.closest && e.target.closest('.ml-row');
 				if (e.dataTransfer) {
 					e.dataTransfer.dropEffect = isEditableRow(tr) ? 'copy' : 'none';
 				}
 			});
 			results.addEventListener('dragenter', function (e) {
 				if (!dragHasFiles(e)) return;
-				var tr = e.target.closest && e.target.closest('tr');
+				var tr = e.target.closest && e.target.closest('.ml-row');
 				if (!isEditableRow(tr)) return;
 				tr.classList.add('ml-row-drop-target');
 			});
 			results.addEventListener('dragleave', function (e) {
-				var tr = e.target.closest && e.target.closest('tr');
+				var tr = e.target.closest && e.target.closest('.ml-row');
 				if (!tr) return;
 				// dragleave fires when crossing child boundaries too —
 				// only drop the highlight when the pointer actually
@@ -1635,7 +1638,7 @@
 				if (!dragHasFiles(e)) return;
 				e.preventDefault();
 				e.stopPropagation();
-				var tr = e.target.closest && e.target.closest('tr');
+				var tr = e.target.closest && e.target.closest('.ml-row');
 				if (!isEditableRow(tr)) return;
 				tr.classList.remove('ml-row-drop-target');
 				if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
@@ -1913,7 +1916,7 @@
 			var map = {};
 			if (!results) return map;
 			results.querySelectorAll('.ml-select-row').forEach(function (cb) {
-				var tr = cb.closest('tr');
+				var tr = cb.closest('.ml-row');
 				if (cb.dataset.key && tr) map[cb.dataset.key] = tr;
 			});
 			return map;
@@ -1987,7 +1990,7 @@
 			if (!btn) return;
 			e.preventDefault();
 			e.stopImmediatePropagation();
-			var tr = btn.closest('tr');
+			var tr = btn.closest('.ml-row');
 			if (!isEditableRow(tr)) return;
 			var rowItm = rowItem(tr);
 			if (!rowItm || !rowItm.pageId) return;
@@ -2205,6 +2208,19 @@
 					if (pagLink) {
 						e.preventDefault();
 						replaceFromHref(pagLink.href);
+						return;
+					}
+					// View-mode toggle (table / masonry). Track the choice
+					// locally so saveUserPrefs doesn't clobber it, then let
+					// the server render the new layout via ?view= in the href.
+					var viewBtn = e.target.closest('.ml-view-btn');
+					if (viewBtn) {
+						e.preventDefault();
+						var nextView = viewBtn.getAttribute('data-view');
+						if (nextView && nextView !== viewMode) {
+							viewMode = nextView;
+							replaceFromHref(viewBtn.href);
+						}
 						return;
 					}
 					// Bulk-selection checkboxes handle their own state via the
@@ -2701,6 +2717,12 @@
 			: [];
 
 		var savePrefsTimer = null;
+		// Current result layout ('table' | 'masonry'). The server is the
+		// source of truth (it persists ?view= toggles), but saveUserPrefs
+		// does a full overwrite of the prefs blob, so we carry the current
+		// value here and include it in every save to avoid clobbering it.
+		var viewMode = (userPrefs.viewMode === 'masonry') ? 'masonry' : 'table';
+
 		function saveUserPrefs() {
 			if (!config.userPrefsUrl) return;
 			clearTimeout(savePrefsTimer);
@@ -2713,7 +2735,8 @@
 					},
 					pageSize:  readCurrentPageSize(),
 					bookmarks: bookmarks,
-					thumbScale: thumbScale
+					thumbScale: thumbScale,
+					viewMode:  viewMode
 				}));
 				appendCsrf(fd);
 				fetch(config.userPrefsUrl, {
