@@ -532,6 +532,11 @@ class ProcessImageLibrary extends Process {
 		// so the WireTabs uk-tab markup picks up the admin's tab
 		// styling without us shipping new CSS.
 		$this->wire('modules')->get('JqueryWireTabs');
+		// jQuery UI (incl. the slider widget + its theme CSS) so the
+		// thumbnail-size slider renders as a native PW jQuery-UI slider
+		// — visually identical to InputfieldImage's own size slider —
+		// instead of a browser-styled <input type=range>.
+		$this->wire('modules')->get('JqueryUI');
 		$prefs = $this->getUserPrefs();
 		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
@@ -4579,14 +4584,18 @@ class ProcessImageLibrary extends Process {
 		// --ml-thumb-scale CSS var live and persists the value to
 		// $user->meta (debounced). Server renders the saved value so it's
 		// in sync after every AJAX swap.
+		// Empty <span> that the JS turns into a jQuery-UI slider (same
+		// widget PW's InputfieldImage size slider uses). Bounds + the
+		// saved value ride in data-* so the slider is configured before
+		// init; the JS reads them.
 		$sizeLabel = $san->entities($this->_('Thumbnail size'));
-		$out .= '<label class="ml-thumb-size" title="' . $sizeLabel . '">'
+		$out .= '<span class="ml-thumb-size" title="' . $sizeLabel . '">'
 			. '<i class="fa fa-picture-o" aria-hidden="true"></i>'
-			. '<input type="range" class="ml-thumb-size-slider"'
-			. ' min="' . self::THUMB_SCALE_MIN . '" max="' . self::THUMB_SCALE_MAX . '" step="0.1"'
-			. ' value="' . rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.') . '"'
-			. ' aria-label="' . $sizeLabel . '">'
-			. '</label>';
+			. '<span class="ml-thumb-size-slider"'
+			. ' data-min="' . self::THUMB_SCALE_MIN . '" data-max="' . self::THUMB_SCALE_MAX . '" data-step="0.1"'
+			. ' data-value="' . rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.') . '"'
+			. ' aria-label="' . $sizeLabel . '"></span>'
+			. '</span>';
 		// Per-page picker. Client-side JS intercepts the change event,
 		// rewrites the URL and triggers the AJAX refresh; non-JS users
 		// see the picker but it requires a manual reload to take effect.

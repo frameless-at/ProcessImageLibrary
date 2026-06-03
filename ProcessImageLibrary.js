@@ -2682,29 +2682,52 @@
 			return (!isNaN(v) && v >= thumbScaleMin && v <= thumbScaleMax)
 				? v : (parseFloat(config.thumbScaleDefault) || 1);
 		})();
-		function applyThumbScale() {
-			root.style.setProperty('--ml-thumb-scale', String(thumbScale));
-			// Keep every slider instance (top + bottom pagination) in sync.
-			document.querySelectorAll('.ml-thumb-size-slider').forEach(function (s) {
-				if (parseFloat(s.value) !== thumbScale) s.value = String(thumbScale);
+		// Apply a new scale: update the CSS var live, mirror it onto every
+		// initialised slider (top + bottom pagination), and persist.
+		// Programmatic jQuery-UI value sets don't fire slide/change, so
+		// mirroring can't loop.
+		function setThumbScale(v) {
+			v = Math.min(thumbScaleMax, Math.max(thumbScaleMin, parseFloat(v)));
+			if (isNaN(v)) return;
+			thumbScale = v;
+			root.style.setProperty('--ml-thumb-scale', String(v));
+			var $ = window.jQuery;
+			document.querySelectorAll('.ml-thumb-size-slider.ui-slider').forEach(function (el) {
+				if ($ && $(el).slider('value') !== v) $(el).slider('value', v);
+			});
+			saveUserPrefs();
+		}
+		// Turn an empty .ml-thumb-size-slider span into a jQuery-UI slider
+		// (the same widget PW's own image-size slider uses, so the look
+		// matches the admin). No-op if jQuery UI isn't present.
+		function initThumbSlider(el) {
+			var $ = window.jQuery;
+			if (!$ || !$.fn || !$.fn.slider) return;
+			var $el = $(el);
+			if ($el.hasClass('ui-slider')) return; // already initialised
+			$el.slider({
+				min:   parseFloat(el.getAttribute('data-min'))  || thumbScaleMin,
+				max:   parseFloat(el.getAttribute('data-max'))  || thumbScaleMax,
+				step:  parseFloat(el.getAttribute('data-step')) || 0.1,
+				value: thumbScale,
+				range: 'min',
+				slide:  function (e, ui) { setThumbScale(ui.value); },
+				change: function (e, ui) { setThumbScale(ui.value); }
 			});
 		}
-		if (results) {
-			results.addEventListener('input', function (e) {
-				var t = e.target;
-				if (!t || !t.classList || !t.classList.contains('ml-thumb-size-slider')) return;
-				var v = parseFloat(t.value);
-				if (isNaN(v)) return;
-				thumbScale = Math.min(thumbScaleMax, Math.max(thumbScaleMin, v));
-				root.style.setProperty('--ml-thumb-scale', String(thumbScale));
-				document.querySelectorAll('.ml-thumb-size-slider').forEach(function (s) {
-					if (s !== t) s.value = String(thumbScale);
-				});
-				saveUserPrefs();
+		function applyThumbScale() {
+			root.style.setProperty('--ml-thumb-scale', String(thumbScale));
+			var $ = window.jQuery;
+			document.querySelectorAll('.ml-thumb-size-slider').forEach(function (el) {
+				if ($ && $(el).hasClass('ui-slider')) {
+					if ($(el).slider('value') !== thumbScale) $(el).slider('value', thumbScale);
+				} else {
+					initThumbSlider(el);
+				}
 			});
 		}
 		applyThumbScale();
-		// Re-sync the slider value after an AJAX swap re-renders the
+		// Re-init / re-sync the slider after an AJAX swap re-renders the
 		// pagination row (the CSS var on .ml-root persists across swaps).
 		root._mlApplyThumbScale = applyThumbScale;
 

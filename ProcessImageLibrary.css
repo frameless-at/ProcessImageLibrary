@@ -579,22 +579,23 @@ textarea.ml-cell-input {
 }
 
 /* Thumbnail size slider — sits in the pagination-right toolbar next to
-   the per-page picker. Scales the table thumbnails live via
+   the per-page picker. The empty span is turned into a jQuery-UI slider
+   by the JS (same widget + theme as PW's own InputfieldImage size
+   slider), so its look comes from the admin's jQuery-UI CSS; we only
+   set the track width here. Scales the table thumbnails live via
    --ml-thumb-scale (per-user, persisted). */
 .ml-thumb-size {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.35rem;
+	gap: 0.5rem;
 	color: var(--pw-muted-color, #555);
 }
 .ml-thumb-size .fa {
 	font-size: 0.95rem;
 }
-.ml-thumb-size-slider {
+.ml-thumb-size-slider.ui-slider {
 	width: 90px;
-	cursor: pointer;
-	vertical-align: middle;
-	accent-color: var(--pw-main-color, #5b8cd6);
+	margin: 0;
 }
 
 /* Variations cell renders just a count — right-align like other
