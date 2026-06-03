@@ -3646,6 +3646,9 @@ class ProcessImageLibrary extends Process {
 				'usageScanning'    => $this->_('Checking references…'),
 				'usageFieldFmt'    => $this->_('“%1$s” · %2$s'),
 				'usageCountFmt'    => $this->_('used in %d page(s)'),
+				// Where-used preflight on the RENAME confirm dialog.
+				'renameUsageTitle' => $this->_('Heads up — still embedded in other pages'),
+				'renameAnyway'     => $this->_('Rename anyway'),
 				// Field-dropdown label when a template is active — %s is
 				// the template name. The JS swaps "All image fields" for
 				// this so the user isn't told "all" while non-template
