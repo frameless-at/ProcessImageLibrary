@@ -633,35 +633,46 @@ textarea.ml-cell-input {
 	color: var(--pw-main-color, #5b8cd6);
 }
 
-/* Masonry / gallery view — CSS columns so tiles flow into the
-   shortest column. Keep-ratio thumbs vary in height (Pinterest
-   look); crop thumbs are uniform. Column width tracks the
-   configured thumb size × the user's zoom so the size slider works
-   here too. */
+/* Masonry / gallery view — CSS grid packed by row span. Each tile
+   gets an inline `grid-row-end: span N` (N computed server-side from
+   the image's aspect ratio), so tiles tile left-to-right in reading
+   order with no column-flow holes. The fine row unit, the column
+   width and the gap ALL scale with --ml-thumb-scale, so the integer
+   span stays correct at every zoom. Geometry kept in sync with the
+   MASONRY_* constants in the module (COL 220 / ROW 4 / GAP 10). The
+   block keeps generous breathing room above and below. */
 .ml-masonry {
-	column-width: calc(var(--ml-thumb-cell-width, 100px) * var(--ml-thumb-scale, 1) * 1.6);
-	column-gap: 12px;
-	padding: 4px 0;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, calc(220px * var(--ml-thumb-scale, 1)));
+	grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1));
+	grid-auto-flow: row dense;
+	gap: calc(10px * var(--ml-thumb-scale, 1));
+	justify-content: center;
+	margin: 1.5rem 0 1.75rem;
 }
 .ml-card {
 	position: relative;
-	break-inside: avoid;
-	margin: 0 0 12px;
-	width: 100%;
 }
+/* The tile fills its grid cell exactly; the image covers it at its
+   natural ratio (the few px of span-rounding are absorbed by cover,
+   never shown as an internal gap). */
 .ml-card .ml-cell-thumb {
 	width: 100%;
+	height: 100%;
 }
-/* Tiles always show the image at its natural aspect ratio + full
-   column width — override both the table's keep-ratio caps and the
-   crop box so masonry stays a true gallery. */
 .ml-card .ml-cell-thumb img,
 .ml-card .ml-cell-thumb img.ml-thumb-crop {
 	width: 100%;
-	height: auto;
+	height: 100%;
 	max-width: none;
 	max-height: none;
-	object-fit: initial;
+	object-fit: cover;
+}
+/* Hover affordance drawn INSIDE the tile (negative offset) so it can
+   never bleed a stray line into a neighbouring cell. */
+.ml-card .ml-cell-thumb[data-file-hash] img:hover {
+	outline: 2px solid var(--pw-main-color, #5b8cd6);
+	outline-offset: -2px;
 }
 /* Selection checkbox overlaid top-left; replace stays top-right and
    delete moves to bottom-right so the three controls never collide. */

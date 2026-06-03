@@ -71,6 +71,16 @@ class ProcessImageLibrary extends Process {
 	const VIEW_TABLE   = 'table';
 	const VIEW_MASONRY = 'masonry';
 
+	// Masonry grid geometry (CSS-grid row-span packing). COL = base
+	// column width in px at zoom 1; ROW = the fine grid-auto-rows unit
+	// each tile spans an integer number of; GAP = track gap. All three
+	// scale together with --ml-thumb-scale, so a tile's integer row span
+	// (computed server-side from the image's aspect ratio) stays correct
+	// at every zoom level. Kept in sync with the .ml-masonry CSS.
+	const MASONRY_COL = 220;
+	const MASONRY_ROW = 4;
+	const MASONRY_GAP = 10;
+
 	/**
 	 * Admin-configurable thumbnail dimensions, JPEG quality and
 	 * crop behaviour, used for the per-row thumb in the table view.
@@ -757,16 +767,18 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Masonry / gallery layout: a CSS-columns grid of thumbnail tiles,
-	 * nothing else. Each editable tile carries the SAME identity attrs +
-	 * .ml-cell-thumb element as a table row, so the existing JS handlers
-	 * (thumb-click → image editor, replace, delete, drag-drop, bulk
-	 * selection) work unchanged via their shared .ml-row / class-based
-	 * delegation. Tiles for non-editable host pages are display-only.
+	 * Masonry / gallery layout: a CSS-grid of thumbnail tiles packed by
+	 * row span, nothing else. Each tile spans an integer number of fine
+	 * grid rows computed from the image's natural aspect ratio, so tiles
+	 * tile left-to-right (reading order) with no column-flow holes. Each
+	 * editable tile carries the SAME identity attrs + .ml-cell-thumb
+	 * element as a table row, so the existing JS handlers (thumb-click →
+	 * image editor, replace, delete, drag-drop, bulk selection) work
+	 * unchanged via their shared .ml-row / class-based delegation. Tiles
+	 * for non-editable host pages are display-only.
 	 */
 	protected function renderMasonry(array $slice): string {
 		$san = $this->wire('sanitizer');
-		$thumb = $this->getThumbDims();
 
 		if (!$slice) {
 			return '<p class="ml-empty">'
@@ -776,6 +788,16 @@ class ProcessImageLibrary extends Process {
 		$out = '<div class="ml-masonry">';
 		foreach ($slice as $row) {
 			$editable = !empty($row['pageEditUrl']);
+
+			// Row span from the tile's NATURAL aspect ratio (the gallery
+			// shows the full uncropped thumb). Rendered height at zoom 1 =
+			// COL × (srcH / srcW); span = that height expressed in (ROW +
+			// GAP) units. Square fallback when the source dims are unknown.
+			$srcW = (int) ($row['thumbWidth']  ?? 0);
+			$srcH = (int) ($row['thumbHeight'] ?? 0);
+			$ratioH    = ($srcW > 0 && $srcH > 0) ? ($srcH / $srcW) : 1.0;
+			$renderedH = self::MASONRY_COL * $ratioH;
+			$span      = max(1, (int) round(($renderedH + self::MASONRY_GAP) / (self::MASONRY_ROW + self::MASONRY_GAP)));
 
 			$editAttrs = sprintf(
 				'data-page-id="%d" data-field="%s" data-basename="%s" data-file-hash="%s"',
@@ -805,7 +827,7 @@ class ProcessImageLibrary extends Process {
 					$san->entities((string) ($row['pageName']  ?? ''))
 				);
 			}
-			$out .= '<div class="ml-row ml-card"' . $rowAttrs . '>';
+			$out .= '<div class="ml-row ml-card" style="grid-row-end:span ' . $span . '"' . $rowAttrs . '>';
 
 			// Selection checkbox — same class/data-key as the table so the
 			// bulk machinery picks it up. Shown on hover / when checked.
@@ -822,29 +844,17 @@ class ProcessImageLibrary extends Process {
 			}
 			$out .= '<div class="ml-cell-thumb"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
-				$srcW = (int) ($row['thumbWidth']  ?? 0);
-				$srcH = (int) ($row['thumbHeight'] ?? 0);
-				if ($thumb['keepRatio']) {
-					$longer = (int) $thumb['longerSide'];
-					if ($srcW >= $srcH) {
-						$dispW = $srcW > 0 ? min($longer, $srcW) : $longer;
-						$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
-					} else {
-						$dispH = $srcH > 0 ? min($longer, $srcH) : $longer;
-						$dispW = $srcH > 0 ? (int) round($srcW * $dispH / $srcH) : $srcW;
-					}
-					$cls = 'ml-thumb';
-				} else {
-					$dispW = (int) $thumb['width'];
-					$dispH = (int) $thumb['height'];
-					$cls   = 'ml-thumb ml-thumb-crop';
-				}
-				$out .= '<img class="' . $cls . '"'
+				// Natural-ratio width/height attrs reserve the right box
+				// before the bytes land (CSS sizes the tile to the grid
+				// cell; object-fit: cover absorbs the small rounding).
+				$attrW = $srcW > 0 ? $srcW : self::MASONRY_COL;
+				$attrH = $srcH > 0 ? $srcH : self::MASONRY_COL;
+				$out .= '<img class="ml-thumb"'
 					. ' src="' . $san->entities($row['thumbUrl']) . '"'
 					. ' alt="' . $san->entities($row['basename']) . '"'
 					. ' loading="lazy"'
-					. ' width="' . $dispW . '"'
-					. ' height="' . $dispH . '">';
+					. ' width="' . $attrW . '"'
+					. ' height="' . $attrH . '">';
 			}
 			if ($editable) {
 				$replaceLabel = $san->entities(sprintf($this->_('Replace %s'), (string) $row['basename']));
