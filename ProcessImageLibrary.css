@@ -602,35 +602,35 @@ textarea.ml-cell-input {
 	margin: 0;
 }
 
-/* View-mode toggle — segmented table/masonry switch, styled to sit
-   next to the slider + per-page picker. Two icon anchors share a
-   border; the active one fills with the admin's main colour. */
+/* View-mode toggle — two bare icons (table / masonry) matching the
+   columns-toggle icon next to it: same size, no button chrome. The
+   active mode renders in the admin's primary colour; the inactive
+   one is muted and brightens on hover. */
 .ml-view-toggle {
 	display: inline-flex;
-	border: 1px solid var(--pw-border-color, #ccc);
-	border-radius: 3px;
-	overflow: hidden;
+	align-items: center;
+	gap: 0.45rem;
 }
 .ml-view-btn {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	width: 30px;
-	height: 26px;
-	color: var(--pw-text-color, #444);
-	background: var(--pw-inputs-background, #fff);
+	font-size: 1.15rem;
+	line-height: 1;
+	color: var(--pw-muted-color, #555);
+	background: transparent;
+	border: 0;
 	cursor: pointer;
 	text-decoration: none;
 }
-.ml-view-btn + .ml-view-btn {
-	border-left: 1px solid var(--pw-border-color, #ccc);
+.ml-view-btn .fa {
+	display: block;
 }
-.ml-view-btn:hover {
+.ml-view-btn:hover,
+.ml-view-btn:focus {
+	color: var(--pw-text-color, #111);
+	text-decoration: none;
+}
+.ml-view-btn.ml-view-active,
+.ml-view-btn.ml-view-active:hover {
 	color: var(--pw-main-color, #5b8cd6);
-}
-.ml-view-btn.ml-view-active {
-	background: var(--pw-main-color, #5b8cd6);
-	color: #fff;
 }
 
 /* Masonry / gallery view — CSS columns so tiles flow into the
