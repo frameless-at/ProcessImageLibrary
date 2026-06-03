@@ -334,6 +334,11 @@ MIT (or GPL depending on repo convention). The module should be submittable as a
 - **Variations column** → implemented (read-only counter).
 - **Module info / versioning** → SemVer, GitHub tags. Composer support not actively planned.
 
+## Roadmap (planned)
+
+- **Where-used on rename**: before a rename commits, surface which pages still embed the image by its *current* basename (`contentType=html` Textarea scan — the same where-used preflight the delete confirm already runs via `___executeUsage`). Advisory only, so the editor knows the rename will break those embeds and can fix them. Mirrors the delete-side behaviour for the rename path.
+- **Thumbnail-size slider**: a per-user, in-view slider to scale the table thumbnails interactively, persisted in `$user->meta` alongside the column / page-size prefs (cross-device). Complements — doesn't replace — the admin-config thumbnail dimensions, which stay the default.
+
 ## Remaining Open Questions
 
 1. **Mobile**: currently flex-wrap + horizontally-scrolling table. Sufficient, or worth a dedicated card view < 640 px?

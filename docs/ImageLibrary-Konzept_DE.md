@@ -334,6 +334,11 @@ MIT (oder GPL, je nach Repo-Konvention). Modul sollte als Public-Module auf modu
 - **Variations-Spalte** → umgesetzt (read-only Zähler).
 - **Modul-Info / Versioning** → SemVer, GitHub-Tags. Composer-Support nicht aktiv geplant.
 
+## Roadmap (geplant)
+
+- **Where-used beim Rename**: vor dem Commit eines Rename anzeigen, welche Pages das Bild noch über seinen *aktuellen* Basename einbetten (`contentType=html`-Textarea-Scan — derselbe Where-used-Preflight, den der Delete-Confirm schon via `___executeUsage` macht). Nur als Hinweis, damit der Editor weiß, dass der Rename diese Embeds bricht, und sie fixen kann. Spiegelt das Delete-Verhalten auf den Rename-Pfad.
+- **Thumbnail-Größen-Slider**: ein per-User-Slider im View, um die Tabellen-Thumbnails interaktiv zu skalieren, persistiert in `$user->meta` neben den Column-/Page-Size-Prefs (cross-device). Ergänzt — ersetzt nicht — die Admin-Config-Thumbnail-Maße, die der Default bleiben.
+
 ## Verbleibende Open Questions
 
 1. **Mobile**: aktuell flex-wrap + horizontal-scrollende Tabelle. Reicht das oder lohnt ein dedizierter Card-View < 640 px?
