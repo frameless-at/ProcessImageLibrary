@@ -116,16 +116,16 @@
    variation. */
 .ml-cell-thumb img {
 	display: block;
-	max-width: var(--ml-thumb-longer, 100px);
-	max-height: var(--ml-thumb-longer, 100px);
+	max-width: calc(var(--ml-thumb-longer, 100px) * var(--ml-thumb-scale, 1));
+	max-height: calc(var(--ml-thumb-longer, 100px) * var(--ml-thumb-scale, 1));
 	width: auto;
 	height: auto;
 	border: 1px solid var(--pw-border-color, #e5e5e5);
 	background: var(--pw-inputs-background, #fafafa);
 }
 .ml-cell-thumb img.ml-thumb-crop {
-	width: var(--ml-thumb-w, 120px);
-	height: var(--ml-thumb-h, 80px);
+	width: calc(var(--ml-thumb-w, 120px) * var(--ml-thumb-scale, 1));
+	height: calc(var(--ml-thumb-h, 80px) * var(--ml-thumb-scale, 1));
 	max-width: none;
 	max-height: none;
 	object-fit: cover;
@@ -145,7 +145,7 @@
    button overlay. */
 .ml-cell-thumb {
 	position: relative;
-	width: var(--ml-thumb-cell-width, 100px);
+	width: calc(var(--ml-thumb-cell-width, 100px) * var(--ml-thumb-scale, 1));
 }
 /* Per-row action icons (Replace + Delete): pinned to opposite top
    corners of the thumb cell so finger-tap on mobile doesn't risk
@@ -578,6 +578,25 @@ textarea.ml-cell-input {
 	padding: 0.1rem 0.3rem;
 }
 
+/* Thumbnail size slider — sits in the pagination-right toolbar next to
+   the per-page picker. Scales the table thumbnails live via
+   --ml-thumb-scale (per-user, persisted). */
+.ml-thumb-size {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.35rem;
+	color: var(--pw-muted-color, #555);
+}
+.ml-thumb-size .fa {
+	font-size: 0.95rem;
+}
+.ml-thumb-size-slider {
+	width: 90px;
+	cursor: pointer;
+	vertical-align: middle;
+	accent-color: var(--pw-main-color, #5b8cd6);
+}
+
 /* Variations cell renders just a count — right-align like other
    numeric cells for quick at-a-glance scanning. */
 .ml-cell-variations {
@@ -600,7 +619,7 @@ textarea.ml-cell-input {
 		flex-wrap: wrap;
 	}
 	.ml-cell-thumb img {
-		max-width: 80px;
+		max-width: calc(80px * var(--ml-thumb-scale, 1));
 	}
 	.ml-popup-editor {
 		width: 100vw;

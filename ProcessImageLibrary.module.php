@@ -55,6 +55,16 @@ class ProcessImageLibrary extends Process {
 	const THUMB_LONGER_SIDE_DEFAULT = 100;
 	const THUMB_QUALITY_DEFAULT     = 90;
 
+	// Per-user thumbnail display scale (the in-view size slider). A
+	// multiplier on the admin-configured thumb dimensions: 1.0 = the
+	// config default, applied purely via the --ml-thumb-scale CSS var.
+	// The generated variation stays the config size; scaling well above
+	// it softens (admins can raise the config base for crisp large
+	// thumbs). Persisted in $user->meta alongside columns / page size.
+	const THUMB_SCALE_MIN     = 0.5;
+	const THUMB_SCALE_MAX     = 2.5;
+	const THUMB_SCALE_DEFAULT = 1.0;
+
 	/**
 	 * Admin-configurable thumbnail dimensions, JPEG quality and
 	 * crop behaviour, used for the per-row thumb in the table view.
@@ -210,6 +220,7 @@ class ProcessImageLibrary extends Process {
 		$order   = [];
 		$pageSize = null;
 		$bookmarks = [];
+		$thumbScale = null;
 		if (is_array($raw)) {
 			$cols = isset($raw['columns']) && is_array($raw['columns']) ? $raw['columns'] : [];
 			if (isset($cols['visible']) && is_array($cols['visible'])) {
@@ -237,12 +248,29 @@ class ProcessImageLibrary extends Process {
 					$bookmarks[] = ['name' => $name, 'qs' => $qs];
 				}
 			}
+			if (isset($raw['thumbScale'])) {
+				$ts = (float) $raw['thumbScale'];
+				if ($ts >= self::THUMB_SCALE_MIN && $ts <= self::THUMB_SCALE_MAX) {
+					$thumbScale = $ts;
+				}
+			}
 		}
 		return [
-			'columns'   => ['visible' => $visible, 'order' => $order],
-			'pageSize'  => $pageSize,
-			'bookmarks' => $bookmarks,
+			'columns'    => ['visible' => $visible, 'order' => $order],
+			'pageSize'   => $pageSize,
+			'bookmarks'  => $bookmarks,
+			'thumbScale' => $thumbScale,
 		];
+	}
+
+	/**
+	 * Effective per-user thumbnail display scale (the size-slider value),
+	 * clamped to [THUMB_SCALE_MIN, THUMB_SCALE_MAX]; falls back to the
+	 * default when the user has no saved value.
+	 */
+	protected function getThumbScale(): float {
+		$ts = $this->getUserPrefs()['thumbScale'];
+		return ($ts === null) ? self::THUMB_SCALE_DEFAULT : (float) $ts;
 	}
 
 	protected function getDefaultHiddenColumns(): array {
@@ -461,10 +489,15 @@ class ProcessImageLibrary extends Process {
 		$cellWidth = $thumbDims['keepRatio']
 			? (int) $thumbDims['longerSide']
 			: (int) $thumbDims['width'];
+		// --ml-thumb-scale is the per-user size-slider multiplier on top
+		// of the configured dims; server-rendered here so the initial
+		// paint already reflects the saved scale (no flash), then updated
+		// live by the slider.
 		$rootStyle = sprintf(
-			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;--ml-thumb-cell-width:%dpx;',
+			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;--ml-thumb-cell-width:%dpx;--ml-thumb-scale:%s;',
 			(int) $thumbDims['width'], (int) $thumbDims['height'],
-			(int) $thumbDims['longerSide'], $cellWidth
+			(int) $thumbDims['longerSide'], $cellWidth,
+			rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.')
 		);
 		$rootAttrs = sprintf(
 			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-csrf-name="%s" data-csrf-value="%s" style="%s"',
@@ -2278,9 +2311,10 @@ class ProcessImageLibrary extends Process {
 
 		$sanitizer = $this->wire('sanitizer');
 		$clean = [
-			'columns'   => ['visible' => [], 'order' => []],
-			'pageSize'  => null,
-			'bookmarks' => [],
+			'columns'    => ['visible' => [], 'order' => []],
+			'pageSize'   => null,
+			'bookmarks'  => [],
+			'thumbScale' => null,
 		];
 		if (isset($data['columns']) && is_array($data['columns'])) {
 			$cols = $data['columns'];
@@ -2309,6 +2343,12 @@ class ProcessImageLibrary extends Process {
 				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
 				if ($name === '') continue;
 				$clean['bookmarks'][] = ['name' => $name, 'qs' => $qs];
+			}
+		}
+		if (isset($data['thumbScale'])) {
+			$ts = (float) $data['thumbScale'];
+			if ($ts >= self::THUMB_SCALE_MIN && $ts <= self::THUMB_SCALE_MAX) {
+				$clean['thumbScale'] = round($ts, 2);
 			}
 		}
 
@@ -3572,6 +3612,12 @@ class ProcessImageLibrary extends Process {
 			'fieldCaps' => $this->buildFieldCapsPayload($imageFields),
 			'defaultPageSize'      => $this->getDefaultPageSize(),
 			'defaultHiddenColumns' => $this->getDefaultHiddenColumns(),
+			// Bounds for the per-user thumbnail size slider (multiplier
+			// on the configured thumb dims). Current value rides in
+			// userPrefs.thumbScale.
+			'thumbScaleMin'        => self::THUMB_SCALE_MIN,
+			'thumbScaleMax'        => self::THUMB_SCALE_MAX,
+			'thumbScaleDefault'    => self::THUMB_SCALE_DEFAULT,
 			// Languages list for the popup's multilang tabs. Each
 			// entry: { id: <storage key>, name: <api name>,
 			// title: <display title> }. The "id" is the key PW uses
@@ -4529,6 +4575,18 @@ class ProcessImageLibrary extends Process {
 		$out .= '</div>';
 
 		$out .= '<div class="ml-pagination-right">';
+		// Thumbnail size slider — per-user view zoom. JS updates the
+		// --ml-thumb-scale CSS var live and persists the value to
+		// $user->meta (debounced). Server renders the saved value so it's
+		// in sync after every AJAX swap.
+		$sizeLabel = $san->entities($this->_('Thumbnail size'));
+		$out .= '<label class="ml-thumb-size" title="' . $sizeLabel . '">'
+			. '<i class="fa fa-picture-o" aria-hidden="true"></i>'
+			. '<input type="range" class="ml-thumb-size-slider"'
+			. ' min="' . self::THUMB_SCALE_MIN . '" max="' . self::THUMB_SCALE_MAX . '" step="0.1"'
+			. ' value="' . rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.') . '"'
+			. ' aria-label="' . $sizeLabel . '">'
+			. '</label>';
 		// Per-page picker. Client-side JS intercepts the change event,
 		// rewrites the URL and triggers the AJAX refresh; non-JS users
 		// see the picker but it requires a manual reload to take effect.

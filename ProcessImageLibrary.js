@@ -1987,6 +1987,8 @@
 				// user's column visibility prefs to the swapped DOM.
 				if (root._mlApplyColumnVisibility) root._mlApplyColumnVisibility();
 				if (root._mlApplyColumnOrder) root._mlApplyColumnOrder();
+				// Re-rendered pagination row → re-sync the thumb-size slider.
+				if (root._mlApplyThumbScale) root._mlApplyThumbScale();
 				if (push) {
 					history.pushState({ ml: qs }, '', location.pathname + qs);
 				}
@@ -2653,7 +2655,8 @@
 						order:   columnsOrder
 					},
 					pageSize:  readCurrentPageSize(),
-					bookmarks: bookmarks
+					bookmarks: bookmarks,
+					thumbScale: thumbScale
 				}));
 				appendCsrf(fd);
 				fetch(config.userPrefsUrl, {
@@ -2665,6 +2668,45 @@
 				});
 			}, 400);
 		}
+
+		// -- Thumbnail size slider -------------------------------------
+		// Per-user view zoom: thumbScale multiplies the configured thumb
+		// dims via the --ml-thumb-scale CSS var on .ml-root. Server
+		// renders the initial value (no flash) and re-renders the slider
+		// in the pagination row on every AJAX swap; we keep it in sync,
+		// update the var live while dragging, and persist (debounced).
+		var thumbScaleMin = parseFloat(config.thumbScaleMin) || 0.5;
+		var thumbScaleMax = parseFloat(config.thumbScaleMax) || 2.5;
+		var thumbScale = (function () {
+			var v = parseFloat(userPrefs.thumbScale);
+			return (!isNaN(v) && v >= thumbScaleMin && v <= thumbScaleMax)
+				? v : (parseFloat(config.thumbScaleDefault) || 1);
+		})();
+		function applyThumbScale() {
+			root.style.setProperty('--ml-thumb-scale', String(thumbScale));
+			// Keep every slider instance (top + bottom pagination) in sync.
+			document.querySelectorAll('.ml-thumb-size-slider').forEach(function (s) {
+				if (parseFloat(s.value) !== thumbScale) s.value = String(thumbScale);
+			});
+		}
+		if (results) {
+			results.addEventListener('input', function (e) {
+				var t = e.target;
+				if (!t || !t.classList || !t.classList.contains('ml-thumb-size-slider')) return;
+				var v = parseFloat(t.value);
+				if (isNaN(v)) return;
+				thumbScale = Math.min(thumbScaleMax, Math.max(thumbScaleMin, v));
+				root.style.setProperty('--ml-thumb-scale', String(thumbScale));
+				document.querySelectorAll('.ml-thumb-size-slider').forEach(function (s) {
+					if (s !== t) s.value = String(thumbScale);
+				});
+				saveUserPrefs();
+			});
+		}
+		applyThumbScale();
+		// Re-sync the slider value after an AJAX swap re-renders the
+		// pagination row (the CSS var on .ml-root persists across swaps).
+		root._mlApplyThumbScale = applyThumbScale;
 
 		// -- Bookmarks -------------------------------------------------
 		// Tab strip above the filter bar; each tab is a saved filter
