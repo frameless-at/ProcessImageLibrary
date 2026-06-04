@@ -7,3 +7,6 @@
 /AdminThemeUikit/
 /AdminThemeReno/
 /AdminThemeDefault/
+
+# Third-party module kept locally only as a reference / study copy.
+/MediaHub-1.19.0/
