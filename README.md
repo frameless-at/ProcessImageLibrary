@@ -217,6 +217,10 @@ Select multiple rows, then click any selected row's filename cell. The popup ope
 
 Collision detection runs per-image inside the same Pageimages collection; a name clash with another (non-selected) file in that field fails that one row with a clear message, others continue.
 
+**Where-used preflight.** A rename changes the basename, so any rich-text field that still embeds the old URL would break. Before applying, the same scan the delete dialog uses runs over every Textarea field; if any selected image is still referenced, a *"Heads up — still embedded in other pages"* dialog lists each one with links to the embedding pages. Fix the embeds first, or choose **Rename anyway**. When nothing is referenced the rename applies straight through with no extra prompt.
+
+![Rename where-used dialog titled "Heads up — still embedded in other pages": a red "Still referenced in rich-text fields" list naming img_6426.jpeg and img_6430.jpeg, each linking to the "Flowers" page body field, with Cancel and "Rename anyway" buttons](docs/screenshots/12-rename-usage.png)
+
 ## Replacing files
 
 Each editable row carries an upload icon in the **top-right** corner of the thumb cell, visible on row hover, plus the row itself is a drop target for files dragged from the OS. Both paths swap the file bytes of an existing image while keeping the basename, every URL pointing at it, and the Pagefile metadata (description, tags, customs, multilang) intact.
