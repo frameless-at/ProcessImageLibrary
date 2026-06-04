@@ -4775,8 +4775,8 @@ class ProcessImageLibrary extends Process {
 		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
 		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
 		$views = [
-			[self::VIEW_TABLE,   'fa-table', $this->_('Table view')],
-			[self::VIEW_MASONRY, 'fa-th',    $this->_('Masonry view')],
+			[self::VIEW_TABLE,   'fa-table',     $this->_('Table view')],
+			[self::VIEW_MASONRY, 'fa-picture-o', $this->_('Masonry view')],
 		];
 		$out .= '<span class="ml-view-toggle" role="group" aria-label="'
 			. $san->entities($this->_('Result layout')) . '">';
