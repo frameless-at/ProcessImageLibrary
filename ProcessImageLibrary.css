@@ -302,6 +302,14 @@
 	font-weight: 600;
 	color: var(--pw-error-inline-text-color, #c33);
 }
+/* Same rhythm as the red delete warning heading, but neutral — the
+   post-rename summary is a success confirmation, not a warning. */
+.ml-rename-done-usage-h {
+	margin: 0 0 0.4rem;
+	font-size: 0.95em;
+	font-weight: 600;
+	color: var(--pw-text-color, #333);
+}
 .ml-delete-confirm-usage-list,
 .ml-delete-confirm-usage-list ul {
 	margin: 0;

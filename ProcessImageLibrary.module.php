@@ -1528,6 +1528,7 @@ class ProcessImageLibrary extends Process {
 			'stillMatches'    => !in_array($key, $match['vanished'], true),
 			'newTotal'        => $match['newTotal'],
 			'embedsRewritten' => (int) ($result['embedsRewritten'] ?? 0),
+			'embedsRefs'      => $result['embedsRefs'] ?? [],
 		]);
 	}
 
@@ -2032,9 +2033,9 @@ class ProcessImageLibrary extends Process {
 		// rich-text embeds reference it by URL and still point at the old
 		// stem. Rewrite them so they survive the rename. A rewrite failure
 		// must never roll back a rename that already succeeded on disk.
-		$embedsRewritten = 0;
+		$embedRefs = [];
 		try {
-			$embedsRewritten = $this->rewriteEmbeddedReferences(
+			$embedRefs = $this->rewriteEmbeddedReferences(
 				$img, $page, $oldBasename, (string) $img->basename
 			);
 		} catch (\Throwable $e) {
@@ -2048,7 +2049,8 @@ class ProcessImageLibrary extends Process {
 			'ok'              => true,
 			'basename'        => (string) $img->basename,
 			'unchanged'       => false,
-			'embedsRewritten' => $embedsRewritten,
+			'embedsRewritten' => count($embedRefs),
+			'embedsRefs'      => $embedRefs,
 		];
 	}
 
@@ -2075,27 +2077,31 @@ class ProcessImageLibrary extends Process {
 	 * Referencing pages are saved here (single field only). When a page
 	 * embeds its own image we write through the caller's own $ownerPage
 	 * instance rather than a second copy, so the deferred image-field save
-	 * in the caller doesn't clobber the rewrite. Returns the number of
-	 * (page, field) embeds rewritten.
+	 * in the caller doesn't clobber the rewrite. Returns one row per
+	 * (page, field) rewritten — {pageId, pageTitle, fieldName, editUrl} —
+	 * in the same shape the where-used list consumes, so the client can
+	 * show the editor exactly which embeds were fixed.
 	 *
 	 * Note: in a batch rename this runs once per image, like the preflight;
 	 * correctness over micro-optimisation — RTE-embedded library images in
 	 * large batches are rare.
+	 *
+	 * @return array<int,array{pageId:int,pageTitle:string,fieldName:string,editUrl:string}>
 	 */
-	protected function rewriteEmbeddedReferences(Pageimage $img, Page $ownerPage, string $oldBasename, string $newBasename): int {
+	protected function rewriteEmbeddedReferences(Pageimage $img, Page $ownerPage, string $oldBasename, string $newBasename): array {
 		$oldDot  = strrpos($oldBasename, '.');
 		$oldStem = $oldDot === false ? $oldBasename : substr($oldBasename, 0, $oldDot);
 		$oldExt  = $oldDot === false ? '' : substr($oldBasename, $oldDot + 1);
 		$newDot  = strrpos($newBasename, '.');
 		$newStem = $newDot === false ? $newBasename : substr($newBasename, 0, $newDot);
-		if ($oldStem === '' || $oldExt === '' || $oldStem === $newStem) return 0;
+		if ($oldStem === '' || $oldExt === '' || $oldStem === $newStem) return [];
 
 		// {pid} in the asset URL is the page that physically HOLDS the file.
 		// For a repeater-hosted image that's the repeater item page, not the
 		// owner passed into the rename, so $img->page is the authority.
 		$filePage = $img->page;
 		$pid = ($filePage && $filePage->id) ? (int) $filePage->id : (int) $ownerPage->id;
-		if (!$pid) return 0;
+		if (!$pid) return [];
 
 		$pages     = $this->wire('pages');
 		$sanitizer = $this->wire('sanitizer');
@@ -2116,7 +2122,7 @@ class ProcessImageLibrary extends Process {
 			. preg_quote($oldExt, '#')
 			. ')#i';
 
-		$rewritten = 0;
+		$refs = [];
 		foreach ($this->wire('fields') as $field) {
 			if (!($field->type instanceof FieldtypeTextarea)) continue;
 			$name = $field->name;
@@ -2134,7 +2140,12 @@ class ProcessImageLibrary extends Process {
 				try {
 					if ($this->rewriteTextareaField($refPage, $name, $pattern, $newStem)) {
 						$refPage->save($name);
-						$rewritten++;
+						$refs[] = [
+							'pageId'    => (int) $refPage->id,
+							'pageTitle' => (string) $refPage->get('title|name'),
+							'fieldName' => $name,
+							'editUrl'   => $refPage->editable() ? (string) $refPage->editUrl() : '',
+						];
 					}
 				} catch (\Throwable $e) {
 					// One un-writable reference must not abort the rename or
@@ -2142,7 +2153,7 @@ class ProcessImageLibrary extends Process {
 				}
 			}
 		}
-		return $rewritten;
+		return $refs;
 	}
 
 	/**
@@ -3990,9 +4001,6 @@ class ProcessImageLibrary extends Process {
 				// Label next to the checkbox widget for a boolean custom subfield.
 				'enabled'          => $this->_('Enabled'),
 				'rename'           => $this->_('New filename'),
-				// Announced after a rename that also fixed embedded
-				// references in rich-text fields; JS substitutes %d.
-				'embedsUpdated'    => $this->_('Renamed — updated %d embedded reference(s)'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
@@ -4030,9 +4038,11 @@ class ProcessImageLibrary extends Process {
 				'usageScanning'    => $this->_('Checking references…'),
 				'usageFieldFmt'    => $this->_('“%1$s” · %2$s'),
 				'usageCountFmt'    => $this->_('used in %d page(s)'),
-				// Where-used preflight on the RENAME confirm dialog.
-				'renameUsageTitle' => $this->_('Heads up — still embedded in other pages'),
-				'renameAnyway'     => $this->_('Rename anyway'),
+				// Post-rename summary dialog. A rename rewrites every
+				// rich-text embed automatically, so instead of warning
+				// beforehand we confirm afterwards which embeds were fixed.
+				'renameDoneTitle'  => $this->_('Renamed'),
+				'embedsUpdatedHeading' => $this->_('Updated embedded references:'),
 				// Field-dropdown label when a template is active — %s is
 				// the template name. The JS swaps "All image fields" for
 				// this so the user isn't told "all" while non-template

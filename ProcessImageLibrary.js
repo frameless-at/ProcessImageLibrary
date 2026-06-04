@@ -879,11 +879,10 @@
 					var oldStem = td.dataset.stem || '';
 					if (newStem === '' || newStem === oldStem) { teardown(); return; }
 					teardown();
-					// Where-used preflight: if any page still embeds the file(s)
-					// by the current basename, warn before committing the rename.
-					var renameItems = batch
-						? selectionItems()
-						: [{ pageId: td.dataset.pageId, fieldName: td.dataset.field, basename: td.dataset.basename }];
+					// A rename now rewrites every rich-text embed of the
+					// file automatically (server side), so there is nothing
+					// to warn about up front — run it straight away, then
+					// summarise which embeds were updated afterwards.
 					var doRename = function () {
 					// Optimistic update — resolve placeholders on the
 					// originating cell now. For batch rename the per-row
@@ -1015,13 +1014,17 @@
 						td.classList.remove('ml-cell-saving');
 						if (result && result.data && result.data.ok) {
 							flashCell(td, true);
-							// If the rename also fixed rich-text embeds,
-							// say so — flashCell already announced "Saved",
-							// this replaces it with the more informative
-							// count for assistive tech + screen readers.
-							var nEmbeds = result.data.embedsRewritten | 0;
-							if (nEmbeds > 0 && labels.embedsUpdated) {
-								announce(labels.embedsUpdated.replace('%d', nEmbeds));
+							// If the rename also rewrote rich-text embeds,
+							// show a summary dialog naming the new file and
+							// every reference that was updated. A plain
+							// rename (no embeds) just flashes green.
+							var embedRefs = (result.data.embedsRefs) || [];
+							if (embedRefs.length) {
+								renameSummaryDialog(
+									td.dataset.basename,
+									result.data.basename,
+									embedRefs
+								);
 							}
 							// Carry the persistent selection across the
 							// basename change — without this, ticking a
@@ -1065,7 +1068,7 @@
 					});
 					return;
 					};
-					confirmRename(renameItems, doRename);
+					doRename();
 					return;
 				}
 
@@ -1869,52 +1872,58 @@
 			return document.createTextNode(label);
 		}
 
-		// Where-used preflight for rename (advisory, mirrors the delete
-		// confirm). If any item is still embedded by its current basename,
-		// show a confirm dialog listing the pages so the editor knows the
-		// rename will break those embeds; with no embeds it proceeds
-		// straight away (no dialog).
-		function confirmRename(items, onConfirm) {
-			fetchUsage(items).then(function (usage) {
-				var hasRefs = items.some(function (it) {
-					return (usage[it.pageId + ':' + it.basename] || []).length > 0;
-				});
-				if (!hasRefs) { onConfirm(); return; }
+		// Post-rename summary. The rename already happened and every
+		// rich-text embed of the file was rewritten server-side; this
+		// dialog confirms the new filename and lists the references that
+		// were updated (with links), so the editor can see what changed.
+		// Only shown when at least one embed was rewritten — a plain
+		// rename just flashes the cell green.
+		function renameSummaryDialog(oldBasename, newBasename, refs) {
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-delete-confirm';
 
-				var dialog = document.createElement('dialog');
-				dialog.className = 'ml-delete-confirm';
+			var header = document.createElement('header');
+			header.textContent = labels.renameDoneTitle || 'Renamed';
+			dialog.appendChild(header);
 
-				var header = document.createElement('header');
-				header.textContent = labels.renameUsageTitle
-					|| 'Heads up — still embedded in other pages';
-				dialog.appendChild(header);
+			// old → new, in the same monospace chip the delete dialog uses.
+			var line = document.createElement('p');
+			line.className = 'ml-delete-confirm-solo';
+			line.textContent = oldBasename + '  →  ' + newBasename;
+			dialog.appendChild(line);
 
-				var holder = document.createElement('div');
-				holder.className = 'ml-delete-confirm-usage';
-				dialog.appendChild(holder);
-				renderUsageBlock(holder, items, usage);
-
-				var footer = document.createElement('footer');
-				var cancelBtn = document.createElement('button');
-				cancelBtn.type = 'button';
-				cancelBtn.className = 'uk-button uk-button-secondary';
-				cancelBtn.textContent = labels.cancel || 'Cancel';
-				var okBtn = document.createElement('button');
-				okBtn.type = 'button';
-				okBtn.className = 'uk-button uk-button-primary';
-				okBtn.textContent = labels.renameAnyway || 'Rename anyway';
-				footer.appendChild(cancelBtn);
-				footer.appendChild(okBtn);
-				dialog.appendChild(footer);
-
-				document.body.appendChild(dialog);
-				function cleanup() { if (dialog.open) dialog.close(); dialog.remove(); }
-				cancelBtn.addEventListener('click', cleanup);
-				dialog.addEventListener('close', function () { dialog.remove(); });
-				okBtn.addEventListener('click', function () { cleanup(); onConfirm(); });
-				dialog.showModal();
-				okBtn.focus();
+			var holder = document.createElement('div');
+			holder.className = 'ml-delete-confirm-usage';
+			var h = document.createElement('p');
+			// Neutral heading (not the red warning style) — this is a
+			// success summary, nothing went wrong.
+			h.className = 'ml-rename-done-usage-h';
+			h.textContent = labels.embedsUpdatedHeading || 'Updated embedded references:';
+			holder.appendChild(h);
+			var ul = document.createElement('ul');
+			ul.className = 'ml-delete-confirm-usage-list';
+			refs.forEach(function (r) {
+				var li = document.createElement('li');
+				li.appendChild(buildUsageRef(r));
+				ul.appendChild(li);
 			});
+			holder.appendChild(ul);
+			dialog.appendChild(holder);
+
+			var footer = document.createElement('footer');
+			var okBtn = document.createElement('button');
+			okBtn.type = 'button';
+			okBtn.className = 'uk-button uk-button-primary';
+			okBtn.textContent = labels.close || 'Close';
+			footer.appendChild(okBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+			function cleanup() { if (dialog.open) dialog.close(); dialog.remove(); }
+			okBtn.addEventListener('click', cleanup);
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			dialog.showModal();
+			okBtn.focus();
 		}
 
 		// Build a (data-key → <tr>) map once so we don't have to escape
