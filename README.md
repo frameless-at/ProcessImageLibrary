@@ -28,6 +28,7 @@ A ProcessWire admin module that puts every image across every page and every ima
   - [Placeholders](#placeholders)
   - [Single rename](#single-rename)
   - [Batch rename](#batch-rename)
+  - [Embeds follow the rename](#embeds-follow-the-rename)
 - [Replacing files](#replacing-files)
 - [Deleting images](#deleting-images)
 - [Export / Import](#export--import)
@@ -243,7 +244,7 @@ Tokens expand server-side before sanitization. For single edits `(n)` is always 
 
 Click any filename cell with the host page editable. So `(p)-cover` becomes `summer-festival-cover` straight away.
 
-The server: removes the old basename's variation files (their names embed the old stem; they'd orphan on disk otherwise), calls `Pagefile::rename()`, saves the page, drops the module's row cache. The table re-renders with the new basename in every reference (thumb URL, `data-basename`, selection key).
+The server calls `Pagefile::rename()` — which on PW **3.0.172+** moves the original and every variation file together — saves the page, rewrites any rich-text embeds of the file (see **[Embeds follow the rename](#embeds-follow-the-rename)** below), then drops the module's row cache. The table re-renders with the new basename in every reference (thumb URL, `data-basename`, selection key).
 
 ### Batch rename
 
@@ -251,9 +252,17 @@ Select multiple rows, then click any selected row's filename cell. The popup ope
 
 Collision detection runs per-image inside the same Pageimages collection; a name clash with another (non-selected) file in that field fails that one row with a clear message, others continue.
 
-**Where-used preflight.** A rename changes the basename, so any rich-text field that still embeds the old URL would break. Before applying, the same scan the delete dialog uses runs over every Textarea field; if any selected image is still referenced, a *"Heads up — still embedded in other pages"* dialog lists each one with links to the embedding pages. Fix the embeds first, or choose **Rename anyway**. When nothing is referenced the rename applies straight through with no extra prompt.
+### Embeds follow the rename
 
-![Rename where-used dialog titled "Heads up — still embedded in other pages": a red "Still referenced in rich-text fields" list naming img_6426.jpeg and img_6430.jpeg, each linking to the "Flowers" page body field, with Cancel and "Rename anyway" buttons](docs/screenshots/12-rename-usage.png)
+A rename changes the basename, so any rich-text field that embedded the old URL would otherwise break. Rather than warn you up front, the module fixes them. Right after the file moves, the same Textarea-field scan the delete dialog uses runs over the site, and every embed of the renamed file is rewritten to the new stem:
+
+- **Original and every variation** — `…/{pageId}/{stem}.{ext}`, `…/{stem}.WxH.{ext}`, cropped / hidpi suffixes — all follow along; only the stem changes, the extension and variation suffix are preserved.
+- **All languages** of a multilang Textarea are rewritten in place; untouched translations stay put.
+- **Repeater-hosted images** use the file-owning page as the URL base, so embeds inside Repeater / RepeaterMatrix content are caught too.
+- A **same-stem sibling of a different type** (e.g. `foo.jpg` vs `foo.png` sharing one page folder) is left untouched — the match is pinned to the old extension.
+- A reference that can't be saved is logged and skipped; it never aborts the rename or the remaining rewrites.
+
+When a single rename touched at least one embed, a summary dialog confirms the new filename and lists each reference that was updated, with a link to its page. A plain rename with no embeds applies silently — the cell just flashes green. Batch rename rewrites embeds the same way and reports through its usual result summary.
 
 ## Replacing files
 
