@@ -1520,13 +1520,14 @@ class ProcessImageLibrary extends Process {
 		$match = $this->matchTouchedRows([$key]);
 
 		return $this->jsonResponse([
-			'ok'           => true,
-			'basename'     => $finalBasename,
-			'stem'         => $finalDot === false ? $finalBasename : substr($finalBasename, 0, $finalDot),
-			'ext'          => $finalDot === false ? '' : substr($finalBasename, $finalDot),
-			'unchanged'    => false,
-			'stillMatches' => !in_array($key, $match['vanished'], true),
-			'newTotal'     => $match['newTotal'],
+			'ok'              => true,
+			'basename'        => $finalBasename,
+			'stem'            => $finalDot === false ? $finalBasename : substr($finalBasename, 0, $finalDot),
+			'ext'             => $finalDot === false ? '' : substr($finalBasename, $finalDot),
+			'unchanged'       => false,
+			'stillMatches'    => !in_array($key, $match['vanished'], true),
+			'newTotal'        => $match['newTotal'],
+			'embedsRewritten' => (int) ($result['embedsRewritten'] ?? 0),
 		]);
 	}
 
@@ -2027,7 +2028,170 @@ class ProcessImageLibrary extends Process {
 			return ['ok' => false, 'basename' => $oldBasename, 'error' => 'Rename failed'];
 		}
 
-		return ['ok' => true, 'basename' => (string) $img->basename, 'unchanged' => false];
+		// The file (and its variations) moved to a new on-disk name, but
+		// rich-text embeds reference it by URL and still point at the old
+		// stem. Rewrite them so they survive the rename. A rewrite failure
+		// must never roll back a rename that already succeeded on disk.
+		$embedsRewritten = 0;
+		try {
+			$embedsRewritten = $this->rewriteEmbeddedReferences(
+				$img, $page, $oldBasename, (string) $img->basename
+			);
+		} catch (\Throwable $e) {
+			$this->wire('log')->error(
+				'ImageLibrary: embed rewrite after rename failed for '
+				. $oldBasename . ' → ' . $img->basename . ': ' . $e->getMessage()
+			);
+		}
+
+		return [
+			'ok'              => true,
+			'basename'        => (string) $img->basename,
+			'unchanged'       => false,
+			'embedsRewritten' => $embedsRewritten,
+		];
+	}
+
+	/**
+	 * After a successful file rename, rewrite every rich-text embed that
+	 * still points at the OLD basename so it points at the new one.
+	 *
+	 * Both pwimage plugins (CKEditor + TinyMCE) embed an image by URL:
+	 *   {assets}/files/{pid}/{stem}.{ext}              (original)
+	 *   {assets}/files/{pid}/{stem}.WxH.{ext}          (resized)
+	 *   {assets}/files/{pid}/{stem}.WxH-…{ext}         (cropped / hidpi)
+	 * Pagefile::rename() moves the file AND every variation on disk but
+	 * leaves those URLs dangling. We mirror exactly what happened on disk:
+	 * the page folder ({pid}) is unchanged, the extension is unchanged,
+	 * every variation is carried along — only the stem changes.
+	 *
+	 * Candidate pages are found with the SAME FieldtypeTextarea sweep the
+	 * where-used preflight uses (selector engine ⇒ multilang / repeater /
+	 * access aware), so we rewrite precisely the embeds that preflight
+	 * warned about. The per-URL swap is then anchored on /{pid}/{oldStem}.
+	 * AND the trailing OLD extension, so a same-stem sibling of a different
+	 * type (foo.jpg vs foo.png sharing one page folder) is left untouched.
+	 *
+	 * Referencing pages are saved here (single field only). When a page
+	 * embeds its own image we write through the caller's own $ownerPage
+	 * instance rather than a second copy, so the deferred image-field save
+	 * in the caller doesn't clobber the rewrite. Returns the number of
+	 * (page, field) embeds rewritten.
+	 *
+	 * Note: in a batch rename this runs once per image, like the preflight;
+	 * correctness over micro-optimisation — RTE-embedded library images in
+	 * large batches are rare.
+	 */
+	protected function rewriteEmbeddedReferences(Pageimage $img, Page $ownerPage, string $oldBasename, string $newBasename): int {
+		$oldDot  = strrpos($oldBasename, '.');
+		$oldStem = $oldDot === false ? $oldBasename : substr($oldBasename, 0, $oldDot);
+		$oldExt  = $oldDot === false ? '' : substr($oldBasename, $oldDot + 1);
+		$newDot  = strrpos($newBasename, '.');
+		$newStem = $newDot === false ? $newBasename : substr($newBasename, 0, $newDot);
+		if ($oldStem === '' || $oldExt === '' || $oldStem === $newStem) return 0;
+
+		// {pid} in the asset URL is the page that physically HOLDS the file.
+		// For a repeater-hosted image that's the repeater item page, not the
+		// owner passed into the rename, so $img->page is the authority.
+		$filePage = $img->page;
+		$pid = ($filePage && $filePage->id) ? (int) $filePage->id : (int) $ownerPage->id;
+		if (!$pid) return 0;
+
+		$pages     = $this->wire('pages');
+		$sanitizer = $this->wire('sanitizer');
+
+		// Loose stem-prefix needle finds candidate pages cheaply (catches
+		// the original AND every variation in one query). The trailing
+		// literal '.' guards against stem-prefix collisions (foo. vs foo2.).
+		$needle  = '/' . $pid . '/' . $oldStem . '.';
+		$escaped = $sanitizer->selectorValue($needle);
+
+		// Precise per-URL pattern: /{pid}/{oldStem}.[{variation}.]{oldExt}
+		// The variation segment is dotless / slashless / quoteless so the
+		// match can never run past the embed's own URL token, and pinning
+		// the old extension keeps different-type siblings safe.
+		$pattern = '#(/' . $pid . '/)'
+			. preg_quote($oldStem, '#')
+			. '(\.(?:[^/"\'\s.]+\.)?'
+			. preg_quote($oldExt, '#')
+			. ')#i';
+
+		$rewritten = 0;
+		foreach ($this->wire('fields') as $field) {
+			if (!($field->type instanceof FieldtypeTextarea)) continue;
+			$name = $field->name;
+			try {
+				$ids = $pages->findIDs($name . '%=' . $escaped . ', include=all');
+			} catch (\Throwable $e) {
+				continue;
+			}
+			foreach ($ids as $refId) {
+				$refId = (int) $refId;
+				// Self-embed: reuse the caller's instance so the deferred
+				// image-field save can't overwrite this rewrite.
+				$refPage = ($refId === (int) $ownerPage->id) ? $ownerPage : $pages->get($refId);
+				if (!$refPage->id) continue;
+				try {
+					if ($this->rewriteTextareaField($refPage, $name, $pattern, $newStem)) {
+						$refPage->save($name);
+						$rewritten++;
+					}
+				} catch (\Throwable $e) {
+					// One un-writable reference must not abort the rename or
+					// the remaining rewrites.
+				}
+			}
+		}
+		return $rewritten;
+	}
+
+	/**
+	 * Swap the stem in one textarea field of one page, across every
+	 * language slot, returning true if anything changed (so the caller
+	 * knows whether to save). A preg_replace_callback does the swap so a
+	 * stem containing $ or \ can't corrupt the replacement string.
+	 */
+	protected function rewriteTextareaField(Page $page, string $fieldName, string $pattern, string $newStem): bool {
+		$page->of(false);
+		$value = $page->getUnformatted($fieldName);
+
+		$swap = function (string $html) use ($pattern, $newStem): string {
+			$out = preg_replace_callback($pattern, function ($m) use ($newStem) {
+				// $m[1] = "/{pid}/", $m[2] = ".[variation.]ext"
+				return $m[1] . $newStem . $m[2];
+			}, $html);
+			return $out === null ? $html : $out;
+		};
+
+		// Multilang textarea — a LanguagesPageFieldValue. Rewrite each
+		// language slot in place so untouched translations are preserved.
+		if (is_object($value)
+			&& method_exists($value, 'getLanguageValue')
+			&& method_exists($value, 'setLanguageValue')) {
+			$languages = $this->wire('languages');
+			if ($languages) {
+				$changed = false;
+				foreach ($languages as $lang) {
+					$old = (string) $value->getLanguageValue($lang);
+					if ($old === '') continue;
+					$new = $swap($old);
+					if ($new !== $old) {
+						$value->setLanguageValue($lang, $new);
+						$changed = true;
+					}
+				}
+				if ($changed) $page->set($fieldName, $value);
+				return $changed;
+			}
+		}
+
+		// Single-language textarea — a plain string.
+		$old = (string) $value;
+		if ($old === '') return false;
+		$new = $swap($old);
+		if ($new === $old) return false;
+		$page->set($fieldName, $new);
+		return true;
 	}
 
 	/**
@@ -3826,6 +3990,9 @@ class ProcessImageLibrary extends Process {
 				// Label next to the checkbox widget for a boolean custom subfield.
 				'enabled'          => $this->_('Enabled'),
 				'rename'           => $this->_('New filename'),
+				// Announced after a rename that also fixed embedded
+				// references in rich-text fields; JS substitutes %d.
+				'embedsUpdated'    => $this->_('Renamed — updated %d embedded reference(s)'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),

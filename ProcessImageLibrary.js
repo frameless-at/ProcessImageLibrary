@@ -1015,6 +1015,14 @@
 						td.classList.remove('ml-cell-saving');
 						if (result && result.data && result.data.ok) {
 							flashCell(td, true);
+							// If the rename also fixed rich-text embeds,
+							// say so — flashCell already announced "Saved",
+							// this replaces it with the more informative
+							// count for assistive tech + screen readers.
+							var nEmbeds = result.data.embedsRewritten | 0;
+							if (nEmbeds > 0 && labels.embedsUpdated) {
+								announce(labels.embedsUpdated.replace('%d', nEmbeds));
+							}
 							// Carry the persistent selection across the
 							// basename change — without this, ticking a
 							// row, renaming, then re-using bulk would
