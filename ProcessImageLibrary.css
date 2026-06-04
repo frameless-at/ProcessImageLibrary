@@ -622,13 +622,9 @@ textarea.ml-cell-input {
 }
 .ml-view-btn .fa {
 	display: block;
-	width: 1.2em;
-	text-align: center;
 }
-/* fa-picture-o fills its em box more than fa-table, so it reads bigger
-   at the same font-size — nudge it down to match optically. */
-.ml-view-btn .fa-picture-o {
-	font-size: 0.88em;
+.ml-view-btn .fa-table {
+	font-size: 20px;
 }
 .ml-view-btn:hover,
 .ml-view-btn:focus {
