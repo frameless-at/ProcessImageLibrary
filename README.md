@@ -4,6 +4,40 @@ A ProcessWire admin module that puts every image across every page and every ima
 
 ![Overview screenshot of the Image Library admin page showing bookmark tabs and the collapsed filter bar at the top, a table of images with thumbnails / filename / page / tags / description / size / dimensions / uploaded columns, and a toolbar with the thumbnail-size slider plus the table / gallery view toggle](docs/screenshots/01-overview.png)
 
+## Contents
+
+- [Quick tour](#quick-tour)
+- [Table and gallery views](#table-and-gallery-views)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Permissions](#permissions)
+- [Module configuration](#module-configuration)
+  - [Thumbnail](#thumbnail)
+  - [Pagination](#pagination)
+  - [Default sort](#default-sort)
+  - [Columns](#columns)
+  - [Scope](#scope)
+- [Filtering](#filtering)
+- [Bookmarks](#bookmarks)
+- [The table](#the-table)
+  - [Columns dialog](#columns-dialog)
+  - [Pagination row](#pagination-row)
+- [Inline editing](#inline-editing)
+  - [Editing as paintbrush (bulk)](#editing-as-paintbrush-bulk)
+- [Renaming files](#renaming-files)
+  - [Placeholders](#placeholders)
+  - [Single rename](#single-rename)
+  - [Batch rename](#batch-rename)
+- [Replacing files](#replacing-files)
+- [Deleting images](#deleting-images)
+- [Export / Import](#export--import)
+  - [Export](#export)
+  - [Import](#import)
+- [Performance](#performance)
+- [Accessibility](#accessibility)
+- [File layout](#file-layout)
+- [License](#license)
+
 ## Quick tour
 
 - **Single view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates — including images that live inside Repeater / RepeaterMatrix fields, resolved up to their owner page. Rows are `(page, field, basename)` tuples.
