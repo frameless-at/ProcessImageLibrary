@@ -2,11 +2,12 @@
 
 A ProcessWire admin module that puts every image across every page and every image field into one filterable, inline-editable table. Built for editorial teams that need to audit and update image metadata in bulk — description, tags, custom subfields, multilang values, filenames — without navigating to each page individually.
 
-![Overview screenshot of the Image Library admin page showing the filter bar collapsed at the top, a table of images with thumbnails / page / filename / description / tags / dimensions columns, pagination + columns icon row at top and bottom](docs/screenshots/01-overview.png)
+![Overview screenshot of the Image Library admin page showing bookmark tabs and the collapsed filter bar at the top, a table of images with thumbnails / filename / page / tags / description / size / dimensions / uploaded columns, and a toolbar with the thumbnail-size slider plus the table / gallery view toggle](docs/screenshots/01-overview.png)
 
 ## Quick tour
 
-- **Single table view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates — including images that live inside Repeater / RepeaterMatrix fields, resolved up to their owner page. Rows are `(page, field, basename)` tuples.
+- **Single view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates — including images that live inside Repeater / RepeaterMatrix fields, resolved up to their owner page. Rows are `(page, field, basename)` tuples.
+- **Table or masonry gallery** — toggle between the data table and a thumbnail gallery that packs every image edge-to-edge for fast visual scanning; click a tile to open the per-image editor. A size slider scales thumbnails (table) / tiles (gallery) live. Both choices persist per user via `$user->meta`.
 - **Inline editing** for description, tags and any custom subfields (PW 3.0.142+ field-on-image templates). Click a cell, type, hit save — that's it. Multilang installs get per-language tabs in the editor.
 - **Bulk edits as paintbrush** — tick a few rows, then edit any cell on a selected row to broadcast the change to all selected rows. Works for description, tags, customs, and filenames (with placeholder syntax for numbering).
 - **Replace image in place** — drag a file onto the row or click the upload icon. The basename + every URL stay intact, variations regenerate, metadata is preserved. Extension match enforced so format conversions can't sneak in.
@@ -15,6 +16,12 @@ A ProcessWire admin module that puts every image across every page and every ima
 - **Filter, sort, paginate** with URL-state persistence so the view is bookmarkable. Per-user column visibility and order, page size — all stored in `$user->meta` so they follow the user across devices.
 - **Export / Import** the current filter set as JSON or CSV, edit externally, re-upload to apply. Multilang values round-trip in language-suffixed columns.
 - **Server-side performance** with `findRaw` + `WireCache` so listings stay fast across thousands of images. Thumbnails reuse PW's lazily-generated 260 px admin variation whenever possible, falling back to a custom size only when the configured display exceeds it.
+
+## Table and gallery views
+
+The toolbar carries a **view toggle** (top-right, next to the per-page picker): the data **table** for editing metadata column by column, or a **masonry gallery** for browsing visually. The gallery packs every thumbnail into a tidy left-to-right grid — click any tile to open the per-image editor (full crop / focus / metadata), and the per-row replace / delete actions stay available on hover. The **size slider** beside the toggle scales thumbnails (table) or tiles (gallery) live; the chosen view and zoom both persist per user across devices.
+
+![Masonry gallery view of the Image Library: the same toolbar with the size slider and table / gallery toggle, below it a dense grid of flower thumbnails of varying heights packed edge-to-edge](docs/screenshots/04-masonry.png)
 
 ## Requirements
 
