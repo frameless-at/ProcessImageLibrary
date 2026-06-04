@@ -264,6 +264,8 @@ A rename changes the basename, so any rich-text field that embedded the old URL 
 
 When a single rename touched at least one embed, a summary dialog confirms the new filename and lists each reference that was updated, with a link to its page. A plain rename with no embeds applies silently — the cell just flashes green. Batch rename rewrites embeds the same way and reports through its usual result summary.
 
+![Post-rename summary dialog titled "Renamed": a monospace chip reads "img_6426.jpeg → daisy-white.jpeg", and below an "Updated embedded references" list links "Flowers" · body, with a single Close button](docs/screenshots/12-rename-done.png)
+
 ## Replacing files
 
 Each editable row carries an upload icon in the **top-right** corner of the thumb cell, visible on row hover, plus the row itself is a drop target for files dragged from the OS. Both paths swap the file bytes of an existing image while keeping the basename, every URL pointing at it, and the Pagefile metadata (description, tags, customs, multilang) intact.
