@@ -282,7 +282,7 @@
    the basename indented as a code-style line instead. */
 .ml-delete-confirm-solo {
 	padding: 0.35rem 0.6rem;
-	background: var(--pw-secondary-background, #f4f4f4);
+	background: var(--pw-inputs-background, #f4f4f4);
 	border-radius: 3px;
 	display: inline-block;
 }
@@ -294,7 +294,7 @@
 .ml-delete-confirm-usage {
 	margin-top: 1rem;
 	padding-top: 0.75rem;
-	border-top: 1px solid var(--pw-secondary-background, #eee);
+	border-top: 1px solid var(--pw-border-color, #eee);
 }
 .ml-delete-confirm-usage-h {
 	margin: 0 0 0.4rem;
