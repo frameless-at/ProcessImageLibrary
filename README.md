@@ -238,9 +238,9 @@ The trash icon hangs in the **top-left** corner of each thumb cell — opposite 
 
 A confirm dialog always intervenes — count in the header, first eight filenames listed inline, `+N more` if the batch is larger, plus a hard warning that the operation can't be undone. Successful rows fade out then drop from the DOM; the persistent selection set follows. Per-row failures (page no longer editable, file already gone) surface through the same result modal the bulk edits use.
 
-**Where-used preflight.** Before you confirm, the dialog runs a server-side scan over every Textarea field and lists the pages that still embed each image in their rich text. CKEditor and TinyMCE both insert images through the same `pwimage` plugin with the deterministic URL shape `/site/assets/files/{pageId}/{basename}` (or a sized variation `…/{stem}.WxH.{ext}`), so a single PW selector — `field%='/pageId/stem.'` — catches the original AND every PW-derived variation. The selector route is multilang-, repeater- and access-aware out of the box. Each reference is rendered as a link straight to that page's edit screen (new tab) so you can fix the embed before — or instead of — deleting. The list is advisory; you can still confirm the delete.
-
 ![Delete confirm dialog for a batch of 4 images: the header counts the selection, the files are listed inline, and a red "Still referenced in rich-text fields" block names img_6426.jpeg with a link to the "Flowers" page body field that still embeds it](docs/screenshots/11-delete.png)
+
+**Where-used preflight.** Before you confirm, the dialog runs a server-side scan over every Textarea field and lists the pages that still embed each image in their rich text. CKEditor and TinyMCE both insert images through the same `pwimage` plugin with the deterministic URL shape `/site/assets/files/{pageId}/{basename}` (or a sized variation `…/{stem}.WxH.{ext}`), so a single PW selector — `field%='/pageId/stem.'` — catches the original AND every PW-derived variation. The selector route is multilang-, repeater- and access-aware out of the box. Each reference is rendered as a link straight to that page's edit screen (new tab) so you can fix the embed before — or instead of — deleting. The list is advisory; you can still confirm the delete.
 
 ## Export / Import
 
