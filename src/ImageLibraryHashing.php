@@ -42,6 +42,11 @@ trait ImageLibraryHashing {
 	 *  1000+ image site never blocks a single request past this. */
 	const HASH_SCAN_BUDGET_MS = 8000;
 
+	/** Per-placement "keep custom metadata" locks. A row here means that
+	 *  (page, field, basename) is excluded from cluster-wide propagation, so
+	 *  a deliberately different caption/alt is never overwritten. */
+	const METALOCK_TABLE = 'process_imagelibrary_metalock';
+
 	/**
 	 * Best available content-hash algorithm. xxh128 (PHP 8.1+) is several×
 	 * faster than md5 and ample for dedup (non-cryptographic is fine);
@@ -93,9 +98,95 @@ trait ImageLibraryHashing {
 	protected function dropHashTable(): void {
 		try {
 			$this->wire('database')->exec('DROP TABLE IF EXISTS `' . self::HASH_TABLE . '`');
+			$this->wire('database')->exec('DROP TABLE IF EXISTS `' . self::METALOCK_TABLE . '`');
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: hash table drop failed: ' . $e->getMessage());
 		}
+	}
+
+	/** Create the metadata-lock table lazily (once per request). */
+	protected function ensureMetaLockTable(): void {
+		static $ensured = false;
+		if ($ensured) return;
+		$ensured = true;
+		$sql = 'CREATE TABLE IF NOT EXISTS `' . self::METALOCK_TABLE . '` (
+			page_id INT UNSIGNED NOT NULL,
+			field_name VARCHAR(128) NOT NULL,
+			basename VARCHAR(191) NOT NULL,
+			PRIMARY KEY (page_id, field_name, basename)
+		) ENGINE=InnoDB DEFAULT CHARSET=ascii';
+		try {
+			$this->wire('database')->exec($sql);
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: metalock table create failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * All locked placements as a set keyed "pageId\0fieldName\0basename".
+	 * Loaded once for the whole duplicates render.
+	 *
+	 * @return array<string,bool>
+	 */
+	protected function loadLockSet(): array {
+		$this->ensureMetaLockTable();
+		$out = [];
+		try {
+			$stmt = $this->wire('database')->query(
+				'SELECT page_id, field_name, basename FROM `' . self::METALOCK_TABLE . '`'
+			);
+			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+				$out[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']] = true;
+			}
+		} catch (\Throwable $e) {
+		}
+		return $out;
+	}
+
+	/** Add or remove one placement's metadata lock. */
+	protected function setMetaLock(int $pageId, string $fieldName, string $basename, bool $locked): void {
+		$this->ensureMetaLockTable();
+		$db = $this->wire('database');
+		try {
+			if ($locked) {
+				$stmt = $db->prepare(
+					'INSERT IGNORE INTO `' . self::METALOCK_TABLE . '` (page_id, field_name, basename) VALUES (?, ?, ?)'
+				);
+			} else {
+				$stmt = $db->prepare(
+					'DELETE FROM `' . self::METALOCK_TABLE . '` WHERE page_id = ? AND field_name = ? AND basename = ?'
+				);
+			}
+			$stmt->execute([$pageId, $fieldName, $basename]);
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: metalock write failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Members of one exact-duplicate cluster, by content hash.
+	 *
+	 * @return array<int,array{pageId:int,fieldName:string,basename:string}>
+	 */
+	protected function loadClusterMembers(string $contentHash): array {
+		$this->ensureHashTable();
+		$out = [];
+		if ($contentHash === '') return $out;
+		try {
+			$stmt = $this->wire('database')->prepare(
+				'SELECT page_id, field_name, basename FROM `' . self::HASH_TABLE . '` WHERE content_hash = ?'
+			);
+			$stmt->execute([$contentHash]);
+			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+				$out[] = [
+					'pageId'    => (int) $r['page_id'],
+					'fieldName' => (string) $r['field_name'],
+					'basename'  => (string) $r['basename'],
+				];
+			}
+		} catch (\Throwable $e) {
+		}
+		return $out;
 	}
 
 	/**

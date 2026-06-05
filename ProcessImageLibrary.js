@@ -2937,6 +2937,76 @@
 			runChunk(0);
 		});
 
+		// -- Duplicate metadata: propagate + per-copy lock -------------
+		// Editing a cluster's description reuses the normal inline editor
+		// (the lead copy is a .ml-cell-editable). These two handlers add
+		// the dedup-specific actions: copy that description to the other
+		// copies, and lock a copy so it keeps its own text.
+		results && results.addEventListener('click', function (e) {
+			var apply = e.target.closest && e.target.closest('.ml-dup-apply');
+			if (!apply || apply.disabled || !config.propagateUrl) return;
+			e.preventDefault();
+			var cluster = apply.closest('.ml-dup-cluster');
+			var status  = cluster && cluster.querySelector('.ml-dup-apply-status');
+			apply.disabled = true;
+			var fd = new FormData();
+			fd.append('hash',      apply.dataset.hash || '');
+			fd.append('subfield',  apply.dataset.subfield || 'description');
+			fd.append('pageId',    apply.dataset.pageId || '');
+			fd.append('fieldName', apply.dataset.field || '');
+			fd.append('basename',  apply.dataset.basename || '');
+			appendCsrf(fd);
+			fetch(config.propagateUrl, {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
+			}).then(function (r) { return r.json(); }).then(function (d) {
+				apply.disabled = false;
+				if (!d || !d.ok) throw new Error('propagate failed');
+				if (status) {
+					status.hidden = false;
+					var msg = (labels.propagated || 'Applied to %d copy/copies').replace('%d', d.applied | 0);
+					if (d.skippedLocked) {
+						msg += ' ' + (labels.propagatedLocked || '(%d kept own)').replace('%d', d.skippedLocked);
+					}
+					status.textContent = msg;
+				}
+				// Re-render so every copy's shown description updates.
+				setTimeout(function () { replaceFromQs(location.search, false); }, 900);
+			}).catch(function () {
+				apply.disabled = false;
+				if (status) { status.hidden = false; status.textContent = labels.error || 'Failed'; }
+			});
+		});
+		results && results.addEventListener('change', function (e) {
+			var lock = e.target.closest && e.target.closest('.ml-dup-lock');
+			if (!lock || !config.metaLockUrl) return;
+			var li = lock.closest('li');
+			if (!li) return;
+			var fd = new FormData();
+			fd.append('pageId',    li.dataset.pageId || '');
+			fd.append('fieldName', li.dataset.field || '');
+			fd.append('basename',  li.dataset.basename || '');
+			fd.append('locked',    lock.checked ? '1' : '0');
+			appendCsrf(fd);
+			fetch(config.metaLockUrl, {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
+			}).then(function (r) { return r.json(); }).then(function (d) {
+				if (!d || !d.ok) lock.checked = !lock.checked; // revert on failure
+			}).catch(function () { lock.checked = !lock.checked; });
+		});
+		// Leaving the duplicates view via any bookmark tab dims the
+		// Duplicates tab (it's a full link, so entering re-renders cleanly).
+		var dupTabEl = root.querySelector('.ml-dup-tab');
+		var dupTabLi = dupTabEl && dupTabEl.closest('li');
+		if (dupTabLi) {
+			root.addEventListener('click', function (e) {
+				if (e.target.closest && e.target.closest('.ml-bookmark')) {
+					dupTabLi.classList.remove('uk-active');
+				}
+			});
+		}
+
 		// -- Bookmarks -------------------------------------------------
 		// Tab strip above the filter bar; each tab is a saved filter
 		// combination. State lives in $user->meta via the existing
