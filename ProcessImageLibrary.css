@@ -698,6 +698,22 @@ textarea.ml-cell-input {
    two zones stack vertically on narrow viewports, and rework the
    gallery so it fills the viewport instead of overflowing it. */
 @media (max-width: 640px) {
+	/* Guard against horizontal scroll coming from admin-theme chrome
+	   parked off-screen — notably PW's debug panel container, which the
+	   theme positions at `left: -75%; width: 75%`. If that element isn't
+	   fixed it extends the document's scrollable width and the whole
+	   page (masthead included) can be panned sideways.
+
+	   overflow-x: clip removes the off-viewport bleed WITHOUT turning the
+	   root into a scroll container (unlike overflow:hidden), so it won't
+	   break sticky chrome, and it doesn't clip position:fixed descendants
+	   (offcanvas nav, opened panels) — those are positioned against the
+	   viewport, so they still slide in normally. If the panel IS fixed it
+	   never caused overflow to begin with, so this is harmless either
+	   way. Scoped to our admin page (our stylesheet only loads here). */
+	html.pw {
+		overflow-x: clip;
+	}
 	.ml-pagination {
 		flex-wrap: wrap;
 		row-gap: 0.5rem;
