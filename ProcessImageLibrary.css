@@ -695,25 +695,9 @@ textarea.ml-cell-input {
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
    columnWidth handling; here we let the pagination flex-wrap so the
-   two zones stack vertically on narrow viewports, and rework the
-   gallery so it fills the viewport instead of overflowing it. */
+   two zones stack vertically on narrow viewports, and shrink the
+   gallery columns so a phone shows several thumbnails per row. */
 @media (max-width: 640px) {
-	/* Guard against horizontal scroll coming from admin-theme chrome
-	   parked off-screen — notably PW's debug panel container, which the
-	   theme positions at `left: -75%; width: 75%`. If that element isn't
-	   fixed it extends the document's scrollable width and the whole
-	   page (masthead included) can be panned sideways.
-
-	   overflow-x: clip removes the off-viewport bleed WITHOUT turning the
-	   root into a scroll container (unlike overflow:hidden), so it won't
-	   break sticky chrome, and it doesn't clip position:fixed descendants
-	   (offcanvas nav, opened panels) — those are positioned against the
-	   viewport, so they still slide in normally. If the panel IS fixed it
-	   never caused overflow to begin with, so this is harmless either
-	   way. Scoped to our admin page (our stylesheet only loads here). */
-	html.pw {
-		overflow-x: clip;
-	}
 	.ml-pagination {
 		flex-wrap: wrap;
 		row-gap: 0.5rem;
@@ -724,21 +708,16 @@ textarea.ml-cell-input {
 	}
 	/* Gallery: keep the masonry (varied-height tiles) AND the live
 	   thumb-size slider on mobile — just shrink the column so a phone
-	   shows a handful of columns instead of one giant track, and stop
-	   the sideways scroll.
+	   shows a handful of columns instead of one giant track.
 
 	   Column / row / gap keep the desktop 220:4:10 ratio (so the
 	   server-computed row spans stay proportionally correct), only
 	   multiplied by a mobile factor. At the slider's low end a phone
 	   shows ~4–5 columns at a comfortable thumbnail size; dragging the
 	   slider right enlarges them to 1–2. (The factor is deliberately
-	   gentle — 0.33 made the thumbnails too small at the low end.)
-
-	   min(…, 100%) caps each track at the container width and auto-fill
-	   lays down only tracks that fit, so the grid can never exceed the
-	   viewport — no horizontal scroll, whatever the zoom. */
+	   gentle — 0.33 made the thumbnails too small at the low end.) */
 	.ml-masonry {
-		grid-template-columns: repeat(auto-fill, min(calc(220px * var(--ml-thumb-scale, 1) * 0.7), 100%));
+		grid-template-columns: repeat(auto-fill, calc(220px * var(--ml-thumb-scale, 1) * 0.7));
 		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.7);
 		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.7);
 	}
