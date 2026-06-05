@@ -3931,9 +3931,17 @@ class ProcessImageLibrary extends Process {
 		$config = $this->wire('config');
 		$session = $this->wire('session');
 		$baseUrl = $config->urls($this);
-		$version = $this->wire('modules')->getModuleInfoProperty($this, 'version');
-		$config->styles->add($baseUrl . 'ProcessImageLibrary.css?v=' . $version);
-		$config->scripts->add($baseUrl . 'ProcessImageLibrary.js?v=' . $version);
+		// Cache-bust on each asset's mtime, not the module version, so
+		// edits to the CSS / JS take effect on the next load without a
+		// version bump or a manual hard-refresh. Per-file so a CSS-only
+		// change doesn't force the JS to re-download. Falls back to the
+		// module version if filemtime is unavailable (e.g. stat disabled).
+		$baseDir = $config->paths($this);
+		$version = (string) $this->wire('modules')->getModuleInfoProperty($this, 'version');
+		$cssVer  = @filemtime($baseDir . 'ProcessImageLibrary.css') ?: $version;
+		$jsVer   = @filemtime($baseDir . 'ProcessImageLibrary.js')  ?: $version;
+		$config->styles->add($baseUrl . 'ProcessImageLibrary.css?v=' . $cssVer);
+		$config->scripts->add($baseUrl . 'ProcessImageLibrary.js?v=' . $jsVer);
 
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
