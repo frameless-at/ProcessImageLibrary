@@ -644,65 +644,72 @@ textarea.ml-cell-input {
 	color: var(--pw-main-color, #5b8cd6);
 }
 
-/* Masonry / gallery view — CSS grid packed by row span. Each tile
-   gets an inline `grid-row-end: span N` (N computed server-side from
-   the image's aspect ratio), so tiles tile left-to-right in reading
-   order with no column-flow holes. The fine row unit, the column
-   width and the gap ALL scale with --ml-thumb-scale, so the integer
-   span stays correct at every zoom. Geometry kept in sync with the
-   MASONRY_* constants in the module (COL 220 / ROW 4 / GAP 10). The
-   block keeps generous breathing room above and below.
+/* Masonry / gallery view — TRUE masonry: thumbnails at their NATURAL
+   aspect ratio (width 100% of the column, height auto) so nothing is
+   cropped, and the columns fill the container width edge-to-edge.
 
-   Columns are minmax(<col>, 1fr): <col> is the MINIMUM track width
-   (the slider-scaled 220px design size, where the row-span proportions
-   are exact), and 1fr lets every track grow to consume the leftover so
-   the grid ALWAYS fills the container edge-to-edge — no centred margin,
-   no half-empty last row of width. The mild over-width from the stretch
-   is absorbed by the thumbnails' object-fit: cover. */
+   Layout is done by JS (layoutGallery): it distributes the flat .ml-card
+   tiles round-robin into N equal flex columns, so the reading order
+   stays left-to-right (row by row) and the size slider can change N
+   live. N and the column wrappers come from JS; CSS only styles them.
+
+   Before that JS runs — or if it's disabled — the :not([data-cols])
+   fallback lays the same tiles out with CSS multi-column: same no-crop,
+   full-width result, only the reading order is column-major. So the
+   gallery is never broken, even pre-hydration.
+
+   --ml-gap is the single spacing token (column gap + vertical gap),
+   scaled by the size slider. */
 .ml-masonry {
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ml-thumb-scale, 1)), 1fr));
-	grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1));
-	grid-auto-flow: row dense;
-	gap: calc(10px * var(--ml-thumb-scale, 1));
+	--ml-gap: calc(10px * var(--ml-thumb-scale, 1));
 	margin: 1.5rem 0 1.75rem;
+}
+/* JS-laid-out state: equal-width flex columns, left-to-right order. */
+.ml-masonry[data-cols] {
+	display: flex;
+	align-items: flex-start;
+	gap: var(--ml-gap);
+}
+.ml-masonry-col {
+	flex: 1 1 0;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: var(--ml-gap);
+}
+/* Fallback before JS hydrates: CSS multi-column — still no crop, still
+   full width, just column-major order. */
+.ml-masonry:not([data-cols]) {
+	column-width: calc(220px * var(--ml-thumb-scale, 1));
+	column-gap: var(--ml-gap);
+}
+.ml-masonry:not([data-cols]) > .ml-card {
+	break-inside: avoid;
+	-webkit-column-break-inside: avoid;
+	margin-bottom: var(--ml-gap);
 }
 .ml-card {
 	position: relative;
 }
-/* The tile fills its grid cell exactly; the image covers it at its
-   natural ratio (the few px of span-rounding are absorbed by cover,
-   never shown as an internal gap). */
+/* Natural-ratio thumbnail — fills the column width, height follows the
+   image's own proportions. No object-fit: cover, so no crop. */
 .ml-card .ml-cell-thumb {
+	display: block;
 	width: 100%;
-	height: 100%;
 }
 .ml-card .ml-cell-thumb img,
 .ml-card .ml-cell-thumb img.ml-thumb-crop {
+	display: block;
 	width: 100%;
-	height: 100%;
+	height: auto;
 	max-width: none;
 	max-height: none;
-	object-fit: cover;
 }
 /* Hover affordance drawn INSIDE the tile (negative offset) so it can
    never bleed a stray line into a neighbouring cell. */
 .ml-card .ml-cell-thumb[data-file-hash] img:hover {
 	outline: 2px solid var(--pw-main-color, #5b8cd6);
 	outline-offset: -2px;
-}
-
-/* Landscape phones + small tablets (641–1024px) sit above the phone
-   breakpoint but are still far too narrow for the 220px desktop column,
-   which would leave only 3–4 oversized tiles. Use an in-between factor
-   so this range shows ~5–7 columns. Same minmax(<col>, 1fr) ratio, so
-   the row spans stay proportional and the row fills edge-to-edge. */
-@media (min-width: 641px) and (max-width: 1024px) {
-	.ml-masonry {
-		grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ml-thumb-scale, 1) * 0.6), 1fr));
-		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.6);
-		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.6);
-	}
 }
 
 /* Variations cell renders just a count — right-align like other
@@ -725,17 +732,11 @@ textarea.ml-cell-input {
 		margin-left: 0;
 		flex-wrap: wrap;
 	}
-	/* Gallery: same minmax(<col>, 1fr) fill-the-width masonry as the
-	   desktop block, with the minimum column shrunk by a mobile factor
-	   so a phone shows more, smaller thumbnails. Column / row / gap keep
-	   the 220:4:10 ratio (× factor), so the server row spans stay
-	   proportionally correct and the tiles fill the full row width
-	   regardless of how many fit. The slider still scales everything, so
-	   dragging it left packs more columns and right fewer / larger. */
-	.ml-masonry {
-		grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ml-thumb-scale, 1) * 0.4), 1fr));
-		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.4);
-		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.4);
+	/* Pre-JS masonry fallback: smaller column on phones so the brief
+	   un-hydrated state isn't one giant column. (The hydrated flex layout
+	   gets its column count from layoutGallery in JS.) */
+	.ml-masonry:not([data-cols]) {
+		column-width: calc(88px * var(--ml-thumb-scale, 1));
 	}
 	/* Table view keeps the small inline thumbnail cap. */
 	.ml-table .ml-cell-thumb img {

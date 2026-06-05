@@ -2066,6 +2066,8 @@
 				if (root._mlApplyColumnOrder) root._mlApplyColumnOrder();
 				// Re-rendered pagination row → re-sync the thumb-size slider.
 				if (root._mlApplyThumbScale) root._mlApplyThumbScale();
+				// Fresh gallery markup → (re)distribute tiles into columns.
+				if (root._mlLayoutGallery) root._mlLayoutGallery();
 				if (push) {
 					history.pushState({ ml: qs }, '', location.pathname + qs);
 				}
@@ -2792,6 +2794,10 @@
 			document.querySelectorAll('.ml-thumb-size-slider.ui-slider').forEach(function (el) {
 				if ($ && $(el).slider('value') !== v) $(el).slider('value', v);
 			});
+			// Re-flow the gallery: a new zoom may change the column count.
+			// Cheap no-op while dragging within one column-count band
+			// (layoutGallery early-returns when the count is unchanged).
+			if (root._mlLayoutGallery) root._mlLayoutGallery();
 			saveUserPrefs();
 		}
 		// Turn an empty .ml-thumb-size-slider span into a jQuery-UI slider
@@ -2827,6 +2833,62 @@
 		// Re-init / re-sync the slider after an AJAX swap re-renders the
 		// pagination row (the CSS var on .ml-root persists across swaps).
 		root._mlApplyThumbScale = applyThumbScale;
+
+		// -- Gallery masonry layout ------------------------------------
+		// TRUE masonry: each thumbnail keeps its natural aspect ratio (no
+		// crop) and the tiles are distributed round-robin into N equal
+		// flex columns, so the reading order stays left-to-right (row by
+		// row) and the columns fill the full width. N is derived from the
+		// container width and the size slider, recomputed on render, on
+		// slider change and on resize. Re-parenting cards is safe: they
+		// stay inside .ml-results, where every handler is delegated.
+		var galleryCards = null; // source-ordered .ml-card nodes for this render
+		function galleryColumnCount(masonry) {
+			var w = masonry.clientWidth || 0;
+			if (w <= 0) return 1;
+			// Target column width: the 220px design size at zoom 1, with a
+			// smaller base on phones / tablets so narrow screens still show
+			// several columns. Scaled live by the slider (bigger zoom →
+			// wider target → fewer, larger columns).
+			var base = w <= 640 ? 88 : (w <= 1024 ? 132 : 220);
+			var gap = 10;
+			var n = Math.floor((w + gap) / (base * thumbScale + gap));
+			return Math.max(1, n);
+		}
+		function layoutGallery() {
+			var masonry = results && results.querySelector('.ml-masonry');
+			if (!masonry) { galleryCards = null; return; }
+			// On a fresh server render the cards are flat children in source
+			// order (no data-cols yet) — capture them. Once columnised the
+			// DOM order is column-major, so reuse the captured source order.
+			if (!masonry.hasAttribute('data-cols')) {
+				galleryCards = Array.prototype.slice.call(masonry.children).filter(function (el) {
+					return el.classList && el.classList.contains('ml-card');
+				});
+			}
+			if (!galleryCards || !galleryCards.length) return;
+			var n = galleryColumnCount(masonry);
+			if (masonry.getAttribute('data-cols') === String(n)) return; // unchanged → skip
+			var cols = [], i;
+			for (i = 0; i < n; i++) {
+				var col = document.createElement('div');
+				col.className = 'ml-masonry-col';
+				cols.push(col);
+			}
+			// Round-robin (card i → column i % n) keeps the first row in
+			// left-to-right source order.
+			galleryCards.forEach(function (card, idx) { cols[idx % n].appendChild(card); });
+			masonry.textContent = '';
+			for (i = 0; i < n; i++) masonry.appendChild(cols[i]);
+			masonry.setAttribute('data-cols', String(n));
+		}
+		root._mlLayoutGallery = layoutGallery;
+		var galleryResizeTimer = null;
+		window.addEventListener('resize', function () {
+			if (galleryResizeTimer) clearTimeout(galleryResizeTimer);
+			galleryResizeTimer = setTimeout(layoutGallery, 150);
+		});
+		layoutGallery();
 
 		// -- Bookmarks -------------------------------------------------
 		// Tab strip above the filter bar; each tab is a saved filter

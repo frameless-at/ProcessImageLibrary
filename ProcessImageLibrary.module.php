@@ -71,15 +71,12 @@ class ProcessImageLibrary extends Process {
 	const VIEW_TABLE   = 'table';
 	const VIEW_MASONRY = 'masonry';
 
-	// Masonry grid geometry (CSS-grid row-span packing). COL = base
-	// column width in px at zoom 1; ROW = the fine grid-auto-rows unit
-	// each tile spans an integer number of; GAP = track gap. All three
-	// scale together with --ml-thumb-scale, so a tile's integer row span
-	// (computed server-side from the image's aspect ratio) stays correct
-	// at every zoom level. Kept in sync with the .ml-masonry CSS.
+	// Masonry base column width in px at zoom 1. The gallery is now laid
+	// out client-side (layoutGallery distributes natural-ratio tiles into
+	// equal flex columns), so this is only the square-ish fallback used
+	// for an <img>'s width/height attrs when the source dimensions are
+	// unknown — it no longer drives any server-side row-span packing.
 	const MASONRY_COL = 220;
-	const MASONRY_ROW = 4;
-	const MASONRY_GAP = 10;
 
 	/**
 	 * Admin-configurable thumbnail dimensions, JPEG quality and
@@ -789,15 +786,13 @@ class ProcessImageLibrary extends Process {
 		foreach ($slice as $row) {
 			$editable = !empty($row['pageEditUrl']);
 
-			// Row span from the tile's NATURAL aspect ratio (the gallery
-			// shows the full uncropped thumb). Rendered height at zoom 1 =
-			// COL × (srcH / srcW); span = that height expressed in (ROW +
-			// GAP) units. Square fallback when the source dims are unknown.
+			// Natural source dims drive the <img> width/height attrs below,
+			// so the browser reserves the correct (uncropped) box before the
+			// bytes land. Layout is done client-side by layoutGallery(),
+			// which distributes these flat cards into equal columns — no
+			// server-computed row span any more.
 			$srcW = (int) ($row['thumbWidth']  ?? 0);
 			$srcH = (int) ($row['thumbHeight'] ?? 0);
-			$ratioH    = ($srcW > 0 && $srcH > 0) ? ($srcH / $srcW) : 1.0;
-			$renderedH = self::MASONRY_COL * $ratioH;
-			$span      = max(1, (int) round(($renderedH + self::MASONRY_GAP) / (self::MASONRY_ROW + self::MASONRY_GAP)));
 
 			$editAttrs = sprintf(
 				'data-page-id="%d" data-field="%s" data-basename="%s" data-file-hash="%s"',
@@ -821,7 +816,7 @@ class ProcessImageLibrary extends Process {
 					$san->entities((string) ($row['pageName']  ?? ''))
 				);
 			}
-			$out .= '<div class="ml-row ml-card" style="grid-row-end:span ' . $span . '"' . $rowAttrs . '>';
+			$out .= '<div class="ml-row ml-card"' . $rowAttrs . '>';
 
 			if ($editable) {
 				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
