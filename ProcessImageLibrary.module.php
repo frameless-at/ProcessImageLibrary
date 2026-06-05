@@ -3,6 +3,7 @@
 require_once __DIR__ . '/src/ImageLibraryDiscovery.php';
 require_once __DIR__ . '/src/ImageLibraryMultilang.php';
 require_once __DIR__ . '/src/ImageLibraryExportImport.php';
+require_once __DIR__ . '/src/ImageLibraryHashing.php';
 
 /**
  * Process Image Library
@@ -33,6 +34,7 @@ class ProcessImageLibrary extends Process {
 	use ImageLibraryDiscovery;
 	use ImageLibraryMultilang;
 	use ImageLibraryExportImport;
+	use ImageLibraryHashing;
 
 	const ADMIN_PAGE_NAME = 'image-library';
 	const PERMISSION_NAME = 'image-library-access';
@@ -5076,6 +5078,39 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * AJAX endpoint: compute + store content fingerprints (exact byte hash +
+	 * perceptual dHash) for the managed image set, one time-budgeted chunk per
+	 * call. The fingerprints feed duplicate detection (a later phase).
+	 *
+	 * Internal plumbing — there is no UI trigger yet. A client drives it to
+	 * completion by re-POSTing with the returned `nextOffset` as `offset`
+	 * until `complete` is true. POST + CSRF.
+	 */
+	public function ___executeScanHashes() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		// A chunk can decode many full-resolution images for the dHash;
+		// give it room, matching the Replace endpoint's envelope.
+		@set_time_limit(60);
+		@ini_set('memory_limit', '512M');
+
+		$offset = (int) $this->wire('input')->post('offset');
+		$result = $this->scanHashes($offset);
+		$result['ok'] = true;
+		return $this->jsonResponse($result);
+	}
+
+	/**
 	 * Install: create admin page under Setup and the access permission.
 	 */
 	public function ___install() {
@@ -5096,6 +5131,7 @@ class ProcessImageLibrary extends Process {
 	public function ___uninstall() {
 		$cache = $this->wire('cache');
 		$cache->deleteFor($this, '*');
+		$this->dropHashTable();
 
 		parent::___uninstall();
 	}
