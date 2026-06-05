@@ -231,6 +231,67 @@ trait ImageLibraryHashing {
 	}
 
 	/**
+	 * Exact-duplicate clusters from the fingerprint store: every content_hash
+	 * shared by 2+ images, with each member's identity, biggest cluster first.
+	 * Also returns how many images are fingerprinted so the caller can tell
+	 * "not scanned yet" (0) from "scanned, no duplicates" (>0, no clusters).
+	 *
+	 * @return array{scanned:int, clusters:array<int,array{hash:string, members:array<int,array{pageId:int,fieldName:string,basename:string}>}>}
+	 */
+	protected function loadExactClusters(): array {
+		$this->ensureHashTable();
+		$db = $this->wire('database');
+
+		$scanned = 0;
+		try {
+			$scanned = (int) $db->query(
+				'SELECT COUNT(*) FROM `' . self::HASH_TABLE . '` WHERE content_hash IS NOT NULL'
+			)->fetchColumn();
+		} catch (\Throwable $e) {
+			return ['scanned' => 0, 'clusters' => []];
+		}
+		if (!$scanned) return ['scanned' => 0, 'clusters' => []];
+
+		$clusters = [];
+		try {
+			$dupHashes = [];
+			$stmt = $db->query(
+				'SELECT content_hash, COUNT(*) c FROM `' . self::HASH_TABLE . '`
+				 WHERE content_hash IS NOT NULL
+				 GROUP BY content_hash HAVING c > 1 ORDER BY c DESC, content_hash'
+			);
+			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+				$dupHashes[] = (string) $r['content_hash'];
+			}
+			if ($dupHashes) {
+				$in = implode(',', array_fill(0, count($dupHashes), '?'));
+				$m  = $db->prepare(
+					'SELECT content_hash, page_id, field_name, basename
+					 FROM `' . self::HASH_TABLE . '` WHERE content_hash IN (' . $in . ')'
+				);
+				$m->execute($dupHashes);
+				$byHash = [];
+				while ($r = $m->fetch(\PDO::FETCH_ASSOC)) {
+					$byHash[(string) $r['content_hash']][] = [
+						'pageId'    => (int) $r['page_id'],
+						'fieldName' => (string) $r['field_name'],
+						'basename'  => (string) $r['basename'],
+					];
+				}
+				// Preserve the size-desc order from the GROUP BY.
+				foreach ($dupHashes as $h) {
+					if (!empty($byHash[$h])) {
+						$clusters[] = ['hash' => $h, 'members' => $byHash[$h]];
+					}
+				}
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: cluster query failed: ' . $e->getMessage());
+		}
+		return ['scanned' => $scanned, 'clusters' => $clusters];
+	}
+
+	/**
 	 * Time-budgeted fingerprint scan over the whole managed image set.
 	 *
 	 * Walks the cached row list from $offset, skipping images whose stored

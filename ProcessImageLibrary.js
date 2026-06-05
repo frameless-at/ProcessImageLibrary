@@ -2890,6 +2890,53 @@
 		});
 		layoutGallery();
 
+		// -- Duplicate scan --------------------------------------------
+		// The duplicates view renders a Scan / Re-scan button. Drive the
+		// chunked ___executeScanHashes endpoint to completion (passing the
+		// returned nextOffset back as offset), show progress, then re-render
+		// the view so the freshly-found clusters appear. Delegated on the
+		// persistent .ml-results so it survives AJAX swaps.
+		results && results.addEventListener('click', function (e) {
+			var btn = e.target.closest && e.target.closest('.ml-dups-scan');
+			if (!btn || btn.disabled || !config.scanHashesUrl) return;
+			e.preventDefault();
+			var progress = results.querySelector('.ml-dups-progress');
+			btn.disabled = true;
+			if (progress) {
+				progress.hidden = false;
+				progress.textContent = labels.scanning || 'Scanning…';
+			}
+			function runChunk(offset) {
+				var fd = new FormData();
+				fd.append('offset', String(offset));
+				appendCsrf(fd);
+				fetch(config.scanHashesUrl, {
+					method: 'POST',
+					credentials: 'same-origin',
+					headers: { 'X-Requested-With': 'XMLHttpRequest' },
+					body: fd
+				}).then(function (res) { return res.json(); }).then(function (data) {
+					if (!data || !data.ok) throw new Error('scan failed');
+					var done = data.nextOffset | 0, total = data.total | 0;
+					if (progress) {
+						var fmt = labels.scanProgress || 'Scanning… %1$d / %2$d';
+						progress.textContent = fmt
+							.replace('%1$d', Math.min(done, total)).replace('%2$d', total);
+					}
+					if (!data.complete) {
+						runChunk(done);
+					} else {
+						// Fresh clusters → re-render the duplicates view.
+						replaceFromQs(location.search, false);
+					}
+				}).catch(function () {
+					btn.disabled = false;
+					if (progress) progress.textContent = labels.error || 'Scan failed';
+				});
+			}
+			runChunk(0);
+		});
+
 		// -- Bookmarks -------------------------------------------------
 		// Tab strip above the filter bar; each tab is a saved filter
 		// combination. State lives in $user->meta via the existing

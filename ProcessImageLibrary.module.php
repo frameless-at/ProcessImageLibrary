@@ -68,10 +68,13 @@ class ProcessImageLibrary extends Process {
 	const THUMB_SCALE_DEFAULT = 1.0;
 
 	// Result layout. 'table' is the default data-grid; 'masonry' is a
-	// thumbnail-only gallery (click a tile to open the per-image editor).
-	// Persisted per-user in $user->meta alongside the other view prefs.
-	const VIEW_TABLE   = 'table';
-	const VIEW_MASONRY = 'masonry';
+	// thumbnail-only gallery (click a tile to open the per-image editor);
+	// 'duplicates' groups byte-identical (and, later, near-identical) copies
+	// into clusters from the fingerprint store. Persisted per-user in
+	// $user->meta alongside the other view prefs.
+	const VIEW_TABLE      = 'table';
+	const VIEW_MASONRY    = 'masonry';
+	const VIEW_DUPLICATES = 'duplicates';
 
 	// Masonry base column width in px at zoom 1. The gallery is now laid
 	// out client-side (layoutGallery distributes natural-ratio tiles into
@@ -270,7 +273,7 @@ class ProcessImageLibrary extends Process {
 					$thumbScale = $ts;
 				}
 			}
-			if (isset($raw['viewMode']) && in_array($raw['viewMode'], [self::VIEW_TABLE, self::VIEW_MASONRY], true)) {
+			if (isset($raw['viewMode']) && in_array($raw['viewMode'], $this->viewModes(), true)) {
 				$viewMode = (string) $raw['viewMode'];
 			}
 		}
@@ -283,6 +286,11 @@ class ProcessImageLibrary extends Process {
 		];
 	}
 
+	/** The whitelist of valid result-layout modes. */
+	protected function viewModes(): array {
+		return [self::VIEW_TABLE, self::VIEW_MASONRY, self::VIEW_DUPLICATES];
+	}
+
 	/**
 	 * Effective result layout. An explicit ?view= request param wins and
 	 * is persisted to the user's prefs (so the choice survives a clean
@@ -293,7 +301,7 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function getViewMode(): string {
 		$req = (string) $this->wire('input')->get('view');
-		if (in_array($req, [self::VIEW_TABLE, self::VIEW_MASONRY], true)) {
+		if (in_array($req, $this->viewModes(), true)) {
 			$prefs = $this->getUserPrefs();
 			if (($prefs['viewMode'] ?? null) !== $req) {
 				$this->persistViewMode($req);
@@ -301,7 +309,7 @@ class ProcessImageLibrary extends Process {
 			return $req;
 		}
 		$stored = $this->getUserPrefs()['viewMode'];
-		return ($stored === self::VIEW_MASONRY) ? self::VIEW_MASONRY : self::VIEW_TABLE;
+		return in_array($stored, $this->viewModes(), true) ? $stored : self::VIEW_TABLE;
 	}
 
 	/**
@@ -311,7 +319,7 @@ class ProcessImageLibrary extends Process {
 	 * ?view= toggle.
 	 */
 	protected function persistViewMode(string $mode): void {
-		if (!in_array($mode, [self::VIEW_TABLE, self::VIEW_MASONRY], true)) return;
+		if (!in_array($mode, $this->viewModes(), true)) return;
 		$raw = $this->wire('user')->meta('imageLibraryPrefs');
 		if (!is_array($raw)) $raw = [];
 		$raw['viewMode'] = $mode;
@@ -729,6 +737,18 @@ class ProcessImageLibrary extends Process {
 		$usedTags = $this->collectUsedTagsByField($rows);
 
 		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
+
+		// Duplicates is a clustered view over the fingerprint store, not the
+		// paginated row list — branch before sort / pagination. It builds its
+		// own member rows from the hash table, so it needs no slice here. A
+		// slim toolbar carries the view toggle so the user can switch back.
+		if ($this->getViewMode() === self::VIEW_DUPLICATES) {
+			$toolbar = '<div class="ml-pagination"><span class="ml-pagination-right">'
+				. $this->renderViewToggle($filters, 1, $sort, $dir, $this->readPageSize())
+				. '</span></div>';
+			return $toolbar . $this->renderDuplicates($filters);
+		}
+
 		// Sorting by a custom subfield needs the value on every row,
 		// not just the visible slice — applySort reads $row['custom']
 		// and otherwise compares empty strings, leaving the list in
@@ -855,6 +875,143 @@ class ProcessImageLibrary extends Process {
 			$out .= '</div>'; // .ml-cell-thumb
 			$out .= '</div>'; // .ml-card
 		}
+		$out .= '</div>';
+		return $out;
+	}
+
+	/**
+	 * The view-mode toggle (table / masonry / duplicates) as standalone HTML
+	 * so it can sit both in the pagination row and atop the duplicates view
+	 * (which renders no pager). Anchors carry a ?view= URL — bookmark- and
+	 * reload-safe, degrades without JS; the JS intercepts and AJAX-swaps.
+	 */
+	protected function renderViewToggle(array $filters, int $page, string $sort, string $dir, int $pageSize): string {
+		$san = $this->wire('sanitizer');
+		$currentView = $this->getViewMode();
+		$viewBase = $this->buildUrl($filters, $page, $sort, $dir, $pageSize);
+		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
+		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
+		$views = [
+			[self::VIEW_TABLE,      'fa-table',     $this->_('Table view')],
+			[self::VIEW_MASONRY,    'fa-picture-o', $this->_('Masonry view')],
+			[self::VIEW_DUPLICATES, 'fa-clone',     $this->_('Duplicates view')],
+		];
+		$out = '<span class="ml-view-toggle" role="group" aria-label="'
+			. $san->entities($this->_('Result layout')) . '">';
+		foreach ($views as [$mode, $icon, $label]) {
+			$active = ($mode === $currentView);
+			$lbl = $san->entities($label);
+			$out .= '<a class="ml-view-btn' . ($active ? ' ml-view-active' : '') . '"'
+				. ' href="' . $san->entities($viewBase . $viewSep . 'view=' . $mode) . '"'
+				. ' data-view="' . $mode . '"'
+				. ' title="' . $lbl . '" aria-label="' . $lbl . '"'
+				. ($active ? ' aria-current="true"' : '') . '>'
+				. '<i class="fa ' . $icon . '" aria-hidden="true"></i></a>';
+		}
+		$out .= '</span>';
+		return $out;
+	}
+
+	/**
+	 * Duplicates view: byte-identical images grouped into clusters from the
+	 * fingerprint store. Each cluster shows one thumbnail, the copy count, and
+	 * every place a copy lives (page · field · filename, linked to the page
+	 * editor). Stale fingerprints (file since deleted / renamed) are dropped
+	 * by intersecting cluster members with the current image set, so a
+	 * cluster only renders when 2+ copies still exist.
+	 *
+	 * A toolbar carries the Scan / Re-scan button (the JS drives
+	 * ___executeScanHashes in chunks) and a summary; when nothing is
+	 * fingerprinted yet it prompts for a first scan. Near-duplicates (dHash)
+	 * are a later phase — this is exact only.
+	 */
+	protected function renderDuplicates(array $filters): string {
+		$san  = $this->wire('sanitizer');
+		$data = $this->loadExactClusters();
+		$scanned = (int) $data['scanned'];
+
+		// Index the current image set by identity so we can attach display
+		// data (thumb, title, edit URL) and discard stale fingerprints.
+		$byKey = [];
+		foreach ($this->loadRows() as $r) {
+			$byKey[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] = $r;
+		}
+
+		$clusters = [];
+		$pool     = [];
+		foreach ($data['clusters'] as $c) {
+			$members = [];
+			foreach ($c['members'] as $m) {
+				$k = $m['pageId'] . "\0" . $m['fieldName'] . "\0" . $m['basename'];
+				if (isset($byKey[$k])) $members[] = $byKey[$k];
+			}
+			if (count($members) >= 2) {
+				$clusters[] = $members;
+				foreach ($members as $mr) $pool[] = $mr;
+			}
+		}
+
+		// One hydrate pass for every member's thumbnail, then re-index.
+		$hByKey = [];
+		foreach ($this->hydrateSlice($pool) as $hr) {
+			$hByKey[$hr['pageId'] . "\0" . $hr['fieldName'] . "\0" . $hr['basename']] = $hr;
+		}
+
+		$redundant = 0;
+		foreach ($clusters as $members) $redundant += count($members) - 1;
+
+		$out = '<div class="ml-dups">';
+
+		// Toolbar: scan button + live progress slot + summary.
+		$scanLabel = $scanned ? $this->_('Re-scan') : $this->_('Scan for duplicates');
+		$out .= '<div class="ml-dups-bar">'
+			. '<button type="button" class="uk-button uk-button-primary ml-dups-scan">'
+			. $san->entities($scanLabel) . '</button>'
+			. '<span class="ml-dups-progress" hidden></span>';
+		if (!$scanned) {
+			$summary = $this->_('Not scanned yet — run a scan to find duplicates.');
+		} elseif (!$clusters) {
+			$summary = $this->_('No exact duplicates found.');
+		} else {
+			$summary = sprintf(
+				$this->_('%1$d duplicate set(s), %2$d redundant cop(y/ies).'),
+				count($clusters), $redundant
+			);
+		}
+		$out .= '<span class="ml-dups-summary">' . $san->entities($summary) . '</span>'
+			. '</div>';
+
+		// Cluster cards.
+		foreach ($clusters as $members) {
+			$first  = $members[0];
+			$fKey   = $first['pageId'] . "\0" . $first['fieldName'] . "\0" . $first['basename'];
+			$hFirst = $hByKey[$fKey] ?? $first;
+
+			$out .= '<div class="ml-dup-cluster">';
+			$out .= '<div class="ml-dup-thumb">';
+			if (!empty($hFirst['thumbUrl'])) {
+				$out .= '<img src="' . $san->entities((string) $hFirst['thumbUrl']) . '" alt="" loading="lazy">';
+			}
+			$out .= '<span class="ml-dup-count">' . count($members) . '×</span>'
+				. '</div>';
+
+			$out .= '<ul class="ml-dup-members">';
+			foreach ($members as $m) {
+				$title   = (string) ($m['pageTitle'] ?? '');
+				if ($title === '') $title = '#' . (int) $m['pageId'];
+				$editUrl = (string) ($m['pageEditUrl'] ?? '');
+				$label   = $san->entities($title)
+					. ' <span class="ml-dup-field">' . $san->entities((string) $m['fieldName']) . '</span> '
+					. '<code>' . $san->entities((string) $m['basename']) . '</code>';
+				$out .= '<li>';
+				$out .= $editUrl
+					? '<a href="' . $san->entities($editUrl) . '" target="_blank" rel="noopener">' . $label . '</a>'
+					: $label;
+				$out .= '</li>';
+			}
+			$out .= '</ul></div>';
+		}
+
 		$out .= '</div>';
 		return $out;
 	}
@@ -2691,7 +2848,7 @@ class ProcessImageLibrary extends Process {
 				$clean['thumbScale'] = round($ts, 2);
 			}
 		}
-		if (isset($data['viewMode']) && in_array($data['viewMode'], [self::VIEW_TABLE, self::VIEW_MASONRY], true)) {
+		if (isset($data['viewMode']) && in_array($data['viewMode'], $this->viewModes(), true)) {
 			$clean['viewMode'] = (string) $data['viewMode'];
 		}
 
@@ -3952,6 +4109,7 @@ class ProcessImageLibrary extends Process {
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
 			'usageUrl'   => $this->wire('page')->url . 'usage/',
 			'widgetUrl'  => $this->wire('page')->url . 'widget/',
+			'scanHashesUrl' => $this->wire('page')->url . 'scan-hashes/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -4006,6 +4164,9 @@ class ProcessImageLibrary extends Process {
 				// Label next to the checkbox widget for a boolean custom subfield.
 				'enabled'          => $this->_('Enabled'),
 				'rename'           => $this->_('New filename'),
+				// Duplicate-scan progress (JS substitutes %1$d / %2$d).
+				'scanning'         => $this->_('Scanning…'),
+				'scanProgress'     => $this->_('Scanning… %1$d / %2$d'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
@@ -4953,26 +5114,7 @@ class ProcessImageLibrary extends Process {
 		// click and AJAX-swaps the results in place. The server both
 		// honours and persists the chosen mode (see getViewMode()).
 		$currentView = $this->getViewMode();
-		$viewBase = $this->buildUrl($filters, $page, $sort, $dir, $pageSize);
-		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
-		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
-		$views = [
-			[self::VIEW_TABLE,   'fa-table',     $this->_('Table view')],
-			[self::VIEW_MASONRY, 'fa-picture-o', $this->_('Masonry view')],
-		];
-		$out .= '<span class="ml-view-toggle" role="group" aria-label="'
-			. $san->entities($this->_('Result layout')) . '">';
-		foreach ($views as [$mode, $icon, $label]) {
-			$active = ($mode === $currentView);
-			$lbl = $san->entities($label);
-			$out .= '<a class="ml-view-btn' . ($active ? ' ml-view-active' : '') . '"'
-				. ' href="' . $san->entities($viewBase . $viewSep . 'view=' . $mode) . '"'
-				. ' data-view="' . $mode . '"'
-				. ' title="' . $lbl . '" aria-label="' . $lbl . '"'
-				. ($active ? ' aria-current="true"' : '') . '>'
-				. '<i class="fa ' . $icon . '" aria-hidden="true"></i></a>';
-		}
-		$out .= '</span>';
+		$out .= $this->renderViewToggle($filters, $page, $sort, $dir, $pageSize);
 		// Per-page picker. Client-side JS intercepts the change event,
 		// rewrites the URL and triggers the AJAX refresh; non-JS users
 		// see the picker but it requires a manual reload to take effect.
@@ -4990,9 +5132,9 @@ class ProcessImageLibrary extends Process {
 		// the anchor itself carries the accessible name via
 		// aria-label / title. Without JS the picker is unavailable —
 		// no href, the JS click handler runs the open.
-		// Masonry is thumbnail-only — there are no columns to toggle, so
+		// Masonry / duplicates are thumbnail views — no columns to toggle, so
 		// the column-visibility opener is table-view only.
-		if ($currentView !== self::VIEW_MASONRY) {
+		if ($currentView === self::VIEW_TABLE) {
 			$colsLabel = $san->entities($this->_('Columns'));
 			$out .= '<a class="ml-columns-toggle"'
 				. ' title="' . $colsLabel . '"'
