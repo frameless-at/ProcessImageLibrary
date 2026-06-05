@@ -706,32 +706,24 @@ textarea.ml-cell-input {
 		margin-left: 0;
 		flex-wrap: wrap;
 	}
-	/* Gallery: the desktop layout uses a fixed-px column
-	   (220px × the user's persisted zoom). On a phone that single
-	   track can be wider than the viewport, which both limits the row
-	   to ~2 huge thumbnails AND forces the whole page to scroll
-	   sideways. Swap to fluid 1fr tracks: as many uniform square
-	   thumbnails as fit (4–6 on a typical phone), and because 1fr can
-	   never exceed the container, the page can't scroll horizontally. */
+	/* Gallery: keep the masonry (varied-height tiles) AND the live
+	   thumb-size slider on mobile — just shrink the column so a phone
+	   shows several columns instead of one giant track, and stop the
+	   sideways scroll.
+
+	   Column / row / gap keep the desktop 220:4:10 ratio (so the
+	   server-computed row spans stay proportionally correct), only
+	   multiplied by a mobile factor — the default zoom then lands at
+	   ~5 columns. The slider still drives --ml-thumb-scale, so dragging
+	   left packs more / smaller tiles and right fewer / larger ones.
+
+	   min(…, 100%) caps each track at the container width and auto-fill
+	   lays down only tracks that fit, so the grid can never exceed the
+	   viewport — no horizontal scroll, whatever the zoom. */
 	.ml-masonry {
-		grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
-		grid-auto-rows: auto;
-		gap: 4px;
-		justify-content: stretch;
-	}
-	/* Drop the server-computed varied-height row span — on mobile
-	   every tile is a uniform square (driven by the thumb's
-	   aspect-ratio below). !important beats the inline grid-row-end. */
-	.ml-card {
-		grid-row-end: auto !important;
-	}
-	.ml-card .ml-cell-thumb {
-		height: auto;
-	}
-	.ml-card .ml-cell-thumb img,
-	.ml-card .ml-cell-thumb img.ml-thumb-crop {
-		aspect-ratio: 1 / 1;
-		height: auto;
+		grid-template-columns: repeat(auto-fill, min(calc(220px * var(--ml-thumb-scale, 1) * 0.33), 100%));
+		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.33);
+		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.33);
 	}
 	/* Table view keeps the small inline thumbnail cap. */
 	.ml-table .ml-cell-thumb img {
