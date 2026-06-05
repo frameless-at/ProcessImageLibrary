@@ -695,9 +695,8 @@ textarea.ml-cell-input {
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
    columnWidth handling; here we let the pagination flex-wrap so the
-   two zones stack vertically on narrow viewports, and shrink the
-   gallery thumbs a touch so a row fits without horizontal scrolling
-   becoming the only option. */
+   two zones stack vertically on narrow viewports, and rework the
+   gallery so it fills the viewport instead of overflowing it. */
 @media (max-width: 640px) {
 	.ml-pagination {
 		flex-wrap: wrap;
@@ -707,7 +706,35 @@ textarea.ml-cell-input {
 		margin-left: 0;
 		flex-wrap: wrap;
 	}
-	.ml-cell-thumb img {
+	/* Gallery: the desktop layout uses a fixed-px column
+	   (220px × the user's persisted zoom). On a phone that single
+	   track can be wider than the viewport, which both limits the row
+	   to ~2 huge thumbnails AND forces the whole page to scroll
+	   sideways. Swap to fluid 1fr tracks: as many uniform square
+	   thumbnails as fit (4–6 on a typical phone), and because 1fr can
+	   never exceed the container, the page can't scroll horizontally. */
+	.ml-masonry {
+		grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+		grid-auto-rows: auto;
+		gap: 4px;
+		justify-content: stretch;
+	}
+	/* Drop the server-computed varied-height row span — on mobile
+	   every tile is a uniform square (driven by the thumb's
+	   aspect-ratio below). !important beats the inline grid-row-end. */
+	.ml-card {
+		grid-row-end: auto !important;
+	}
+	.ml-card .ml-cell-thumb {
+		height: auto;
+	}
+	.ml-card .ml-cell-thumb img,
+	.ml-card .ml-cell-thumb img.ml-thumb-crop {
+		aspect-ratio: 1 / 1;
+		height: auto;
+	}
+	/* Table view keeps the small inline thumbnail cap. */
+	.ml-table .ml-cell-thumb img {
 		max-width: calc(80px * var(--ml-thumb-scale, 1));
 	}
 	.ml-popup-editor {
