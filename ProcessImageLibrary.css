@@ -651,14 +651,20 @@ textarea.ml-cell-input {
    width and the gap ALL scale with --ml-thumb-scale, so the integer
    span stays correct at every zoom. Geometry kept in sync with the
    MASONRY_* constants in the module (COL 220 / ROW 4 / GAP 10). The
-   block keeps generous breathing room above and below. */
+   block keeps generous breathing room above and below.
+
+   Columns are minmax(<col>, 1fr): <col> is the MINIMUM track width
+   (the slider-scaled 220px design size, where the row-span proportions
+   are exact), and 1fr lets every track grow to consume the leftover so
+   the grid ALWAYS fills the container edge-to-edge — no centred margin,
+   no half-empty last row of width. The mild over-width from the stretch
+   is absorbed by the thumbnails' object-fit: cover. */
 .ml-masonry {
 	display: grid;
-	grid-template-columns: repeat(auto-fill, calc(220px * var(--ml-thumb-scale, 1)));
+	grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ml-thumb-scale, 1)), 1fr));
 	grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1));
 	grid-auto-flow: row dense;
 	gap: calc(10px * var(--ml-thumb-scale, 1));
-	justify-content: center;
 	margin: 1.5rem 0 1.75rem;
 }
 .ml-card {
@@ -686,6 +692,19 @@ textarea.ml-cell-input {
 	outline-offset: -2px;
 }
 
+/* Landscape phones + small tablets (641–1024px) sit above the phone
+   breakpoint but are still far too narrow for the 220px desktop column,
+   which would leave only 3–4 oversized tiles. Use an in-between factor
+   so this range shows ~5–7 columns. Same minmax(<col>, 1fr) ratio, so
+   the row spans stay proportional and the row fills edge-to-edge. */
+@media (min-width: 641px) and (max-width: 1024px) {
+	.ml-masonry {
+		grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ml-thumb-scale, 1) * 0.6), 1fr));
+		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.6);
+		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.6);
+	}
+}
+
 /* Variations cell renders just a count — right-align like other
    numeric cells for quick at-a-glance scanning. */
 .ml-cell-variations {
@@ -706,20 +725,17 @@ textarea.ml-cell-input {
 		margin-left: 0;
 		flex-wrap: wrap;
 	}
-	/* Gallery: keep the masonry (varied-height tiles) AND the live
-	   thumb-size slider on mobile — just shrink the column so a phone
-	   shows a handful of columns instead of one giant track.
-
-	   Column / row / gap keep the desktop 220:4:10 ratio (so the
-	   server-computed row spans stay proportionally correct), only
-	   multiplied by a mobile factor. At the slider's low end a phone
-	   shows ~4–5 columns at a comfortable thumbnail size; dragging the
-	   slider right enlarges them to 1–2. (The factor is deliberately
-	   gentle — 0.33 made the thumbnails too small at the low end.) */
+	/* Gallery: same minmax(<col>, 1fr) fill-the-width masonry as the
+	   desktop block, with the minimum column shrunk by a mobile factor
+	   so a phone shows more, smaller thumbnails. Column / row / gap keep
+	   the 220:4:10 ratio (× factor), so the server row spans stay
+	   proportionally correct and the tiles fill the full row width
+	   regardless of how many fit. The slider still scales everything, so
+	   dragging it left packs more columns and right fewer / larger. */
 	.ml-masonry {
-		grid-template-columns: repeat(auto-fill, calc(220px * var(--ml-thumb-scale, 1) * 0.7));
-		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.7);
-		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.7);
+		grid-template-columns: repeat(auto-fill, minmax(calc(220px * var(--ml-thumb-scale, 1) * 0.4), 1fr));
+		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.4);
+		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.4);
 	}
 	/* Table view keeps the small inline thumbnail cap. */
 	.ml-table .ml-cell-thumb img {
