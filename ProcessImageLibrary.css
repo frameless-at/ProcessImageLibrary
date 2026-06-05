@@ -708,22 +708,23 @@ textarea.ml-cell-input {
 	}
 	/* Gallery: keep the masonry (varied-height tiles) AND the live
 	   thumb-size slider on mobile — just shrink the column so a phone
-	   shows several columns instead of one giant track, and stop the
-	   sideways scroll.
+	   shows a handful of columns instead of one giant track, and stop
+	   the sideways scroll.
 
 	   Column / row / gap keep the desktop 220:4:10 ratio (so the
 	   server-computed row spans stay proportionally correct), only
-	   multiplied by a mobile factor — the default zoom then lands at
-	   ~5 columns. The slider still drives --ml-thumb-scale, so dragging
-	   left packs more / smaller tiles and right fewer / larger ones.
+	   multiplied by a mobile factor. At the slider's low end a phone
+	   shows ~4–5 columns at a comfortable thumbnail size; dragging the
+	   slider right enlarges them to 1–2. (The factor is deliberately
+	   gentle — 0.33 made the thumbnails too small at the low end.)
 
 	   min(…, 100%) caps each track at the container width and auto-fill
 	   lays down only tracks that fit, so the grid can never exceed the
 	   viewport — no horizontal scroll, whatever the zoom. */
 	.ml-masonry {
-		grid-template-columns: repeat(auto-fill, min(calc(220px * var(--ml-thumb-scale, 1) * 0.33), 100%));
-		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.33);
-		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.33);
+		grid-template-columns: repeat(auto-fill, min(calc(220px * var(--ml-thumb-scale, 1) * 0.7), 100%));
+		grid-auto-rows: calc(4px * var(--ml-thumb-scale, 1) * 0.7);
+		gap: calc(10px * var(--ml-thumb-scale, 1) * 0.7);
 	}
 	/* Table view keeps the small inline thumbnail cap. */
 	.ml-table .ml-cell-thumb img {
