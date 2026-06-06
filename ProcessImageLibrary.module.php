@@ -766,21 +766,32 @@ class ProcessImageLibrary extends Process {
 		}
 		$this->applySort($rows, $sort, $dir);
 
-		// Duplicates filter: re-order the sorted rows so each cluster's
-		// copies sit together (grouped, not collapsed). Done after sort so
-		// column sorting still orders rows inside each cluster.
-		if (!empty($filters['dupes'])) {
-			$rows = $this->groupDuplicateRows($rows);
-		}
+		$pageSize = $this->readPageSize();
 
-		$pageSize   = $this->readPageSize();
-		$total      = count($rows);
-		$totalPages = max(1, (int) ceil($total / $pageSize));
-		$page       = min(max(1, $requestedPage), $totalPages);
-		$offset     = ($page - 1) * $pageSize;
-		$slice      = array_slice($rows, $offset, $pageSize);
-		$slice      = $this->hydrateSlice($slice);
-		$slice      = $this->attachDuplicateCounts($slice);
+		if (!empty($filters['dupes'])) {
+			// Duplicates filter: paginate by CLUSTER (after sort, so column
+			// sorting still orders the copies within each cluster). pageSize
+			// counts images here — one cluster per slot — and a cluster never
+			// straddles a page break, so the accordion always has its head row
+			// and that head's hidden copies together on the same page.
+			$clusters   = $this->clusterDuplicateRows($rows);
+			$total      = count($clusters);
+			$totalPages = max(1, (int) ceil($total / $pageSize));
+			$page       = min(max(1, $requestedPage), $totalPages);
+			$offset     = ($page - 1) * $pageSize;
+			$slice      = [];
+			foreach (array_slice($clusters, $offset, $pageSize) as $cluster) {
+				foreach ($cluster as $r) $slice[] = $r;
+			}
+		} else {
+			$total      = count($rows);
+			$totalPages = max(1, (int) ceil($total / $pageSize));
+			$page       = min(max(1, $requestedPage), $totalPages);
+			$offset     = ($page - 1) * $pageSize;
+			$slice      = array_slice($rows, $offset, $pageSize);
+		}
+		$slice = $this->hydrateSlice($slice);
+		$slice = $this->attachDuplicateCounts($slice);
 
 		$pager = $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir, $pageSize);
 
@@ -814,6 +825,24 @@ class ProcessImageLibrary extends Process {
 			$this->_('%d identical copies'), $count
 		));
 		return '<span class="ml-dup-count" title="' . $label . '" aria-label="' . $label . '">'
+			. (int) $count . '×</span>';
+	}
+
+	/**
+	 * The "N×" indicator as an expand/collapse toggle, used on the head row
+	 * of a cluster in the Duplicates filter. Clicking it shows / hides the
+	 * cluster's other copies (the hidden `tr.ml-dup-member` rows sharing this
+	 * content hash). Same ".ml-dup-count" pill, plus button semantics.
+	 */
+	protected function renderDupToggle(int $count, string $hash): string {
+		if ($count < 2 || $hash === '') return '';
+		$san = $this->wire('sanitizer');
+		$label = $san->entities(sprintf(
+			$this->_('%d copies — click to show / hide'), $count
+		));
+		return '<span class="ml-dup-count ml-dup-toggle" data-dup-hash="' . $san->entities($hash) . '"'
+			. ' role="button" tabindex="0" aria-expanded="false"'
+			. ' title="' . $label . '" aria-label="' . $label . '">'
 			. (int) $count . '×</span>';
 	}
 
@@ -879,16 +908,15 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Re-order an already-sorted, duplicates-only row set so the copies of
-	 * each cluster sit together. Buckets by content hash, keeping the input
-	 * (sorted) order inside each cluster; clusters appear in order of first
-	 * appearance. Purely a grouping pass — it neither adds nor drops rows, so
-	 * the count / pagination are unchanged.
+	 * Group an already-sorted, duplicates-only row set into clusters: one
+	 * sub-array per content hash, holding that image's copies in the input
+	 * (sorted) order. Clusters appear in order of first appearance. Used to
+	 * paginate by image and render the expand/collapse accordion.
 	 *
 	 * @param array<int,array<string,mixed>> $rows
-	 * @return array<int,array<string,mixed>>
+	 * @return array<int,array<int,array<string,mixed>>>
 	 */
-	protected function groupDuplicateRows(array $rows): array {
+	protected function clusterDuplicateRows(array $rows): array {
 		$map     = $this->loadDuplicateKeyHashes();
 		$buckets = [];   // hash => [rows]
 		$order   = [];   // hash => first-seen index
@@ -902,7 +930,7 @@ class ProcessImageLibrary extends Process {
 		asort($order);
 		$out = [];
 		foreach (array_keys($order) as $h) {
-			foreach ($buckets[$h] as $r) $out[] = $r;
+			$out[] = $buckets[$h];
 		}
 		return $out;
 	}
@@ -3736,7 +3764,7 @@ class ProcessImageLibrary extends Process {
 		}));
 
 		// "Duplicates" filter: keep EVERY byte-identical copy (drop uniques).
-		// They are grouped into clusters AFTER sorting — see groupDuplicateRows
+		// They are grouped into clusters AFTER sorting — see clusterDuplicateRows
 		// in renderResultsHtml — so the cluster grouping survives any column
 		// sort. Grouped, not collapsed, so copies bulk-edit like any rows.
 		if ($dupes) {
@@ -4932,13 +4960,13 @@ class ProcessImageLibrary extends Process {
 		$out .= '</tr></thead><tbody>';
 
 		// In the "Duplicates" filter the slice arrives grouped by cluster
-		// (consecutive rows share a content hash). Tag each row with its
-		// cluster so the table can shade alternate clusters and draw a
-		// separator where one ends — purely visual; selection + bulk edit
-		// work exactly as on any other rows.
+		// (consecutive rows share a content hash). Only the FIRST row of each
+		// cluster is shown — it carries the "N×" indicator, which toggles its
+		// other copies (the remaining rows, rendered hidden right beneath it).
+		// The copies carry no indicator; once revealed they bulk-edit like any
+		// other rows.
 		$dupesMode   = !empty($filters['dupes']);
 		$prevDupHash = null;
-		$groupParity = 0;
 
 		foreach ($slice as $row) {
 			$desc = $this->normalizeDescription($row['description']);
@@ -4985,21 +5013,26 @@ class ProcessImageLibrary extends Process {
 					$san->entities((string) ($row['pageName']  ?? ''))
 				);
 			}
-			// Cluster grouping (Duplicates filter only): alternate cluster
-			// shading + a separator above each new cluster.
-			$rowClass = 'ml-row';
+			// Duplicates filter accordion: the first row of each cluster is
+			// the visible "head" (carries the toggle indicator); the rest are
+			// hidden copy rows revealed by clicking it.
+			$isDupHead = false; $isDupMember = false; $rowDupHash = '';
 			if ($dupesMode) {
-				$dupHash = (string) ($row['dupHash'] ?? '');
-				if ($dupHash !== '') {
-					if ($dupHash !== $prevDupHash) {
-						$groupParity ^= 1;
-						if ($prevDupHash !== null) $rowClass .= ' ml-dup-group-start';
-					}
-					$rowClass .= $groupParity ? ' ml-dup-group-a' : ' ml-dup-group-b';
-					$prevDupHash = $dupHash;
+				$rowDupHash = (string) ($row['dupHash'] ?? '');
+				if ($rowDupHash !== '') {
+					if ($rowDupHash !== $prevDupHash) { $isDupHead = true; }
+					else { $isDupMember = true; }
+					$prevDupHash = $rowDupHash;
 				}
 			}
-			$out .= '<tr class="' . $rowClass . '"' . $rowAttrs . '>';
+			$rowClass = 'ml-row';
+			$rowExtra = '';
+			if ($isDupHead)   { $rowClass .= ' ml-dup-head'; }
+			if ($isDupMember) {
+				$rowClass .= ' ml-dup-member';
+				$rowExtra = ' data-dup-hash="' . $san->entities($rowDupHash) . '" hidden';
+			}
+			$out .= '<tr class="' . $rowClass . '"' . $rowAttrs . $rowExtra . '>';
 
 			$out .= '<td class="ml-cell-select">'
 				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
@@ -5087,7 +5120,15 @@ class ProcessImageLibrary extends Process {
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
 					. '</button>';
 			}
-			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
+			if ($dupesMode) {
+				// Head row: the indicator becomes the expand/collapse toggle.
+				// Copy rows carry no indicator.
+				if ($isDupHead) {
+					$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
+				}
+			} else {
+				$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0));
+			}
 			$out .= '</td>';
 
 			$pageTitle = $this->normalizeDescription($row['pageTitle']);

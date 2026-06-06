@@ -197,14 +197,29 @@
 	bottom: 4px;
 }
 
-/* Duplicates filter: cluster grouping in the table. Alternate clusters get
-   a faint shade and each new cluster gets a separator line above it, so the
-   copies of one image read as a block you can select and bulk-edit. */
-.ml-dup-group-b td {
-	background: color-mix(in srgb, var(--pw-main-background, #f7f7f7) 92%, var(--pw-text-color, #000) 8%);
+/* Duplicates filter accordion: the "N×" indicator on a cluster head row is
+   a button that expands / collapses the hidden copy rows. */
+.ml-dup-toggle {
+	cursor: pointer;
 }
-.ml-dup-group-start td {
-	border-top: 2px solid var(--pw-main-color, #eb1d61);
+.ml-dup-toggle:hover,
+.ml-dup-toggle:focus-visible {
+	filter: brightness(1.12);
+	outline: none;
+}
+/* Caret hint: ▸ collapsed, ▾ expanded. */
+.ml-dup-toggle::after {
+	content: "\025B8";
+	margin-left: 2px;
+	font-size: 0.8em;
+}
+.ml-dup-toggle.ml-dup-open::after {
+	content: "\025BE";
+}
+/* Revealed copy rows: a thin accent down the select cell marks them as
+   belonging to the cluster above, without heavy full-row shading. */
+.ml-dup-member > td:first-child {
+	box-shadow: inset 3px 0 0 var(--pw-main-color, #eb1d61);
 }
 /* Fade-out animation for rows being deleted — JS adds the class
    right before the row is removed from the DOM so the disappear is

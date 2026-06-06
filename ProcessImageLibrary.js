@@ -2233,6 +2233,19 @@
 			return selection.size > 1 && selection.has(rowKey(td));
 		}
 
+		// Expand / collapse one duplicate cluster: show or hide every hidden
+		// copy row that shares the head row's content hash. Content hashes are
+		// hex, so they're safe to drop straight into the attribute selector.
+		function toggleDupCluster(toggle) {
+			var hash = toggle.dataset.dupHash;
+			if (!hash || !results) return;
+			var open = toggle.getAttribute('aria-expanded') === 'true';
+			var members = results.querySelectorAll('tr.ml-dup-member[data-dup-hash="' + hash + '"]');
+			members.forEach(function (tr) { tr.hidden = open; });
+			toggle.setAttribute('aria-expanded', open ? 'false' : 'true');
+			toggle.classList.toggle('ml-dup-open', !open);
+		}
+
 		// -- Delegated click handler on the persistent .ml-results -----
 
 		if (results) {
@@ -2269,6 +2282,15 @@
 						e.target.classList.contains('ml-select-row') ||
 						e.target.classList.contains('ml-select-all')
 					)) return;
+					// Duplicate indicator → expand / collapse the cluster's
+					// hidden copy rows. Sits on the thumb cell, so handle it
+					// before the thumbnail-open branch below.
+					var dupToggle = e.target.closest('.ml-dup-toggle');
+					if (dupToggle) {
+						e.preventDefault();
+						toggleDupCluster(dupToggle);
+						return;
+					}
 					// Thumbnail → PW image editor modal. The td only carries
 					// the page-edit data attrs when the host page is
 					// editable, so unauthorised users just see the thumb
@@ -2294,6 +2316,12 @@
 			// them; Enter / Space here mirrors a mouse click.
 			results.addEventListener('keydown', function (e) {
 				if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+				var dupToggle = e.target.closest && e.target.closest('.ml-dup-toggle');
+				if (dupToggle && e.target === dupToggle) {
+					e.preventDefault();
+					toggleDupCluster(dupToggle);
+					return;
+				}
 				var nativeTd = e.target.closest && e.target.closest('.ml-cell-thumb[data-file-hash], .ml-cell-native[data-file-hash]');
 				if (nativeTd && e.target === nativeTd) {
 					e.preventDefault();
