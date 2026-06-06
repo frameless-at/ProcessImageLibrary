@@ -282,7 +282,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			. '</ul>'
 			. '<p>'
 			. '<a class="ui-button uk-button uk-button-primary" href="' . $san->entities($scanUrl) . '">'
-			. '<i class="fa fa-refresh" aria-hidden="true"></i> ' . $san->entities($this->_('Scan & reclaim now')) . '</a> '
+			. '<i class="fa fa-refresh" aria-hidden="true"></i> ' . $this->_('Scan &amp; reclaim now') . '</a> '
 			. '<a class="ui-button uk-button uk-button-default" href="' . $san->entities($revertUrl) . '"'
 			. ' onclick="return confirm(' . $san->entities(json_encode($revertConfirm, JSON_UNESCAPED_SLASHES)) . ')">'
 			. '<i class="fa fa-undo" aria-hidden="true"></i> ' . $san->entities($this->_('Revert (un-share all)')) . '</a>'
