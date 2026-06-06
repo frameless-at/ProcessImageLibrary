@@ -739,6 +739,28 @@ class ProcessImageLibrary extends Process {
 	/**
 	 * Render the main media library admin page.
 	 */
+	/**
+	 * Detect picker mode (embedded image-chooser) from ?picker + target_page /
+	 * target_field. Validates the target is an editable page carrying that
+	 * image field. Runs on BOTH the full page render and the AJAX results
+	 * endpoint, so checkboxes survive view switches / pagination in the picker.
+	 */
+	protected function detectPickerMode(): void {
+		$in = $this->wire('input');
+		if (!$in->get('picker')) return;
+		$tp = (int) $in->get('target_page');
+		$tf = $this->wire('sanitizer')->fieldName((string) $in->get('target_field'));
+		$tpPage = $tp ? $this->wire('pages')->get($tp) : null;
+		$tFld   = $tf !== '' ? $this->wire('fields')->get($tf) : null;
+		if ($tpPage && $tpPage->id && $tpPage->editable()
+			&& $tFld && $tFld->type instanceof FieldtypeImage
+			&& $tpPage->template->hasField($tf)) {
+			$this->pickerMode        = true;
+			$this->pickerTargetPage  = $tp;
+			$this->pickerTargetField = $tf;
+		}
+	}
+
 	public function ___execute() {
 		if ($this->wire('input')->get('debug')) {
 			return $this->renderDebug();
@@ -746,22 +768,7 @@ class ProcessImageLibrary extends Process {
 
 		$this->loadAssets();
 
-		// Picker mode: embedded (modal iframe) to pick an image for a page's
-		// image field. Needs a valid, editable target + an image field on it.
-		$pIn = $this->wire('input');
-		if ($pIn->get('picker')) {
-			$tp = (int) $pIn->get('target_page');
-			$tf = $this->wire('sanitizer')->fieldName((string) $pIn->get('target_field'));
-			$tpPage = $tp ? $this->wire('pages')->get($tp) : null;
-			$tFld   = $tf !== '' ? $this->wire('fields')->get($tf) : null;
-			if ($tpPage && $tpPage->id && $tpPage->editable()
-				&& $tFld && $tFld->type instanceof FieldtypeImage
-				&& $tpPage->template->hasField($tf)) {
-				$this->pickerMode        = true;
-				$this->pickerTargetPage  = $tp;
-				$this->pickerTargetField = $tf;
-			}
-		}
+		$this->detectPickerMode();
 
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
@@ -1572,6 +1579,8 @@ class ProcessImageLibrary extends Process {
 		$config = $this->wire('config');
 		$config->ajax = true;
 		header('Content-Type: text/html; charset=utf-8');
+
+		$this->detectPickerMode();
 
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);

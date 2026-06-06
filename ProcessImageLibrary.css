@@ -215,21 +215,25 @@
 	position: relative;
 }
 /* Selection checkbox overlay on a masonry tile — bottom-left, clear of the
-   replace / delete icons (top) and the duplicate badge (bottom-right). */
+   replace / delete icons (top) and the duplicate badge (bottom-right). Just
+   the checkbox on a minimal backdrop: no padding, no rounded corners. */
 .ml-card-select {
 	position: absolute;
 	bottom: 6px;
 	left: 6px;
 	z-index: 3;
-	background: rgba(255, 255, 255, 0.85);
-	border-radius: 3px;
-	padding: 2px;
+	margin: 0;
+	padding: 0;
+	border-radius: 0;
 	line-height: 0;
+	background: rgba(255, 255, 255, 0.85);
 	cursor: pointer;
 }
 .ml-card-select .ml-select-row {
+	display: block;
 	width: 20px;
 	height: 20px;
+	margin: 0;
 	cursor: pointer;
 }
 

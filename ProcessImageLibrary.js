@@ -2116,6 +2116,17 @@
 		}
 
 		function replaceFromQs(qs, push, clearSelection) {
+			// Picker mode: carry the picker context on every AJAX render
+			// (pagination, sort, view switch, filters) so the results endpoint
+			// keeps rendering picker checkboxes — without this, switching to
+			// masonry and back loses them.
+			if (root.dataset.picker === '1') {
+				var pp = new URLSearchParams((qs || '').replace(/^\?/, ''));
+				pp.set('picker', '1');
+				pp.set('target_page',  root.dataset.targetPage || '');
+				pp.set('target_field', root.dataset.targetField || '');
+				qs = '?' + pp.toString();
+			}
 			if (!config.renderUrl || !results) {
 				// Degraded path: full reload to the URL with the query string.
 				location.href = location.pathname + qs;
