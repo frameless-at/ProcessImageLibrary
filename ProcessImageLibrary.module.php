@@ -798,13 +798,18 @@ class ProcessImageLibrary extends Process {
 	 * table / gallery thumbnails (positioned bottom-right there via CSS).
 	 * Empty string for non-duplicates (count < 2).
 	 */
-	protected function renderDupBadge(int $count): string {
+	protected function renderDupBadge(int $count, string $hash = ''): string {
 		if ($count < 2) return '';
 		$san = $this->wire('sanitizer');
 		$label = $san->entities(sprintf(
-			$this->_('%d identical copies of this image across the site'), $count
+			$this->_('%d identical copies — click to manage'), $count
 		));
-		return '<span class="ml-dup-count" title="' . $label . '" aria-label="' . $label . '">'
+		$attrs = ' title="' . $label . '" aria-label="' . $label . '"';
+		// With a hash the badge is a button that opens the cluster modal.
+		if ($hash !== '') {
+			$attrs .= ' data-dup-hash="' . $san->entities($hash) . '" role="button" tabindex="0"';
+		}
+		return '<span class="ml-dup-count' . ($hash !== '' ? ' ml-dup-count-btn' : '') . '"' . $attrs . '>'
 			. (int) $count . '×</span>';
 	}
 
@@ -861,7 +866,9 @@ class ProcessImageLibrary extends Process {
 		foreach ($slice as &$row) {
 			$k = $row['pageId'] . "\0" . $row['fieldName'] . "\0" . $row['basename'];
 			$h = $hashByKey[$k] ?? null;
-			$row['dupCount'] = ($h !== null && isset($counts[$h])) ? $counts[$h] : 0;
+			$isDup = ($h !== null && isset($counts[$h]));
+			$row['dupCount'] = $isDup ? $counts[$h] : 0;
+			$row['dupHash']  = $isDup ? (string) $h : '';
 		}
 		unset($row);
 		return $slice;
@@ -954,7 +961,7 @@ class ProcessImageLibrary extends Process {
 					. ' title="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
 			}
-			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0));
+			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
 			$out .= '</div>'; // .ml-cell-thumb
 			$out .= '</div>'; // .ml-card
 		}
@@ -1112,7 +1119,7 @@ class ProcessImageLibrary extends Process {
 			if (!empty($hFirst['thumbUrl'])) {
 				$out .= '<img src="' . $san->entities((string) $hFirst['thumbUrl']) . '" alt="" loading="lazy">';
 			}
-			$out .= $this->renderDupBadge(count($members)) . '</div>';
+			$out .= $this->renderDupBadge(count($members), $hash) . '</div>';
 
 			$out .= '<div class="ml-dup-body">';
 
@@ -1162,6 +1169,81 @@ class ProcessImageLibrary extends Process {
 		}
 
 		$out .= '</div>';
+		return $out;
+	}
+
+	/**
+	 * One cluster as a table, for the badge-click modal: every byte-identical
+	 * copy with preview, where it's used (page → editor), field, filename, an
+	 * editable description (reuses the inline editor) with a per-row "apply to
+	 * all copies" button (the propagate handler), and a "keep own text" lock.
+	 * The <tr> carries the row identity so the lock toggle resolves it.
+	 *
+	 * @param array<int,array<string,mixed>> $rows hydrated member rows
+	 * @param array<string,bool> $lockSet
+	 */
+	protected function renderClusterTable(string $hash, array $rows, array $lockSet): string {
+		$san = $this->wire('sanitizer');
+		$h   = $san->entities($hash);
+
+		$out = '<table class="ml-dup-modal-table"><thead><tr>'
+			. '<th>' . $san->entities($this->_('Preview')) . '</th>'
+			. '<th>' . $san->entities($this->_('Page')) . '</th>'
+			. '<th>' . $san->entities($this->_('Field')) . '</th>'
+			. '<th>' . $san->entities($this->_('Filename')) . '</th>'
+			. '<th>' . $san->entities($this->_('Description')) . '</th>'
+			. '<th>' . $san->entities($this->_('Own text')) . '</th>'
+			. '</tr></thead><tbody>';
+
+		foreach ($rows as $r) {
+			$pid = (int) $r['pageId'];
+			$fn  = (string) $r['fieldName'];
+			$bn  = (string) $r['basename'];
+			$key = $pid . "\0" . $fn . "\0" . $bn;
+			$idAttrs = sprintf(
+				'data-page-id="%d" data-field="%s" data-basename="%s"',
+				$pid, $san->entities($fn), $san->entities($bn)
+			);
+			$locked  = isset($lockSet[$key]);
+			$title   = (string) ($r['pageTitle'] ?? '');
+			if ($title === '') $title = '#' . $pid;
+			$editUrl = (string) ($r['pageEditUrl'] ?? '');
+			$descDisp = $this->normalizeDescription($r['description'] ?? '');
+
+			$out .= '<tr ' . $idAttrs . '>';
+			// Preview.
+			$out .= '<td class="ml-dup-modal-thumb">';
+			if (!empty($r['thumbUrl'])) {
+				$out .= '<img src="' . $san->entities((string) $r['thumbUrl']) . '" alt="" loading="lazy">';
+			}
+			$out .= '</td>';
+			// Page.
+			$out .= '<td>' . ($editUrl
+				? '<a href="' . $san->entities($editUrl) . '" target="_blank" rel="noopener">' . $san->entities($title) . '</a>'
+				: $san->entities($title)) . '</td>';
+			// Field + filename.
+			$out .= '<td>' . $san->entities($fn) . '</td>';
+			$out .= '<td><code>' . $san->entities($bn) . '</code></td>';
+			// Description — editable cell + per-row "apply to all" button.
+			$out .= '<td class="ml-dup-modal-desc">'
+				. '<div class="ml-cell-desc ml-cell-editable" ' . $idAttrs
+				. ' data-subfield="description" data-input="textarea" role="button" tabindex="0"'
+				. $this->buildLangAttrs($r['description'] ?? '') . '>'
+				. $san->entities($descDisp) . '</div>'
+				. '<button type="button" class="ml-dup-apply ml-dup-apply-row" ' . $idAttrs
+				. ' data-hash="' . $h . '" data-subfield="description"'
+				. ' title="' . $san->entities($this->_('Apply this description to all copies')) . '">'
+				. '<i class="fa fa-share" aria-hidden="true"></i></button>'
+				. '</td>';
+			// Lock.
+			$out .= '<td class="ml-dup-modal-lock">'
+				. '<label title="' . $san->entities($this->_('Keep this copy’s own text (skip when applying)')) . '">'
+				. '<input type="checkbox" class="ml-dup-lock"' . ($locked ? ' checked' : '') . '></label>'
+				. '</td>';
+			$out .= '</tr>';
+		}
+
+		$out .= '</tbody></table>';
 		return $out;
 	}
 
@@ -4290,6 +4372,7 @@ class ProcessImageLibrary extends Process {
 			'metaLockUrl'   => $this->wire('page')->url . 'meta-lock/',
 			'reclaimUrl'    => $this->wire('page')->url . 'reclaim/',
 			'expandUrl'     => $this->wire('page')->url . 'expand/',
+			'dupClusterUrl' => $this->wire('page')->url . 'dup-cluster/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -4350,6 +4433,7 @@ class ProcessImageLibrary extends Process {
 				// Propagate result (JS substitutes %d).
 				'propagated'       => $this->_('Applied to %d cop(y/ies)'),
 				'propagatedLocked' => $this->_('(%d kept own)'),
+				'dupModalTitle'    => $this->_('%d identical copies'),
 				// Space reclaim (JS substitutes %1$d / %2$d).
 				'working'          => $this->_('Working…'),
 				'reclaimProgress'  => $this->_('Reclaiming… %1$d / %2$d'),
@@ -5026,7 +5110,7 @@ class ProcessImageLibrary extends Process {
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
 					. '</button>';
 			}
-			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0));
+			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
 			$out .= '</td>';
 
 			$pageTitle = $this->normalizeDescription($row['pageTitle']);
@@ -5559,6 +5643,43 @@ class ProcessImageLibrary extends Process {
 
 		$this->setMetaLock($pageId, $fieldName, $basename, $locked);
 		return $this->jsonResponse(['ok' => true, 'locked' => $locked]);
+	}
+
+	/**
+	 * AJAX endpoint: the cluster-detail table for the badge-click modal —
+	 * every live byte-identical copy of one content hash, hydrated and
+	 * rendered via renderClusterTable. POST + CSRF. Returns { ok, html, count }.
+	 */
+	public function ___executeDupCluster() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$hash = preg_replace('/[^a-f0-9]/i', '', (string) $this->wire('input')->post('hash'));
+		if ($hash === '') return $this->jsonError('Missing cluster hash');
+
+		$byKey = [];
+		foreach ($this->loadRows() as $r) {
+			$byKey[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] = $r;
+		}
+		$rows = [];
+		foreach ($this->loadClusterMembers($hash) as $m) {
+			$k = $m['pageId'] . "\0" . $m['fieldName'] . "\0" . $m['basename'];
+			if (isset($byKey[$k])) $rows[] = $byKey[$k];
+		}
+		if (count($rows) < 2) return $this->jsonError('Cluster not found', 404);
+
+		$rows = $this->hydrateSlice($rows);
+		$html = $this->renderClusterTable($hash, $rows, $this->loadLockSet());
+		return $this->jsonResponse(['ok' => true, 'html' => $html, 'count' => count($rows)]);
 	}
 
 	/**

@@ -190,11 +190,19 @@
 
 /* Duplicate-count badge (.ml-dup-count) reused from the duplicates view on
    the regular table / gallery thumbnails: bottom-right here (the cluster
-   view keeps it top-right), and click-through so the thumb stays clickable. */
+   view keeps it top-right). Clickable (opens the cluster modal) — only the
+   badge itself, so the rest of the thumb still opens the image editor. */
 .ml-cell-thumb .ml-dup-count {
 	top: auto;
 	bottom: 4px;
-	pointer-events: none;
+}
+.ml-dup-count-btn {
+	cursor: pointer;
+}
+.ml-dup-count-btn:hover,
+.ml-dup-count-btn:focus-visible {
+	filter: brightness(1.15);
+	outline: none;
 }
 /* Fade-out animation for rows being deleted — JS adds the class
    right before the row is removed from the DOM so the disappear is
@@ -847,6 +855,96 @@ textarea.ml-cell-input {
 .ml-dup-desc-cur {
 	color: var(--pw-muted-color, #777);
 	font-style: italic;
+}
+
+/* Cluster-detail modal opened from the duplicate badge — a table of every
+   copy with where-used + inline-editable description + apply + lock. */
+.ml-dup-modal {
+	width: min(900px, 94vw);
+	max-height: 88vh;
+	overflow: auto;
+	padding: 1.25rem;
+	border: 1px solid var(--pw-border-color, #ccc);
+	border-radius: 4px;
+	background: var(--pw-blocks-background, #fff);
+	color: var(--pw-text-color, inherit);
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+}
+.ml-dup-modal::backdrop {
+	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
+}
+.ml-dup-modal-bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-bottom: 0.75rem;
+}
+.ml-dup-modal-title {
+	font-size: 1.05em;
+	font-weight: 600;
+}
+.ml-dup-modal-table {
+	width: 100%;
+	border-collapse: collapse;
+}
+.ml-dup-modal-table th {
+	text-align: left;
+	font-weight: 600;
+	color: var(--pw-muted-color, #6c8dae);
+	border-bottom: 1px solid var(--pw-border-color, #ddd);
+	padding: 0.3rem 0.5rem;
+	white-space: nowrap;
+}
+.ml-dup-modal-table td {
+	padding: 0.4rem 0.5rem;
+	border-bottom: 1px solid var(--pw-border-color, #eee);
+	vertical-align: middle;
+}
+.ml-dup-modal-thumb img {
+	display: block;
+	width: 56px;
+	height: 56px;
+	object-fit: cover;
+	border: 1px solid var(--pw-border-color, #e5e5e5);
+	border-radius: 3px;
+	background: var(--pw-inputs-background, #fafafa);
+}
+.ml-dup-modal-table code {
+	font-size: 0.85em;
+	color: var(--pw-code-color, inherit);
+}
+.ml-dup-modal-desc {
+	min-width: 14rem;
+}
+.ml-dup-modal-desc .ml-cell-editable {
+	display: inline-block;
+	min-width: 9rem;
+	min-height: 1.4em;
+	padding: 0.15rem 0.35rem;
+	border: 1px dashed var(--pw-border-color, #ccc);
+	border-radius: 3px;
+	cursor: text;
+	vertical-align: middle;
+}
+.ml-dup-apply-row {
+	margin-left: 0.4rem;
+	padding: 0.1rem 0.4rem;
+	border: 0;
+	background: transparent;
+	color: var(--pw-main-color, #eb1d61);
+	cursor: pointer;
+	font-size: 1rem;
+	vertical-align: middle;
+}
+.ml-dup-apply-row:hover {
+	filter: brightness(1.15);
+}
+.ml-dup-modal-lock {
+	text-align: center;
+}
+.ml-dup-modal-lock label {
+	cursor: pointer;
 }
 
 /* Variations cell renders just a count — right-align like other

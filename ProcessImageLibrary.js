@@ -2248,6 +2248,9 @@
 						e.target.classList.contains('ml-select-row') ||
 						e.target.classList.contains('ml-select-all')
 					)) return;
+					// Duplicate badge → its own handler opens the cluster
+					// modal; don't also open the image editor underneath.
+					if (e.target.closest('.ml-dup-count[data-dup-hash]')) return;
 					// Thumbnail → PW image editor modal. The td only carries
 					// the page-edit data attrs when the host page is
 					// editable, so unauthorised users just see the thumb
@@ -2970,8 +2973,14 @@
 					}
 					status.textContent = msg;
 				}
-				// Re-render so every copy's shown description updates.
-				setTimeout(function () { replaceFromQs(location.search, false); }, 900);
+				// In the badge modal, re-fetch the cluster so it stays open
+				// with the updated descriptions; in the cluster view, re-render.
+				var modal = apply.closest('.ml-dup-modal');
+				if (modal) {
+					reloadDupModal(modal, apply.dataset.hash || '');
+				} else {
+					setTimeout(function () { replaceFromQs(location.search, false); }, 900);
+				}
 			}).catch(function () {
 				apply.disabled = false;
 				if (status) { status.hidden = false; status.textContent = labels.error || 'Failed'; }
@@ -2980,7 +2989,7 @@
 		results && results.addEventListener('change', function (e) {
 			var lock = e.target.closest && e.target.closest('.ml-dup-lock');
 			if (!lock || !config.metaLockUrl) return;
-			var li = lock.closest('li');
+			var li = lock.closest('[data-page-id]');
 			if (!li) return;
 			var fd = new FormData();
 			fd.append('pageId',    li.dataset.pageId || '');
@@ -2995,6 +3004,61 @@
 				if (!d || !d.ok) lock.checked = !lock.checked; // revert on failure
 			}).catch(function () { lock.checked = !lock.checked; });
 		});
+
+		// -- Duplicate cluster modal (click the "N×" badge) ------------
+		// Renders the cluster-detail table INSIDE .ml-results, so the same
+		// delegated handlers above (inline editor, apply, lock) work in it.
+		function fillDupModal(dialog, hash) {
+			var body  = dialog.querySelector('.ml-dup-modal-body');
+			var title = dialog.querySelector('.ml-dup-modal-title');
+			if (body) body.innerHTML = '<p class="ml-dups-note">' + ((labels && labels.loading) || 'Loading…') + '</p>';
+			var fd = new FormData();
+			fd.append('hash', hash);
+			appendCsrf(fd);
+			fetch(config.dupClusterUrl, {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
+			}).then(function (r) { return r.json(); }).then(function (d) {
+				if (!d || !d.ok) throw new Error('cluster fetch failed');
+				if (body) body.innerHTML = d.html;
+				if (title) {
+					title.textContent = (labels.dupModalTitle || '%d identical copies').replace('%d', d.count | 0);
+				}
+			}).catch(function () {
+				if (body) body.innerHTML = '<p class="ml-dups-note">' + ((labels && labels.error) || 'Failed') + '</p>';
+			});
+		}
+		function reloadDupModal(modal, hash) {
+			fillDupModal(modal, hash || modal.dataset.hash || '');
+		}
+		function openDupModal(hash) {
+			if (!hash || !config.dupClusterUrl || !results) return;
+			var ex = results.querySelector('.ml-dup-modal');
+			if (ex) ex.remove();
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-dup-modal';
+			dialog.dataset.hash = hash;
+			dialog.innerHTML =
+				'<div class="ml-dup-modal-bar">'
+				+ '<strong class="ml-dup-modal-title"></strong>'
+				+ '<button type="button" class="uk-button uk-button-default ml-dup-modal-close">'
+				+ ((labels && labels.close) || 'Close') + '</button>'
+				+ '</div><div class="ml-dup-modal-body"></div>';
+			results.appendChild(dialog);
+			dialog.querySelector('.ml-dup-modal-close').addEventListener('click', function () {
+				if (dialog.open) dialog.close();
+			});
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			fillDupModal(dialog, hash);
+			dialog.showModal();
+		}
+		results && results.addEventListener('click', function (e) {
+			var badge = e.target.closest && e.target.closest('.ml-dup-count[data-dup-hash]');
+			if (!badge) return;
+			e.preventDefault();
+			openDupModal(badge.dataset.dupHash);
+		});
+
 		// Leaving the duplicates view via any bookmark tab dims the
 		// Duplicates tab (it's a full link, so entering re-renders cleanly).
 		var dupTabEl = root.querySelector('.ml-dup-tab');
