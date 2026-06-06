@@ -840,6 +840,63 @@ textarea.ml-cell-input {
 	font-style: italic;
 }
 
+/* Near-duplicate section — distinct versions of the same picture, shown
+   side by side for review. Read-only (no hardlink, no auto-merge). */
+.ml-dups-near-h {
+	margin: 1.75rem 0 0.25rem;
+	font-size: 1.05em;
+	font-weight: 600;
+	color: var(--pw-text-color, inherit);
+}
+.ml-dups-note {
+	margin: 0 0 0.75rem;
+	color: var(--pw-muted-color, #777);
+	font-size: 0.9em;
+}
+.ml-dup-near {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 1rem;
+	padding: 0.6rem 0;
+	border-bottom: 1px solid var(--pw-border-color, #eee);
+}
+.ml-dup-near-ver {
+	display: flex;
+	gap: 0.5rem;
+	align-items: flex-start;
+}
+.ml-dup-near-thumb img {
+	display: block;
+	width: 84px;
+	height: 84px;
+	object-fit: cover;
+	border: 1px solid var(--pw-border-color, #e5e5e5);
+	border-radius: 3px;
+	background: var(--pw-inputs-background, #fafafa);
+}
+.ml-dup-near-meta {
+	min-width: 0;
+	font-size: 0.85em;
+}
+.ml-dup-near-dims {
+	font-weight: 600;
+	color: var(--pw-text-color, inherit);
+}
+.ml-dup-near-copies {
+	color: var(--pw-muted-color, #777);
+}
+.ml-dup-near-where {
+	color: var(--pw-muted-color, #555);
+	margin-top: 0.15rem;
+}
+.ml-dup-near-where a {
+	color: var(--pw-text-color, inherit);
+	text-decoration: none;
+}
+.ml-dup-near-where a:hover {
+	text-decoration: underline;
+}
+
 /* Variations cell renders just a count — right-align like other
    numeric cells for quick at-a-glance scanning. */
 .ml-cell-variations {

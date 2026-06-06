@@ -383,6 +383,94 @@ trait ImageLibraryHashing {
 		return ['scanned' => $scanned, 'clusters' => $clusters];
 	}
 
+	/** dHash Hamming distance at/under which two images count as the same
+	 *  picture (different size/format/recompression). Tests put resize +
+	 *  webp re-encode at 0–1 and unrelated images at ~35, so 8 is a safe,
+	 *  low-false-positive cut. */
+	const NEAR_DHASH_THRESHOLD = 8;
+
+	/** Pairwise near-dup clustering is O(n²); above this many fingerprinted
+	 *  images it's skipped (with a note) to keep the view responsive. */
+	const NEAR_MAX_IMAGES = 6000;
+
+	/**
+	 * Near-duplicate groups: images whose perceptual hashes are within
+	 * NEAR_DHASH_THRESHOLD of each other (the same picture at a different
+	 * size / format / recompression). Built by union-find over pairwise
+	 * Hamming distance. Only groups that span ≥2 DISTINCT content hashes are
+	 * returned — a group that's all one content hash is just an exact
+	 * duplicate (already shown), not a near one.
+	 *
+	 * @return array{capped:bool, groups:array<int,array<int,array{pageId:int,fieldName:string,basename:string,contentHash:?string}>>}
+	 */
+	protected function loadNearClusters(int $threshold = self::NEAR_DHASH_THRESHOLD): array {
+		$this->ensureHashTable();
+		$items = [];
+		try {
+			$stmt = $this->wire('database')->query(
+				'SELECT page_id, field_name, basename, content_hash, dhash
+				 FROM `' . self::HASH_TABLE . '` WHERE dhash IS NOT NULL'
+			);
+			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+				$bin = @hex2bin((string) $r['dhash']);
+				if ($bin === false || strlen($bin) !== 8) continue;
+				$items[] = [
+					'pageId'      => (int) $r['page_id'],
+					'fieldName'   => (string) $r['field_name'],
+					'basename'    => (string) $r['basename'],
+					'contentHash' => $r['content_hash'],
+					'bin'         => $bin,
+				];
+			}
+		} catch (\Throwable $e) {
+			return ['capped' => false, 'groups' => []];
+		}
+
+		$n = count($items);
+		if ($n < 2) return ['capped' => false, 'groups' => []];
+		if ($n > self::NEAR_MAX_IMAGES) return ['capped' => true, 'groups' => []];
+
+		// Union-find (iterative path-halving — no recursion).
+		$parent = range(0, $n - 1);
+		$find = function (int $x) use (&$parent): int {
+			while ($parent[$x] !== $x) { $parent[$x] = $parent[$parent[$x]]; $x = $parent[$x]; }
+			return $x;
+		};
+		for ($a = 0; $a < $n; $a++) {
+			$ba = $items[$a]['bin'];
+			for ($b = $a + 1; $b < $n; $b++) {
+				$bb = $items[$b]['bin'];
+				$d = 0;
+				for ($i = 0; $i < 8; $i++) {
+					$x = ord($ba[$i]) ^ ord($bb[$i]);
+					$d += substr_count(decbin($x), '1');
+					if ($d > $threshold) break;
+				}
+				if ($d <= $threshold) {
+					$ra = $find($a); $rb = $find($b);
+					if ($ra !== $rb) $parent[$ra] = $rb;
+				}
+			}
+		}
+
+		// Collect connected components.
+		$byRoot = [];
+		for ($k = 0; $k < $n; $k++) {
+			unset($items[$k]['bin']);
+			$byRoot[$find($k)][] = $items[$k];
+		}
+		// Keep only genuinely-near groups: ≥2 members AND ≥2 content hashes.
+		$groups = [];
+		foreach ($byRoot as $g) {
+			if (count($g) < 2) continue;
+			$hashes = [];
+			foreach ($g as $m) if ($m['contentHash'] !== null) $hashes[$m['contentHash']] = true;
+			if (count($hashes) < 2) continue;
+			$groups[] = $g;
+		}
+		return ['capped' => false, 'groups' => $groups];
+	}
+
 	/**
 	 * Time-budgeted fingerprint scan over the whole managed image set.
 	 *
