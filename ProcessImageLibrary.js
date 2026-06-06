@@ -739,29 +739,212 @@
 			};
 		}
 
-		// Copy ONE just-saved subfield from the edited image to every
-		// other byte-identical copy in its cluster (the duplicate
-		// "apply to all" action wired into the edit popup). Fire-and-
-		// refresh: the source already holds the value, so the server
-		// reads it and writes the rest; a deferred re-render lets any
-		// on-screen copies catch up. Locked copies are skipped server-side.
-		function propagateToCopies(hash, pageId, field, basename, subfield) {
-			if (!config.propagateUrl || !hash) return;
+		// Per-copy duplicate editor. When an image has byte-identical
+		// twins, editing its description / tags opens THIS popup instead
+		// of the single-cell one: it lists every copy with its OWN current
+		// text in an editable field, so the user can see each version and
+		// set them individually — or hit a copy's "use for all" to push
+		// that text into the other fields. Save writes only the copies
+		// whose text actually changed (one save per page). Copies on
+		// non-editable pages are shown read-only.
+		function openDuplicateEditor(td) {
+			if (td.classList.contains('ml-editing')) return;
+			td.classList.add('ml-editing');
+			var subfield = td.dataset.subfield;            // 'description' | 'tags'
+
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-popup-editor ml-dup-editor';
+
+			var header = document.createElement('header');
+			header.textContent = columnLabelFor(td);
+			dialog.appendChild(header);
+
+			var body = document.createElement('div');
+			body.className = 'ml-dup-editor-body';
+			body.textContent = labels.loading || 'Loading…';
+			dialog.appendChild(body);
+
+			var footer = document.createElement('footer');
+			var cancelBtn = document.createElement('button');
+			cancelBtn.type = 'button';
+			cancelBtn.className = 'ml-popup-cancel uk-button uk-button-secondary';
+			cancelBtn.textContent = labels.cancel || 'Cancel';
+			var saveBtn = document.createElement('button');
+			saveBtn.type = 'button';
+			saveBtn.className = 'ml-popup-save uk-button uk-button-primary';
+			saveBtn.textContent = labels.save || 'Save';
+			saveBtn.disabled = true;
+			footer.appendChild(cancelBtn);
+			footer.appendChild(saveBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+			var committed = false;
+			var rows = [];   // { input, original, pageId, field, basename }
+
+			function teardown() {
+				td.classList.remove('ml-editing');
+				if (dialog.open) dialog.close();
+				dialog.remove();
+			}
+			function cancel() {
+				if (committed) return;
+				committed = true;
+				teardown();
+			}
+
+			cancelBtn.addEventListener('click', cancel);
+			dialog.addEventListener('close', function () { if (!committed) cancel(); });
+
+			// Fetch the cluster (members + each copy's current value).
 			var fd = new FormData();
-			fd.append('hash',      hash);
-			fd.append('subfield',  subfield || 'description');
-			fd.append('pageId',    pageId || '');
-			fd.append('fieldName', field || '');
-			fd.append('basename',  basename || '');
+			fd.append('pageId',    td.dataset.pageId);
+			fd.append('fieldName', td.dataset.field);
+			fd.append('basename',  td.dataset.basename);
+			fd.append('subfield',  subfield);
 			appendCsrf(fd);
-			fetch(config.propagateUrl, {
+			fetch(config.dupInfoUrl, {
 				method: 'POST', credentials: 'same-origin',
 				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
 			}).then(function (r) { return r.json(); }).then(function (d) {
-				if (d && d.ok && (d.applied | 0) > 0) {
-					setTimeout(function () { replaceFromQs(location.search, false); }, 1200);
+				if (committed) return;
+				if (!d || !d.ok || !d.isDup || !d.members || d.members.length < 2) {
+					// Lost its twins between render and open — fall back to
+					// the normal single-cell editor.
+					teardown();
+					activateEditor(td);
+					return;
 				}
-			}).catch(function () {});
+				body.textContent = '';
+				var count = d.count | 0;
+				var heading = document.createElement('p');
+				heading.className = 'ml-dup-editor-heading';
+				heading.textContent = (labels.dupHeading
+					|| 'This file exists %d× — edit each copy or copy one text to all:').replace('%d', count);
+				body.appendChild(heading);
+
+				var list = document.createElement('div');
+				list.className = 'ml-dup-editor-list';
+				var sourceInput = null;
+				d.members.forEach(function (m) {
+					var row = document.createElement('div');
+					row.className = 'ml-dup-editor-row';
+
+					var head = document.createElement('div');
+					head.className = 'ml-dup-editor-rowhead';
+					var nameEl;
+					if (m.editUrl) {
+						nameEl = document.createElement('a');
+						nameEl.href = m.editUrl;
+						nameEl.target = '_blank';
+						nameEl.rel = 'noopener';
+					} else {
+						nameEl = document.createElement('span');
+					}
+					nameEl.className = 'ml-dup-editor-page';
+					nameEl.textContent = m.pageTitle + ' · ' + m.fieldName;
+					head.appendChild(nameEl);
+					if (m.isSource) {
+						var here = document.createElement('em');
+						here.className = 'ml-dup-editor-here';
+						here.textContent = ' (' + (labels.dupThisCopy || 'this copy') + ')';
+						head.appendChild(here);
+					}
+					row.appendChild(head);
+
+					var field;
+					if (subfield === 'tags') {
+						field = document.createElement('input');
+						field.type = 'text';
+					} else {
+						field = document.createElement('textarea');
+						field.rows = 2;
+					}
+					field.className = 'ml-dup-editor-input uk-textarea';
+					field.value = m.value || '';
+					if (!m.editable) {
+						field.disabled = true;
+						field.title = labels.dupReadonly || 'not editable';
+					} else {
+						rows.push({
+							input: field, original: m.value || '',
+							pageId: m.pageId, field: m.fieldName, basename: m.basename
+						});
+					}
+
+					var inputWrap = document.createElement('div');
+					inputWrap.className = 'ml-dup-editor-inputwrap';
+					inputWrap.appendChild(field);
+
+					if (m.editable) {
+						var applyBtn = document.createElement('button');
+						applyBtn.type = 'button';
+						applyBtn.className = 'ml-dup-editor-apply uk-button uk-button-link';
+						applyBtn.textContent = '→ ' + (labels.dupApplyRow || 'Use this text for all copies');
+						applyBtn.addEventListener('click', function () {
+							var v = field.value;
+							rows.forEach(function (rr) {
+								if (rr.input !== field) rr.input.value = v;
+							});
+						});
+						inputWrap.appendChild(applyBtn);
+					} else {
+						var ro = document.createElement('span');
+						ro.className = 'ml-dup-editor-ro';
+						ro.textContent = '(' + (labels.dupReadonly || 'not editable') + ')';
+						inputWrap.appendChild(ro);
+					}
+					row.appendChild(inputWrap);
+					list.appendChild(row);
+					if (m.isSource && m.editable) sourceInput = field;
+				});
+				body.appendChild(list);
+				saveBtn.disabled = false;
+				if (sourceInput) { sourceInput.focus(); sourceInput.select(); }
+				else if (rows[0]) rows[0].input.focus();
+			}).catch(function () {
+				if (committed) return;
+				teardown();
+				activateEditor(td);
+			});
+
+			function commit() {
+				if (committed) return;
+				// Only the copies whose text actually changed.
+				var changed = rows.filter(function (r) { return r.input.value !== r.original; });
+				if (!changed.length) { cancel(); return; }
+				committed = true;
+				saveBtn.disabled = true;
+				saveBtn.textContent = labels.saving || 'Saving…';
+
+				var saves = changed.map(function (r) {
+					return enqueueSave(r.pageId, function () {
+						return postSave({
+							pageId:    r.pageId,
+							fieldName: r.field,
+							basename:  r.basename,
+							subfield:  subfield,
+							value:     r.input.value
+						});
+					}).then(function (result) {
+						return !!(result && result.data && result.data.ok);
+					}).catch(function () { return false; });
+				});
+				Promise.all(saves).then(function () {
+					teardown();
+					// Re-render so every changed copy on screen catches up.
+					replaceFromQs(location.search, false);
+				});
+			}
+			saveBtn.addEventListener('click', commit);
+			dialog.addEventListener('keydown', function (e) {
+				if (e.key !== 'Enter') return;
+				if (e.target && e.target.tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return;
+				e.preventDefault();
+				commit();
+			});
+
+			dialog.showModal();
 		}
 
 		// Lock / unlock one placement so cluster-wide propagation leaves
@@ -783,6 +966,21 @@
 			}).then(function (r) { return r.json(); }).then(function (d) {
 				if (!d || !d.ok) lockCb.checked = !lockCb.checked;
 			}).catch(function () { lockCb.checked = !lockCb.checked; });
+		}
+
+		// Dispatch a cell edit: a duplicate image's description / tags
+		// opens the per-copy duplicate editor (so the other copies' texts
+		// are visible and individually editable); everything else uses the
+		// single-cell popup. data-dup-count rides on the cell server-side.
+		function openCellEditor(td) {
+			var sf = td.dataset.subfield;
+			if (config.dupInfoUrl
+				&& parseInt(td.dataset.dupCount || '0', 10) >= 2
+				&& (sf === 'description' || sf === 'tags')) {
+				openDuplicateEditor(td);
+			} else {
+				activateEditor(td);
+			}
 		}
 
 		// All cell edits run through one popup. The native <dialog>
@@ -896,108 +1094,6 @@
 			document.body.appendChild(dialog);
 
 			var committed = false;
-
-			// Duplicate affordances — single-edit mode, for the prose
-			// subfields the propagate endpoint supports. Ask the server
-			// whether this image has byte-identical twins; if so, grow
-			// the popup with an "apply to all copies" toggle (default on)
-			// and a collapsible where-used list whose non-source rows
-			// carry a per-copy "keep own text" lock. On save the edit is
-			// pushed to every unlocked copy via propagateToCopies.
-			var dupApplyCb = null, dupHash = '';
-			if (!batch
-				&& (td.dataset.subfield === 'description' || td.dataset.subfield === 'tags')
-				&& config.dupInfoUrl) {
-				var dupSection = document.createElement('div');
-				dupSection.className = 'ml-dup-popup';
-				dupSection.hidden = true;
-				dialog.insertBefore(dupSection, footer);
-				// The popup lives on document.body, outside .ml-results, so
-				// the delegated lock handler can't see these checkboxes —
-				// wire them straight to the shared helper here.
-				dupSection.addEventListener('change', function (e) {
-					var lock = e.target.closest && e.target.closest('.ml-dup-lock');
-					if (!lock) return;
-					var li = lock.closest('[data-page-id]');
-					if (li) sendMetaLock(li, lock);
-				});
-				var dupFd = new FormData();
-				dupFd.append('pageId',    td.dataset.pageId);
-				dupFd.append('fieldName', td.dataset.field);
-				dupFd.append('basename',  td.dataset.basename);
-				appendCsrf(dupFd);
-				fetch(config.dupInfoUrl, {
-					method: 'POST', credentials: 'same-origin',
-					headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: dupFd
-				}).then(function (r) { return r.json(); }).then(function (d) {
-					if (committed) return;                 // popup already closed
-					if (!d || !d.ok || !d.isDup || (d.count | 0) < 2) return;
-					dupHash = d.hash || '';
-					var count = d.count | 0;
-
-					// "Apply to all N copies" toggle, default on.
-					var toggle = document.createElement('label');
-					toggle.className = 'ml-dup-popup-toggle';
-					dupApplyCb = document.createElement('input');
-					dupApplyCb.type = 'checkbox';
-					dupApplyCb.className = 'uk-checkbox';
-					dupApplyCb.checked = true;
-					toggle.appendChild(dupApplyCb);
-					toggle.appendChild(document.createTextNode(' '
-						+ (labels.applyToCopies || 'Apply to all %d identical copies').replace('%d', count)));
-					dupSection.appendChild(toggle);
-
-					// Collapsible where-used list: every placement links to
-					// its page editor; non-source copies get a "keep own
-					// text" lock so propagation skips them.
-					var details = document.createElement('details');
-					details.className = 'ml-dup-popup-used';
-					var summary = document.createElement('summary');
-					summary.textContent = (labels.dupUsedIn || 'Used in %d places').replace('%d', count);
-					details.appendChild(summary);
-					var ul = document.createElement('ul');
-					(d.members || []).forEach(function (m) {
-						var li = document.createElement('li');
-						li.setAttribute('data-page-id', m.pageId);
-						li.setAttribute('data-field', m.fieldName);
-						li.setAttribute('data-basename', m.basename);
-						var nameEl;
-						if (m.editUrl) {
-							nameEl = document.createElement('a');
-							nameEl.href = m.editUrl;
-							nameEl.target = '_blank';
-							nameEl.rel = 'noopener';
-						} else {
-							nameEl = document.createElement('span');
-						}
-						nameEl.className = 'ml-dup-popup-page';
-						nameEl.textContent = m.pageTitle + ' · ' + m.fieldName;
-						li.appendChild(nameEl);
-						if (m.isSource) {
-							var here = document.createElement('em');
-							here.className = 'ml-dup-popup-here';
-							here.textContent = ' (' + (labels.dupThisCopy || 'this copy') + ')';
-							li.appendChild(here);
-						} else {
-							var lockLbl = document.createElement('label');
-							lockLbl.className = 'ml-dup-popup-lock';
-							lockLbl.title = labels.dupKeepOwn || 'keep own text';
-							var lockCb = document.createElement('input');
-							lockCb.type = 'checkbox';
-							lockCb.className = 'ml-dup-lock uk-checkbox';
-							lockCb.checked = !!m.locked;
-							lockLbl.appendChild(lockCb);
-							lockLbl.appendChild(document.createTextNode(' '
-								+ (labels.dupKeepOwn || 'keep own text')));
-							li.appendChild(lockLbl);
-						}
-						ul.appendChild(li);
-					});
-					details.appendChild(ul);
-					dupSection.appendChild(details);
-					dupSection.hidden = false;
-				}).catch(function () {});
-			}
 
 			function teardown() {
 				td.classList.remove('ml-editing');
@@ -1393,17 +1489,7 @@
 					return;
 				}
 
-				if (!isMultilang && primaryValue === original) {
-					teardown();
-					// Nothing changed, but the user may have opened the
-					// popup just to push the existing caption to the other
-					// copies — honour the toggle even without an edit.
-					if (dupApplyCb && dupApplyCb.checked && dupHash) {
-						propagateToCopies(dupHash, td.dataset.pageId,
-							td.dataset.field, td.dataset.basename, td.dataset.subfield);
-					}
-					return;
-				}
+				if (!isMultilang && primaryValue === original) { teardown(); return; }
 
 				teardown();
 				// Optimistic update — resolve placeholders client-side
@@ -1463,12 +1549,6 @@
 						td.title = '';
 						flashCell(td, true);
 						fadeRowIfMismatched(td, result.data);
-						// Duplicate "apply to all": the source now holds the
-						// new value, so push it to every unlocked copy.
-						if (dupApplyCb && dupApplyCb.checked && dupHash) {
-							propagateToCopies(dupHash, td.dataset.pageId,
-								td.dataset.field, td.dataset.basename, td.dataset.subfield);
-						}
 					} else {
 						if (!typedInput) setCellText(td, original);
 						var reason = (result && result.data && result.data.error)
@@ -2429,7 +2509,7 @@
 				var td = e.target.closest && e.target.closest('.ml-cell-editable');
 				if (!td) return;
 				if (td.classList.contains('ml-editing')) return;
-				activateEditor(td);
+				openCellEditor(td);
 			});
 
 			// Keyboard activation: editable cells + thumb cells carry
@@ -2446,7 +2526,7 @@
 				var editTd = e.target.closest && e.target.closest('.ml-cell-editable');
 				if (editTd && e.target === editTd && !editTd.classList.contains('ml-editing')) {
 					e.preventDefault();
-					activateEditor(editTd);
+					openCellEditor(editTd);
 				}
 			});
 

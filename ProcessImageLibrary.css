@@ -849,62 +849,72 @@ textarea.ml-cell-input {
 	font-style: italic;
 }
 
-/* Duplicate affordances grown into the normal edit popup when the edited
-   image has byte-identical twins: an "apply to all copies" toggle plus a
-   collapsible where-used list with per-copy "keep own text" locks. Sits
-   between the editor widget and the Save / Cancel footer. */
-.ml-dup-popup {
-	margin-top: 0.75rem;
-	padding-top: 0.75rem;
-	border-top: 1px solid var(--pw-border-color, #e0e0e0);
-	font-size: 0.92em;
+/* Per-copy duplicate editor — opened from a duplicate image's description /
+   tags cell. A wider popup that lists every byte-identical copy with its own
+   current text, each individually editable, plus a per-row "use this text for
+   all" action. Reuses .ml-popup-editor's chrome; .ml-dup-editor widens it. */
+.ml-dup-editor {
+	width: min(640px, 94vw);
 }
-.ml-dup-popup-toggle {
-	display: flex;
-	align-items: center;
-	gap: 0.45rem;
-	font-weight: 600;
-	cursor: pointer;
+.ml-dup-editor-body {
+	margin: 0.25rem 0 0.5rem;
 }
-.ml-dup-popup-used {
-	margin-top: 0.55rem;
-}
-.ml-dup-popup-used summary {
-	cursor: pointer;
+.ml-dup-editor-heading {
+	margin: 0 0 0.6rem;
 	color: var(--pw-muted-color, #6c8dae);
 }
-.ml-dup-popup-used ul {
-	list-style: none;
-	margin: 0.4rem 0 0;
-	padding: 0;
-}
-.ml-dup-popup-used li {
+.ml-dup-editor-list {
 	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	gap: 0.75rem;
-	padding: 0.25rem 0;
+	flex-direction: column;
+	gap: 0.6rem;
+	max-height: 56vh;
+	overflow: auto;
+}
+.ml-dup-editor-row {
+	padding-bottom: 0.55rem;
 	border-bottom: 1px solid var(--pw-border-color, #eee);
 }
-.ml-dup-popup-used li:last-child {
+.ml-dup-editor-row:last-child {
 	border-bottom: 0;
 }
-.ml-dup-popup-page {
+.ml-dup-editor-rowhead {
+	display: flex;
+	align-items: baseline;
+	gap: 0.4rem;
+	margin-bottom: 0.25rem;
+	font-size: 0.92em;
+}
+.ml-dup-editor-page {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.ml-dup-popup-here {
+.ml-dup-editor-here {
 	color: var(--pw-muted-color, #999);
 	white-space: nowrap;
 }
-.ml-dup-popup-lock {
-	display: inline-flex;
-	align-items: center;
-	gap: 0.3rem;
+.ml-dup-editor-inputwrap {
+	display: flex;
+	align-items: flex-start;
+	gap: 0.5rem;
+}
+.ml-dup-editor-input {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+.ml-dup-editor-input:disabled {
+	opacity: 0.6;
+}
+.ml-dup-editor-apply {
+	flex: 0 0 auto;
 	white-space: nowrap;
-	color: var(--pw-muted-color, #777);
-	cursor: pointer;
+	padding: 0;
+}
+.ml-dup-editor-ro {
+	flex: 0 0 auto;
+	color: var(--pw-muted-color, #999);
+	font-size: 0.85em;
+	white-space: nowrap;
 }
 
 /* Variations cell renders just a count — right-align like other

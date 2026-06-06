@@ -909,6 +909,11 @@ class ProcessImageLibrary extends Process {
 				$san->entities((string) $row['basename']),
 				md5((string) $row['basename'])
 			);
+			// Mark editable cells of a duplicate so the JS opens the
+			// per-copy duplicate editor instead of the single-cell popup.
+			if ((int) ($row['dupCount'] ?? 0) >= 2) {
+				$editAttrs .= ' data-dup-count="' . (int) $row['dupCount'] . '"';
+			}
 
 			// Tile identity attrs mirror the table <tr> so replace /
 			// delete / drag-drop resolve the same target.
@@ -4355,12 +4360,13 @@ class ProcessImageLibrary extends Process {
 				// Propagate result (JS substitutes %d).
 				'propagated'       => $this->_('Applied to %d cop(y/ies)'),
 				'propagatedLocked' => $this->_('(%d kept own)'),
-				// Duplicate affordances inside the normal edit popup (JS
-				// substitutes %d with the copy count).
-				'applyToCopies'    => $this->_('Apply to all %d identical copies'),
-				'dupUsedIn'        => $this->_('Used in %d places'),
-				'dupKeepOwn'       => $this->_('keep own text'),
+				// Per-copy duplicate editor in the popup (JS substitutes %d
+				// with the copy count).
+				'dupHeading'       => $this->_('This file exists %d× — edit each copy or copy one text to all:'),
 				'dupThisCopy'      => $this->_('this copy'),
+				'dupApplyRow'      => $this->_('Use this text for all copies'),
+				'dupReadonly'      => $this->_('not editable'),
+				'dupSavedCopies'   => $this->_('Saved %d cop(y/ies)'),
 				// Space reclaim (JS substitutes %1$d / %2$d).
 				'working'          => $this->_('Working…'),
 				'reclaimProgress'  => $this->_('Reclaiming… %1$d / %2$d'),
@@ -4919,6 +4925,11 @@ class ProcessImageLibrary extends Process {
 				$san->entities((string) $row['basename']),
 				md5((string) $row['basename'])
 			);
+			// Mark editable cells of a duplicate so the JS opens the
+			// per-copy duplicate editor instead of the single-cell popup.
+			if ((int) ($row['dupCount'] ?? 0) >= 2) {
+				$editAttrs .= ' data-dup-count="' . (int) $row['dupCount'] . '"';
+			}
 			// A11y: editable cells expose themselves as buttons so
 			// keyboard users can Tab to them and Enter / Space to
 			// open the inline editor (handled in JS). Per-cell labels
@@ -5574,13 +5585,14 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * AJAX endpoint: duplicate info for ONE image, used by the normal edit
-	 * popup to (a) decide whether to offer "apply to all copies" and (b) fill
-	 * the collapsible "used in N places" list. Given (pageId, fieldName,
-	 * basename) it returns the image's exact-duplicate cluster: the content
-	 * hash, the live copy count, and every placement (page title + edit URL +
-	 * per-copy "keep own text" lock state), with the queried image flagged as
-	 * the source. Non-duplicates return { ok:true, isDup:false }. POST + CSRF.
+	 * AJAX endpoint: the full exact-duplicate cluster of ONE image, for the
+	 * per-copy duplicate editor in the popup. Given (pageId, fieldName,
+	 * basename, subfield) it returns every byte-identical copy with its page
+	 * title + edit URL, whether it is editable, and its CURRENT value of the
+	 * requested subfield (description / tags) in the editor's language — so
+	 * the editor can show every copy's text side by side and let the user set
+	 * each one (or push one text to all). The queried image is flagged as the
+	 * source. Non-duplicates return { ok:true, isDup:false }. POST + CSRF.
 	 */
 	public function ___executeDupInfo() {
 		$config = $this->wire('config');
@@ -5600,8 +5612,12 @@ class ProcessImageLibrary extends Process {
 		$pageId    = (int) $input->post('pageId');
 		$fieldName = $sanitizer->fieldName((string) $input->post('fieldName'));
 		$basename  = basename((string) $input->post('basename'));
+		$subfield  = $sanitizer->fieldName((string) $input->post('subfield'));
 		if (!$pageId || $fieldName === '' || $basename === '') {
 			return $this->jsonError('Missing parameter');
+		}
+		if (!in_array($subfield, ['description', 'tags'], true)) {
+			return $this->jsonError('Subfield not supported');
 		}
 
 		// One GROUP BY over the fingerprint table tells us in a single pass
@@ -5617,9 +5633,9 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonResponse(['ok' => true, 'isDup' => false]);
 		}
 
-		$lockSet   = $this->loadLockSet();
-		$pageCache = [];
-		$out       = [];
+		$imageFields = $this->discoverImageFields();
+		$pageCache   = [];
+		$out         = [];
 		foreach ($members as $m) {
 			$pid = (int) $m['pageId']; $fn = (string) $m['fieldName']; $bn = (string) $m['basename'];
 			if (!array_key_exists($pid, $pageCache)) {
@@ -5629,13 +5645,29 @@ class ProcessImageLibrary extends Process {
 			if (!$page->id) continue;
 			$title = (string) $page->get('title|name');
 			if ($title === '') $title = '#' . $pid;
+
+			// Editable only if the host page is editable AND this image
+			// field actually carries the requested subfield.
+			$editable = $page->editable()
+				&& in_array($fn, $imageFields, true)
+				&& in_array($subfield, $this->editableSubfields($fn), true);
+
+			// Read the copy's current value in the editor's language —
+			// the same value executeSave would overwrite, so what the
+			// editor shows matches what a save writes.
+			$value = '';
+			$page->of(false);
+			$img = $this->resolvePageimage($page, $fn, $bn);
+			if ($img) $value = $this->readEditableValue($img, $subfield);
+
 			$out[] = [
 				'pageId'    => $pid,
 				'fieldName' => $fn,
 				'basename'  => $bn,
 				'pageTitle' => $title,
 				'editUrl'   => $page->editable() ? $page->editUrl() : '',
-				'locked'    => isset($lockSet[$pid . "\0" . $fn . "\0" . $bn]),
+				'editable'  => $editable,
+				'value'     => $value,
 				'isSource'  => ($pid === $pageId && $fn === $fieldName && $bn === $basename),
 			];
 		}
@@ -5644,12 +5676,29 @@ class ProcessImageLibrary extends Process {
 		}
 
 		return $this->jsonResponse([
-			'ok'      => true,
-			'isDup'   => true,
-			'hash'    => $hash,
-			'count'   => count($out),
-			'members' => $out,
+			'ok'       => true,
+			'isDup'    => true,
+			'hash'     => $hash,
+			'subfield' => $subfield,
+			'count'    => count($out),
+			'members'  => $out,
 		]);
+	}
+
+	/**
+	 * The current-language value of an image subfield as plain editable text
+	 * (description / tags) — the value the popup shows and executeSave would
+	 * overwrite. Single-lang installs read the raw value; multilang reads the
+	 * editor's current language slot (falling back to the default language).
+	 */
+	protected function readEditableValue(Pageimage $img, string $subfield): string {
+		$langs = $this->readLangValues($img, $subfield);   // null on single-lang
+		if ($langs === null) {
+			return (string) $img->get($subfield);
+		}
+		$cur = $this->getCurrentLangKey();
+		if (array_key_exists($cur, $langs)) return (string) $langs[$cur];
+		return (string) ($langs[0] ?? '');
 	}
 
 	/**
