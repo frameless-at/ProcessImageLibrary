@@ -429,6 +429,76 @@ trait ImageLibraryHashing {
 		];
 	}
 
+	/**
+	 * Hash (or refresh) every managed image on ONE page, skipping files whose
+	 * (size, mtime) are unchanged. Returns the distinct content hashes of the
+	 * page's images so the caller can immediately reclaim those clusters. Used
+	 * by the on-save auto-hash hook — covers top-level pages AND repeater item
+	 * pages, since the hook fires on whichever page actually hosts the field.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function hashPageImages(int $pageId): array {
+		$this->ensureHashTable();
+		$page = $this->wire('pages')->get($pageId);
+		if (!$page->id) return [];
+		$page->of(false);
+		$fields = $this->discoverImageFields();
+		if (!$fields) return [];
+
+		$existing = $this->loadHashRowsForPage($pageId);
+		$hashes   = [];
+		foreach ($fields as $fn) {
+			if (!$page->template->hasField($fn)) continue;
+			$val = $page->get($fn);
+			if (!$val) continue;
+			$items = ($val instanceof Pageimage) ? [$val] : $val;   // Pageimages is iterable
+			foreach ($items as $img) {
+				if (!$img instanceof Pageimage) continue;
+				$bn   = (string) $img->basename;
+				$path = (string) $img->filename;
+				$size = @filesize($path);
+				$mt   = @filemtime($path);
+				if ($size === false || $mt === false) continue;
+
+				$cur = $existing[$fn . "\0" . $bn] ?? null;
+				if ($cur && $cur['content_hash'] !== null
+					&& (int) $cur['filesize'] === (int) $size
+					&& (int) $cur['filemtime'] === (int) $mt) {
+					$hashes[(string) $cur['content_hash']] = true;
+					continue;
+				}
+				$content = $this->computeContentHash($path);
+				if ($content === null) continue;
+				$this->storeImageHash($pageId, $fn, $bn, (int) $size, (int) $mt, $content, null);
+				$hashes[$content] = true;
+			}
+		}
+		return array_keys($hashes);
+	}
+
+	/**
+	 * One automatic maintenance pass: fingerprint changed / new images, then
+	 * collapse byte-identical groups onto a shared inode. Both halves are
+	 * internally time-budgeted (HASH_SCAN_BUDGET_MS per call); this loops them
+	 * up to $maxSeconds wall-clock so a large initial backlog converges over a
+	 * few invocations (install kicks one off, LazyCron repeats it hourly).
+	 */
+	protected function runMaintenancePass(int $maxSeconds = 8): void {
+		$stop = microtime(true) + max(1, $maxSeconds);
+		try {
+			$off = 0;
+			do { $r = $this->scanHashes($off); $off = (int) $r['nextOffset']; }
+			while (empty($r['complete']) && microtime(true) < $stop);
+
+			$off = 0;
+			do { $r = $this->reclaimAll($off); $off = (int) $r['nextOffset']; }
+			while (empty($r['complete']) && microtime(true) < $stop);
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: maintenance pass failed: ' . $e->getMessage());
+		}
+	}
+
 	// ------------------------------------------------------------------
 	// Hardlink reclaim — collapse byte-identical copies to one inode.
 	// ------------------------------------------------------------------

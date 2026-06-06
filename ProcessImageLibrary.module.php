@@ -74,7 +74,6 @@ class ProcessImageLibrary extends Process {
 	// $user->meta alongside the other view prefs.
 	const VIEW_TABLE      = 'table';
 	const VIEW_MASONRY    = 'masonry';
-	const VIEW_DUPLICATES = 'duplicates';
 
 	// Masonry base column width in px at zoom 1. The gallery is now laid
 	// out client-side (layoutGallery distributes natural-ratio tiles into
@@ -294,12 +293,6 @@ class ProcessImageLibrary extends Process {
 		return [self::VIEW_TABLE, self::VIEW_MASONRY];
 	}
 
-	/** Transient "show duplicate clusters" view — a filtered way of looking,
-	 *  not a persisted layout. Driven by ?view=duplicates only. */
-	protected function isDuplicatesView(): bool {
-		return (string) $this->wire('input')->get('view') === self::VIEW_DUPLICATES;
-	}
-
 	/**
 	 * Effective result layout. An explicit ?view= request param wins and
 	 * is persisted to the user's prefs (so the choice survives a clean
@@ -452,6 +445,50 @@ class ProcessImageLibrary extends Process {
 		// the native page-edit UI would leave the image-library table
 		// showing stale values until the cache expired naturally.
 		$this->addHookAfter('Pages::saved', $this, 'invalidateRowCacheOnPageSave');
+
+		// Automatic deduplication. On every save, fingerprint the saved
+		// page's images and immediately collapse any byte-identical twins
+		// to a shared inode (instant space reclaim when the twin already
+		// exists). LazyCron is the safety net: it fingerprints copies whose
+		// twin is uploaded later and links any group the save-time pass
+		// missed. Both are no-ops once everything is hashed + linked.
+		$this->addHookAfter('Pages::saved', $this, 'autoHashOnPageSave');
+		$this->addHook('LazyCron::everyHour', $this, 'autoMaintenance');
+	}
+
+	/**
+	 * Pages::saved listener: auto-fingerprint the saved page's images and
+	 * link any byte-identical twins right away. Scoped to the one page, so
+	 * it's cheap; skips entirely when the page hosts no managed image field.
+	 */
+	public function autoHashOnPageSave(HookEvent $event): void {
+		$page = $event->arguments(0);
+		if (!$page instanceof Page || !$page->id || !$page->template) return;
+		$fields = $this->discoverImageFields();
+		if (!$fields) return;
+		$hosts = false;
+		foreach ($fields as $fn) {
+			if ($page->template->hasField($fn)) { $hosts = true; break; }
+		}
+		if (!$hosts) return;
+
+		try {
+			foreach ($this->hashPageImages((int) $page->id) as $hash) {
+				$members = $this->loadClusterMembers($hash);
+				if (count($members) >= 2) $this->reclaimMembers($members);
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: auto-hash on save failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * LazyCron hourly safety net: a budgeted fingerprint + reclaim pass over
+	 * the whole site, catching copies whose twin arrived later and any group
+	 * the on-save pass didn't cover. No-op once everything is hashed + linked.
+	 */
+	public function autoMaintenance(HookEvent $event): void {
+		$this->runMaintenancePass(8);
 	}
 
 	/**
@@ -747,14 +784,6 @@ class ProcessImageLibrary extends Process {
 
 		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
 
-		// Duplicates is a clustered, filtered view over the fingerprint store,
-		// not the paginated row list — branch before sort / pagination. It's
-		// entered/left from the bookmarks bar (which is rendered above and
-		// persists), so it needs no pager or layout toggle of its own.
-		if ($this->isDuplicatesView()) {
-			return $this->renderDuplicates($filters);
-		}
-
 		// Sorting by a custom subfield needs the value on every row,
 		// not just the visible slice — applySort reads $row['custom']
 		// and otherwise compares empty strings, leaving the list in
@@ -1029,177 +1058,6 @@ class ProcessImageLibrary extends Process {
 				. '<i class="fa ' . $icon . '" aria-hidden="true"></i></a>';
 		}
 		$out .= '</span>';
-		return $out;
-	}
-
-	/**
-	 * Duplicates view: byte-identical images grouped into clusters from the
-	 * fingerprint store. Each cluster shows one thumbnail, the copy count, and
-	 * every place a copy lives (page · field · filename, linked to the page
-	 * editor). Stale fingerprints (file since deleted / renamed) are dropped
-	 * by intersecting cluster members with the current image set, so a
-	 * cluster only renders when 2+ copies still exist.
-	 *
-	 * A toolbar carries the Scan / Re-scan button (the JS drives
-	 * ___executeScanHashes in chunks) and a summary; when nothing is
-	 * fingerprinted yet it prompts for a first scan. Exact byte-identical
-	 * duplicates only.
-	 */
-	protected function renderDuplicates(array $filters): string {
-		$san  = $this->wire('sanitizer');
-		$data = $this->loadExactClusters();
-		$scanned = (int) $data['scanned'];
-
-		// Index the current image set by identity so we can attach display
-		// data (thumb, title, edit URL) and discard stale fingerprints.
-		$byKey = [];
-		foreach ($this->loadRows() as $r) {
-			$byKey[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] = $r;
-		}
-
-		$clusters = [];
-		$pool     = [];
-		foreach ($data['clusters'] as $c) {
-			$members = [];
-			foreach ($c['members'] as $m) {
-				$k = $m['pageId'] . "\0" . $m['fieldName'] . "\0" . $m['basename'];
-				if (isset($byKey[$k])) $members[] = $byKey[$k];
-			}
-			if (count($members) >= 2) {
-				$clusters[] = ['hash' => (string) $c['hash'], 'members' => $members];
-				foreach ($members as $mr) $pool[] = $mr;
-			}
-		}
-
-		// One hydrate pass for every member's thumbnail, then re-index.
-		$hByKey = [];
-		foreach ($this->hydrateSlice($pool) as $hr) {
-			$hByKey[$hr['pageId'] . "\0" . $hr['fieldName'] . "\0" . $hr['basename']] = $hr;
-		}
-		$lockSet = $this->loadLockSet();
-
-		$redundant = 0;
-		$potentialBytes = 0;
-		foreach ($clusters as $cl) {
-			$n = count($cl['members']);
-			$redundant += $n - 1;
-			$potentialBytes += (int) ($cl['members'][0]['filesize'] ?? 0) * ($n - 1);
-		}
-		$reclaimedBytes = $this->totalReclaimedBytes();
-
-		$out = '<div class="ml-dups">';
-
-		// Toolbar: scan button + live progress slot + summary.
-		$scanLabel = $scanned ? $this->_('Re-scan') : $this->_('Scan for duplicates');
-		$out .= '<div class="ml-dups-bar">'
-			. '<button type="button" class="uk-button uk-button-primary ml-dups-scan">'
-			. $san->entities($scanLabel) . '</button>'
-			. '<span class="ml-dups-progress" hidden></span>';
-		if (!$scanned) {
-			$summary = $this->_('Not scanned yet — run a scan to find duplicates.');
-		} elseif (!$clusters) {
-			$summary = $this->_('No exact duplicates found.');
-		} else {
-			$summary = sprintf(
-				$this->_('%1$d duplicate set(s), %2$d redundant cop(y/ies).'),
-				count($clusters), $redundant
-			);
-		}
-		$out .= '<span class="ml-dups-summary">' . $san->entities($summary) . '</span>';
-
-		// Space-reclaim controls: collapse exact copies to one inode. Show
-		// the still-reclaimable amount (gross potential minus what's already
-		// shared), so the button disappears once everything is collapsed.
-		$remainingBytes = max(0, $potentialBytes - $reclaimedBytes);
-		if ($scanned && $clusters && $remainingBytes > 0) {
-			$out .= '<button type="button" class="uk-button uk-button-default ml-dups-reclaim">'
-				. $san->entities(sprintf($this->_('Reclaim space (~%s)'), $this->formatFilesize($remainingBytes)))
-				. '</button>'
-				. '<span class="ml-dups-reclaim-progress" hidden></span>';
-		}
-		if ($reclaimedBytes > 0) {
-			$out .= '<span class="ml-dups-reclaimed">'
-				. $san->entities(sprintf($this->_('%s reclaimed'), $this->formatFilesize($reclaimedBytes)))
-				. '</span>'
-				. '<button type="button" class="uk-button uk-button-link ml-dups-expand">'
-				. $san->entities($this->_('Un-share')) . '</button>';
-		}
-		$out .= '</div>';
-
-		// Cluster cards. The lead copy's description is a normal editable
-		// cell — the existing inline editor opens on it — and "apply to all"
-		// copies that saved value to the other, unlocked copies.
-		foreach ($clusters as $cl) {
-			$hash    = $cl['hash'];
-			$members = $cl['members'];
-			$first   = $members[0];
-			$fKey    = $first['pageId'] . "\0" . $first['fieldName'] . "\0" . $first['basename'];
-			$hFirst  = $hByKey[$fKey] ?? $first;
-
-			$leadAttrs = sprintf(
-				'data-page-id="%d" data-field="%s" data-basename="%s"',
-				(int) $first['pageId'],
-				$san->entities((string) $first['fieldName']),
-				$san->entities((string) $first['basename'])
-			);
-			$leadDesc = $this->normalizeDescription($first['description'] ?? '');
-
-			$out .= '<div class="ml-dup-cluster" data-hash="' . $san->entities($hash) . '">';
-
-			$out .= '<div class="ml-dup-thumb">';
-			if (!empty($hFirst['thumbUrl'])) {
-				$out .= '<img src="' . $san->entities((string) $hFirst['thumbUrl']) . '" alt="" loading="lazy">';
-			}
-			$out .= $this->renderDupBadge(count($members), $hash) . '</div>';
-
-			$out .= '<div class="ml-dup-body">';
-
-			// Lead description — reuses the inline editor (.ml-cell-editable).
-			$out .= '<div class="ml-dup-edit">'
-				. '<span class="ml-dup-edit-label">' . $san->entities($this->_('Description')) . '</span>'
-				. '<div class="ml-cell-desc ml-cell-editable ml-dup-desc-edit" ' . $leadAttrs
-				. ' data-subfield="description" data-input="textarea" role="button" tabindex="0"'
-				. $this->buildLangAttrs($first['description'] ?? '') . '>'
-				. $san->entities($leadDesc) . '</div>'
-				. '<button type="button" class="uk-button uk-button-default ml-dup-apply" '
-				. $leadAttrs . ' data-hash="' . $san->entities($hash) . '" data-subfield="description">'
-				. $san->entities($this->_('Apply description to all copies')) . '</button>'
-				. '<span class="ml-dup-apply-status" hidden></span>'
-				. '</div>';
-
-			// Members — each with a "keep own text" lock toggle.
-			$out .= '<ul class="ml-dup-members">';
-			foreach ($members as $m) {
-				$mKey    = $m['pageId'] . "\0" . $m['fieldName'] . "\0" . $m['basename'];
-				$title   = (string) ($m['pageTitle'] ?? '');
-				if ($title === '') $title = '#' . (int) $m['pageId'];
-				$editUrl = (string) ($m['pageEditUrl'] ?? '');
-				$locked  = isset($lockSet[$mKey]);
-				$curDesc = $this->normalizeDescription($m['description'] ?? '');
-
-				$label = $san->entities($title)
-					. ' <span class="ml-dup-field">' . $san->entities((string) $m['fieldName']) . '</span> '
-					. '<code>' . $san->entities((string) $m['basename']) . '</code>';
-
-				$out .= '<li data-page-id="' . (int) $m['pageId'] . '"'
-					. ' data-field="' . $san->entities((string) $m['fieldName']) . '"'
-					. ' data-basename="' . $san->entities((string) $m['basename']) . '">';
-				$out .= '<label class="ml-dup-lock-lbl" title="'
-					. $san->entities($this->_('Keep this copy’s own text (skip when applying)')) . '">'
-					. '<input type="checkbox" class="ml-dup-lock"' . ($locked ? ' checked' : '') . '> '
-					. $san->entities($this->_('own text')) . '</label> ';
-				$out .= $editUrl
-					? '<a href="' . $san->entities($editUrl) . '" target="_blank" rel="noopener">' . $label . '</a>'
-					: $label;
-				if ($curDesc !== '') {
-					$out .= ' <span class="ml-dup-desc-cur">“' . $san->entities($curDesc) . '”</span>';
-				}
-				$out .= '</li>';
-			}
-			$out .= '</ul></div></div>';
-		}
-
-		$out .= '</div>';
 		return $out;
 	}
 
@@ -4326,11 +4184,6 @@ class ProcessImageLibrary extends Process {
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
 			'usageUrl'   => $this->wire('page')->url . 'usage/',
 			'widgetUrl'  => $this->wire('page')->url . 'widget/',
-			'scanHashesUrl' => $this->wire('page')->url . 'scan-hashes/',
-			'propagateUrl'  => $this->wire('page')->url . 'propagate/',
-			'metaLockUrl'   => $this->wire('page')->url . 'meta-lock/',
-			'reclaimUrl'    => $this->wire('page')->url . 'reclaim/',
-			'expandUrl'     => $this->wire('page')->url . 'expand/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -4385,18 +4238,6 @@ class ProcessImageLibrary extends Process {
 				// Label next to the checkbox widget for a boolean custom subfield.
 				'enabled'          => $this->_('Enabled'),
 				'rename'           => $this->_('New filename'),
-				// Duplicate-scan progress (JS substitutes %1$d / %2$d).
-				'scanning'         => $this->_('Scanning…'),
-				'scanProgress'     => $this->_('Scanning… %1$d / %2$d'),
-				// Propagate result (JS substitutes %d).
-				'propagated'       => $this->_('Applied to %d cop(y/ies)'),
-				'propagatedLocked' => $this->_('(%d kept own)'),
-				// Space reclaim (JS substitutes %1$d / %2$d).
-				'working'          => $this->_('Working…'),
-				'reclaimProgress'  => $this->_('Reclaiming… %1$d / %2$d'),
-				'reclaimConfirm'   => $this->_('Collapse identical copies to one shared file to save disk space? This is reversible (Un-share).'),
-				'expandProgress'   => $this->_('Un-sharing… %1$d / %2$d'),
-				'expandConfirm'    => $this->_('Give every collapsed copy its own file again? This undoes the space saving.'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
@@ -4513,32 +4354,20 @@ class ProcessImageLibrary extends Process {
 		$allLabel = $san->entities($this->_('Show all'));
 		$delTitle = $san->entities($this->_('Delete bookmark'));
 
-		// Duplicates is a transient filtered view, not a saved filter — so it
-		// lights up its own tab and dims every filter tab while active.
-		$inDup = $this->isDuplicatesView();
-
 		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
 
 		// Baseline "Show all" tab first — empty querystring, active
-		// iff nothing filter-shaped is currently set and not in duplicates.
-		$allActive = ($currentCanon === '' && !$inDup) ? ' class="uk-active"' : '';
+		// iff nothing filter-shaped is currently set.
+		$allActive = ($currentCanon === '') ? ' class="uk-active"' : '';
 		$out .= '<li' . $allActive . '>'
 			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
 			. $allLabel . '</a></li>';
-
-		// Duplicates tab — a separate way of looking (clusters of identical
-		// images), entered here and left by picking any other tab. Full link
-		// (not the AJAX bookmark handler) so the page re-renders cleanly.
-		$dupActive = $inDup ? ' class="uk-active"' : '';
-		$out .= '<li' . $dupActive . '>'
-			. '<a class="ml-dup-tab" href="' . $san->entities($page->url . '?view=' . self::VIEW_DUPLICATES) . '">'
-			. $san->entities($this->_('Duplicates')) . '</a></li>';
 
 		$bookmarkMatched = false;
 		foreach ($bookmarks as $idx => $b) {
 			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
 			$href  = $page->url . $canon;
-			$isActive = (!$inDup && $canon !== '' && $canon === $currentCanon);
+			$isActive = ($canon !== '' && $canon === $currentCanon);
 			if ($isActive) $bookmarkMatched = true;
 			$active = $isActive ? ' class="uk-active"' : '';
 			$out .= '<li' . $active . ' data-bookmark-idx="' . (int) $idx . '">'
@@ -5503,219 +5332,10 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * AJAX endpoint: copy ONE subfield (description / tags) from a source
-	 * image to every other copy in its exact-duplicate cluster (identified by
-	 * content hash), skipping any placement the editor has locked ("keep own
-	 * text"). The value is copied straight from the already-saved source —
-	 * including every language — via the same multilang helpers the inline
-	 * editor uses, so editing stays in the existing editor and this is a pure
-	 * "apply to the rest" step. POST + CSRF.
-	 */
-	public function ___executePropagate() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
-
-		$input     = $this->wire('input');
-		$sanitizer = $this->wire('sanitizer');
-		$hash      = preg_replace('/[^a-f0-9]/i', '', (string) $input->post('hash'));
-		$subfield  = $sanitizer->fieldName((string) $input->post('subfield'));
-		$srcPid    = (int) $input->post('pageId');
-		$srcField  = $sanitizer->fieldName((string) $input->post('fieldName'));
-		$srcBase   = basename((string) $input->post('basename'));
-
-		if ($hash === '' || !$srcPid || !$srcField || !$srcBase) {
-			return $this->jsonError('Missing parameter');
-		}
-		// Only the universal prose subfields for now.
-		if (!in_array($subfield, ['description', 'tags'], true)) {
-			return $this->jsonError('Subfield not propagatable');
-		}
-
-		// Read the canonical value (all languages) from the source image.
-		$srcPage = $this->wire('pages')->get($srcPid);
-		if (!$srcPage->id) return $this->jsonError('Source page not found', 404);
-		$srcImg = $this->resolvePageimage($srcPage, $srcField, $srcBase);
-		if (!$srcImg) return $this->jsonError('Source image not found', 404);
-		$srcLangValues = $this->readLangValues($srcImg, $subfield);          // null on single-lang
-		$srcPlain      = ($srcLangValues === null) ? (string) $srcImg->get($subfield) : '';
-
-		$members     = $this->loadClusterMembers($hash);
-		if (count($members) < 2) return $this->jsonError('Cluster not found');
-		$lockSet     = $this->loadLockSet();
-		$imageFields = $this->discoverImageFields();
-		$pageCache   = [];
-		$touched     = [];
-		$applied = 0; $skippedLocked = 0; $skippedOther = 0;
-
-		foreach ($members as $m) {
-			$pid = (int) $m['pageId']; $fn = (string) $m['fieldName']; $bn = (string) $m['basename'];
-			// Skip the source itself (already holds the value).
-			if ($pid === $srcPid && $fn === $srcField && $bn === $srcBase) continue;
-			if (!in_array($fn, $imageFields, true)
-				|| !in_array($subfield, $this->editableSubfields($fn), true)) {
-				$skippedOther++; continue;
-			}
-			if (isset($lockSet[$pid . "\0" . $fn . "\0" . $bn])) { $skippedLocked++; continue; }
-
-			if (!array_key_exists($pid, $pageCache)) {
-				$pageCache[$pid] = $this->wire('pages')->get($pid);
-			}
-			$page = $pageCache[$pid];
-			if (!$page->id || !$page->editable()) { $skippedOther++; continue; }
-			$img = $this->resolvePageimage($page, $fn, $bn);
-			if (!$img) { $skippedOther++; continue; }
-
-			$page->of(false);
-			if ($srcLangValues !== null) {
-				$this->applyLangValues($img, $subfield, $srcLangValues);
-			} else {
-				$this->writeLangValue($img, $subfield, $srcPlain);
-			}
-			$touched[$pid][$fn] = true;
-			$applied++;
-		}
-
-		foreach ($touched as $pid => $fields) {
-			foreach (array_keys($fields) as $fn) {
-				try { $pageCache[$pid]->save($fn); } catch (\Throwable $e) {}
-			}
-		}
-		if ($applied) $this->wire('cache')->deleteFor($this);
-
-		return $this->jsonResponse([
-			'ok'            => true,
-			'applied'       => $applied,
-			'skippedLocked' => $skippedLocked,
-			'skippedOther'  => $skippedOther,
-		]);
-	}
-
-	/**
-	 * AJAX endpoint: lock / unlock one placement's metadata so cluster-wide
-	 * propagation leaves its caption alone ("keep own text"). POST + CSRF.
-	 */
-	public function ___executeMetaLock() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
-
-		$input     = $this->wire('input');
-		$sanitizer = $this->wire('sanitizer');
-		$pageId    = (int) $input->post('pageId');
-		$fieldName = $sanitizer->fieldName((string) $input->post('fieldName'));
-		$basename  = basename((string) $input->post('basename'));
-		$locked    = (string) $input->post('locked') === '1';
-
-		if (!$pageId || !$fieldName || !$basename) return $this->jsonError('Missing parameter');
-		if (!in_array($fieldName, $this->discoverImageFields(), true)) {
-			return $this->jsonError('Field is not a managed image field');
-		}
-
-		$this->setMetaLock($pageId, $fieldName, $basename, $locked);
-		return $this->jsonResponse(['ok' => true, 'locked' => $locked]);
-	}
-
-	/**
-	 * AJAX endpoint: compute + store the exact byte-content hash of every
-	 * managed image, one time-budgeted chunk per call. The fingerprints feed
-	 * the duplicates view (exact-duplicate clusters) and hardlink reclaim.
-	 *
-	 * Internal plumbing — there is no UI trigger yet. A client drives it to
-	 * completion by re-POSTing with the returned `nextOffset` as `offset`
-	 * until `complete` is true. POST + CSRF.
-	 */
-	public function ___executeScanHashes() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
-
-		// A chunk can decode many full-resolution images for the dHash;
-		// give it room, matching the Replace endpoint's envelope.
-		@set_time_limit(60);
-		@ini_set('memory_limit', '512M');
-
-		$offset = (int) $this->wire('input')->post('offset');
-		$result = $this->scanHashes($offset);
-		$result['ok'] = true;
-		return $this->jsonResponse($result);
-	}
-
-	/**
-	 * AJAX endpoint: reclaim disk by collapsing exact-duplicate copies onto a
-	 * single canonical inode (hardlinks), one time-budgeted chunk of clusters
-	 * per call. Re-verifies byte-identity before linking and records a
-	 * reversible manifest. POST + CSRF.
-	 */
-	public function ___executeReclaim() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
-
-		@set_time_limit(60);
-		$result = $this->reclaimAll((int) $this->wire('input')->post('offset'));
-		$result['ok'] = true;
-		return $this->jsonResponse($result);
-	}
-
-	/**
-	 * AJAX endpoint: un-share — give every collapsed copy its own independent
-	 * file again and clear the manifest, one time-budgeted chunk per call.
-	 * The reverse of reclaim. POST + CSRF.
-	 */
-	public function ___executeExpand() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
-
-		@set_time_limit(60);
-		$result = $this->expandManifest((int) $this->wire('input')->post('offset'));
-		$result['ok'] = true;
-		return $this->jsonResponse($result);
-	}
-
-	/**
-	 * Install: create admin page under Setup and the access permission.
+	 * Install: create admin page under Setup and the access permission, make
+	 * the automatic dedup self-sustaining (LazyCron), and kick off a first
+	 * budgeted fingerprint + reclaim pass so existing duplicates start
+	 * collapsing immediately (LazyCron + saves finish any backlog).
 	 */
 	public function ___install() {
 		parent::___install();
@@ -5727,6 +5347,14 @@ class ProcessImageLibrary extends Process {
 			$p->save();
 			$this->message("Created permission: " . self::PERMISSION_NAME);
 		}
+
+		// LazyCron powers the hourly maintenance safety net — install it so
+		// auto-reclaim keeps running without any manual trigger.
+		try { $this->wire('modules')->getInstall('LazyCron'); } catch (\Throwable $e) {}
+
+		// First pass now (bounded), so newly-installed sites with existing
+		// duplicates reclaim space right away instead of waiting for cron.
+		$this->runMaintenancePass(15);
 	}
 
 	/**
