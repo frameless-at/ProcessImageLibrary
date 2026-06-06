@@ -773,6 +773,7 @@ class ProcessImageLibrary extends Process {
 		$offset     = ($page - 1) * $pageSize;
 		$slice      = array_slice($rows, $offset, $pageSize);
 		$slice      = $this->hydrateSlice($slice);
+		$slice      = $this->attachDuplicateCounts($slice);
 
 		$pager = $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir, $pageSize);
 
@@ -789,6 +790,80 @@ class ProcessImageLibrary extends Process {
 			. $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
 			. $this->renderTagDatalists($usedTags)
 			. $pager;
+	}
+
+	/**
+	 * Small badge for the bottom-right of a thumbnail when the image is an
+	 * exact duplicate — shows how many byte-identical copies exist. Empty
+	 * string for non-duplicates (count < 2).
+	 */
+	protected function renderDupBadge(int $count): string {
+		if ($count < 2) return '';
+		$san = $this->wire('sanitizer');
+		$label = $san->entities(sprintf(
+			$this->_('%d identical copies of this image across the site'), $count
+		));
+		return '<span class="ml-dup-badge" title="' . $label . '" aria-label="' . $label . '">'
+			. '<i class="fa fa-clone" aria-hidden="true"></i>' . (int) $count . '</span>';
+	}
+
+	/**
+	 * Attach a `dupCount` to each slice row: the number of byte-identical
+	 * copies of that image across the whole site (1 = unique, ≥2 = duplicate).
+	 * Two cheap queries — the duplicate-hash counts (one GROUP BY) and the
+	 * content hashes for just the slice's pages — so it costs nothing when
+	 * nothing has been scanned. Rows whose image isn't fingerprinted get 0.
+	 *
+	 * @param array<int,array<string,mixed>> $slice
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function attachDuplicateCounts(array $slice): array {
+		if (!$slice) return $slice;
+		$this->ensureHashTable();
+		$db = $this->wire('database');
+
+		$counts = [];
+		try {
+			$stmt = $db->query(
+				'SELECT content_hash, COUNT(*) c FROM `' . self::HASH_TABLE . '`
+				 WHERE content_hash IS NOT NULL GROUP BY content_hash HAVING c > 1'
+			);
+			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+				$counts[(string) $r['content_hash']] = (int) $r['c'];
+			}
+		} catch (\Throwable $e) {
+		}
+		if (!$counts) {
+			foreach ($slice as &$row) $row['dupCount'] = 0;
+			unset($row);
+			return $slice;
+		}
+
+		$pageIds = array_values(array_unique(array_map(
+			static fn($r) => (int) $r['pageId'], $slice
+		)));
+		$hashByKey = [];
+		try {
+			$in = implode(',', array_fill(0, count($pageIds), '?'));
+			$stmt = $db->prepare(
+				'SELECT page_id, field_name, basename, content_hash
+				 FROM `' . self::HASH_TABLE . '` WHERE page_id IN (' . $in . ')'
+			);
+			$stmt->execute($pageIds);
+			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+				$hashByKey[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']]
+					= (string) $r['content_hash'];
+			}
+		} catch (\Throwable $e) {
+		}
+
+		foreach ($slice as &$row) {
+			$k = $row['pageId'] . "\0" . $row['fieldName'] . "\0" . $row['basename'];
+			$h = $hashByKey[$k] ?? null;
+			$row['dupCount'] = ($h !== null && isset($counts[$h])) ? $counts[$h] : 0;
+		}
+		unset($row);
+		return $slice;
 	}
 
 	/**
@@ -878,6 +953,7 @@ class ProcessImageLibrary extends Process {
 					. ' title="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
 			}
+			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0));
 			$out .= '</div>'; // .ml-cell-thumb
 			$out .= '</div>'; // .ml-card
 		}
@@ -4912,6 +4988,7 @@ class ProcessImageLibrary extends Process {
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
 					. '</button>';
 			}
+			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0));
 			$out .= '</td>';
 
 			$pageTitle = $this->normalizeDescription($row['pageTitle']);
