@@ -267,28 +267,44 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			? $instance->dedupStats()
 			: ['reclaimedHuman' => '0', 'linkedCount' => 0, 'clusterCount' => 0];
 
+		// Pass raw URLs (literal &) — InputfieldButton entity-encodes the href
+		// attribute itself; pre-encoding would double it.
 		$base      = $this->wire('config')->urls->admin . 'module/edit?name=ProcessImageLibrary';
 		$scanUrl   = $base . '&ml_dedup=scan&'   . $tokenName . '=' . urlencode($tokenValue);
 		$revertUrl = $base . '&ml_dedup=revert&' . $tokenName . '=' . urlencode($tokenValue);
 		$revertConfirm = $this->_('Give every collapsed copy its own independent file again? This undoes the space saving (the next pass will re-collapse them).');
 
+		// Status read-out (plain markup, no special chars). The long caveat
+		// rides as a field note so PW handles the text encoding.
 		$f = $modules->get('InputfieldMarkup');
 		$f->label = $this->_('Status');
 		$f->value =
-			'<ul class="uk-list uk-list-divider" style="margin-top:0">'
+			'<ul class="uk-list uk-list-divider" style="margin:0">'
 			. '<li>' . $san->entities($this->_('Disk space reclaimed')) . ': <strong>' . $san->entities((string) $stats['reclaimedHuman']) . '</strong></li>'
 			. '<li>' . $san->entities($this->_('Copies sharing a file')) . ': <strong>' . (int) $stats['linkedCount'] . '</strong></li>'
 			. '<li>' . $san->entities($this->_('Exact-duplicate clusters')) . ': <strong>' . (int) $stats['clusterCount'] . '</strong></li>'
-			. '</ul>'
-			. '<p>'
-			. '<a class="ui-button uk-button uk-button-primary" href="' . $san->entities($scanUrl) . '">'
-			. '<i class="fa fa-refresh" aria-hidden="true"></i> ' . $this->_('Scan and reclaim now') . '</a> '
-			. '<a class="ui-button uk-button uk-button-default" href="' . $san->entities($revertUrl) . '"'
-			. ' onclick="return confirm(' . $san->entities(json_encode($revertConfirm, JSON_UNESCAPED_SLASHES)) . ')">'
-			. '<i class="fa fa-undo" aria-hidden="true"></i> ' . $san->entities($this->_('Revert (un-share all)')) . '</a>'
-			. '</p>'
-			. '<p class="description">' . $san->entities($this->_('A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.')) . '</p>';
+			. '</ul>';
+		$f->notes = $this->_('A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.');
 		$fs->add($f);
+
+		// Action buttons built with ProcessWire's own InputfieldButton — it
+		// entity-encodes the label exactly once, so the ampersand renders
+		// correctly (the previous hand-built markup double-encoded it).
+		$scan = $modules->get('InputfieldButton');
+		$scan->value = $this->_('Scan & reclaim');
+		$scan->attr('href', $scanUrl);
+		$scan->icon = 'refresh';
+		$scan->columnWidth = 50;
+		$fs->add($scan);
+
+		$revert = $modules->get('InputfieldButton');
+		$revert->value = $this->_('Revert');
+		$revert->attr('href', $revertUrl);
+		$revert->icon = 'undo';
+		$revert->setSecondary(true);
+		$revert->attr('onclick', 'return confirm(' . json_encode($revertConfirm, JSON_HEX_APOS | JSON_HEX_QUOT) . ')');
+		$revert->columnWidth = 50;
+		$fs->add($revert);
 
 		$inputfields->add($fs);
 
