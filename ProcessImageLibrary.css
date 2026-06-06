@@ -906,10 +906,8 @@ textarea.ml-dup-editor-input {
 	resize: none;          /* height is managed by autosize */
 	overflow-y: auto;
 }
-.ml-dup-editor-tags {
-	height: auto;
-}
-.ml-dup-editor-input:disabled {
+.ml-dup-editor-input:disabled,
+.ml-dup-editor-disabled {
 	opacity: 0.6;
 }
 .ml-dup-editor-actions {

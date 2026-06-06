@@ -554,6 +554,7 @@
 			return {
 				element: ta,
 				getValue: function () { return ta.value; },
+				setValue: function (v) { ta.value = v; },
 				focus:    function () { ta.focus(); ta.select(); }
 			};
 		}
@@ -567,6 +568,7 @@
 			return {
 				element: input,
 				getValue: function () { return input.value; },
+				setValue: function (v) { input.value = v; },
 				focus:    function () { input.focus(); input.select(); }
 			};
 		}
@@ -732,6 +734,13 @@
 					var sel = wrap.querySelectorAll('input[type="checkbox"]:checked');
 					return Array.prototype.map.call(sel, function (cb) { return cb.value; }).join(' ');
 				},
+				setValue: function (v) {
+					var set = Object.create(null);
+					String(v).split(/\s+/).filter(Boolean).forEach(function (t) { set[t] = true; });
+					wrap.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+						cb.checked = !!set[cb.value];
+					});
+				},
 				focus: function () {
 					var first = wrap.querySelector('input[type="checkbox"]');
 					if (first) first.focus();
@@ -746,6 +755,19 @@
 			el.style.height = 'auto';
 			var cap = Math.round(window.innerHeight * 0.3);
 			el.style.height = Math.min(el.scrollHeight, cap) + 'px';
+		}
+
+		// Make a reused popup widget read-only (copy on a non-editable
+		// page): disable the field itself and any inputs it contains
+		// (tag-checkbox list), and dim it.
+		function disableWidget(el) {
+			if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
+				el.disabled = true;
+			}
+			if (el.querySelectorAll) {
+				el.querySelectorAll('input, textarea, select').forEach(function (x) { x.disabled = true; });
+			}
+			el.classList.add('ml-dup-editor-disabled');
 		}
 
 		// Per-copy duplicate editor. When an image has byte-identical
@@ -834,7 +856,7 @@
 
 				var list = document.createElement('div');
 				list.className = 'ml-dup-editor-list';
-				var sourceInput = null;
+				var sourceWidget = null;
 				var editableCount = d.members.filter(function (m) { return m.editable; }).length;
 				d.members.forEach(function (m) {
 					var row = document.createElement('div');
@@ -862,33 +884,43 @@
 					}
 					row.appendChild(head);
 
-					var field;
-					if (subfield === 'tags') {
-						// Tags are a single token line — a one-line input
-						// (full width) rather than a multi-line textarea.
-						field = document.createElement('input');
-						field.type = 'text';
-						field.className = 'ml-dup-editor-input ml-dup-editor-tags uk-input';
-					} else {
-						// Description grows from one line to fit its text,
-						// capped, so empty / short copies stay compact.
-						field = document.createElement('textarea');
-						field.rows = 1;
-						field.className = 'ml-dup-editor-input uk-textarea';
-						field.addEventListener('input', function () { autosizeDup(field); });
+					// Reuse the SAME editor widget the single-cell popup
+					// uses, so tags get their real UI (whitelist checkboxes /
+					// autocomplete) instead of a raw text field. A detached
+					// element carries this subfield's config, cloned from the
+					// clicked cell (duplicate copies share the field family).
+					// No lang attrs → the widget stays single-language, which
+					// matches the current-language value we loaded.
+					var cell = document.createElement('div');
+					cell.dataset.subfield = subfield;
+					cell.dataset.input    = td.dataset.input || (subfield === 'tags' ? 'text' : 'textarea');
+					if (td.dataset.tagsMode)    cell.dataset.tagsMode    = td.dataset.tagsMode;
+					if (td.dataset.tagsAllowed) cell.dataset.tagsAllowed = td.dataset.tagsAllowed;
+					if (td.dataset.tagsListId)  cell.dataset.tagsListId  = td.dataset.tagsListId;
+
+					var widget = buildPopupWidget(cell, m.value || '');
+					var el = widget.element;
+					// Full-width only for real field elements; the tag
+					// checkbox list keeps its own grid layout.
+					if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+						el.classList.add('ml-dup-editor-input');
 					}
-					field.value = m.value || '';
+					if (el.tagName === 'TEXTAREA') {
+						// Description: grow from one line, don't start tall.
+						el.rows = 1;
+						el.addEventListener('input', function () { autosizeDup(el); });
+					}
 					if (!m.editable) {
-						field.disabled = true;
-						field.title = labels.dupReadonly || 'not editable';
+						disableWidget(el);
+						el.title = labels.dupReadonly || 'not editable';
 					} else {
 						rows.push({
-							input: field, original: m.value || '',
+							widget: widget, original: m.value || '',
 							pageId: m.pageId, field: m.fieldName, basename: m.basename
 						});
 					}
-					row.appendChild(field);
-					if (field.tagName === 'TEXTAREA') autosizeDup(field);
+					row.appendChild(el);
+					if (el.tagName === 'TEXTAREA') autosizeDup(el);
 
 					// Footer line under the field: the per-copy "use this
 					// text for all" action (only when more than one copy is
@@ -906,25 +938,28 @@
 						applyBtn.type = 'button';
 						applyBtn.className = 'ml-dup-editor-apply uk-button uk-button-link';
 						applyBtn.textContent = '↳ ' + (labels.dupApplyRow || 'Use this text for all copies');
-						applyBtn.addEventListener('click', function () {
-							var v = field.value;
-							rows.forEach(function (rr) {
-								if (rr.input !== field) {
-									rr.input.value = v;
-									if (rr.input.tagName === 'TEXTAREA') autosizeDup(rr.input);
-								}
+						(function (srcWidget) {
+							applyBtn.addEventListener('click', function () {
+								var v = srcWidget.getValue();
+								rows.forEach(function (rr) {
+									if (rr.widget !== srcWidget && rr.widget.setValue) {
+										rr.widget.setValue(v);
+										var rel = rr.widget.element;
+										if (rel.tagName === 'TEXTAREA') autosizeDup(rel);
+									}
+								});
 							});
-						});
+						})(widget);
 						actions.appendChild(applyBtn);
 					}
 					if (actions.childNodes.length) row.appendChild(actions);
 					list.appendChild(row);
-					if (m.isSource && m.editable) sourceInput = field;
+					if (m.isSource && m.editable) sourceWidget = widget;
 				});
 				body.appendChild(list);
 				saveBtn.disabled = false;
-				if (sourceInput) { sourceInput.focus(); sourceInput.select(); }
-				else if (rows[0]) rows[0].input.focus();
+				if (sourceWidget) sourceWidget.focus();
+				else if (rows[0]) rows[0].widget.focus();
 			}).catch(function () {
 				if (committed) return;
 				teardown();
@@ -934,7 +969,7 @@
 			function commit() {
 				if (committed) return;
 				// Only the copies whose text actually changed.
-				var changed = rows.filter(function (r) { return r.input.value !== r.original; });
+				var changed = rows.filter(function (r) { return r.widget.getValue() !== r.original; });
 				if (!changed.length) { cancel(); return; }
 				committed = true;
 				saveBtn.disabled = true;
@@ -947,7 +982,7 @@
 							fieldName: r.field,
 							basename:  r.basename,
 							subfield:  subfield,
-							value:     r.input.value
+							value:     r.widget.getValue()
 						});
 					}).then(function (result) {
 						return !!(result && result.data && result.data.ok);
