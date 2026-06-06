@@ -2929,7 +2929,7 @@
 		// active-tab detection is a straight string compare.
 		function canonicalFilterQs(qs) {
 			var u = new URLSearchParams((qs || '').replace(/^\?/, ''));
-			var allow = ['q', 'template', 'field', 'tags', 'no_desc', 'no_tags'];
+			var allow = ['q', 'template', 'field', 'tags', 'no_desc', 'no_tags', 'dupes'];
 			var keep = [];
 			u.forEach(function (v, k) {
 				var ok = allow.indexOf(k) !== -1 || k.indexOf('no_custom_') === 0;
