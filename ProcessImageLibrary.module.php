@@ -3641,9 +3641,11 @@ class ProcessImageLibrary extends Process {
 			return $rows;
 		}
 
-		// "Duplicates only" — keep rows whose image is a byte-identical copy
-		// (its key is in the duplicate set). Needs a scan; empty before one.
-		$dupKeys = $dupes ? $this->loadDuplicateKeys() : [];
+		// "Duplicates only" — keep rows whose image is a byte-identical copy,
+		// then collapse each cluster to ONE representative row (below) so a
+		// duplicate is listed once, not once per copy. Needs a scan; the map
+		// is empty before one. Keyed identity => content_hash.
+		$dupKeyHashes = $dupes ? $this->loadDuplicateKeyHashes() : [];
 
 		// Template filter operates at PHP level now (was SQL before caching),
 		// so we resolve the name → id once and compare to row['templateId'].
@@ -3653,10 +3655,10 @@ class ProcessImageLibrary extends Process {
 			if ($tpl && $tpl->id) $tplId = (int) $tpl->id;
 		}
 
-		return array_values(array_filter($rows, function ($r) use (
-			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeys
+		$filtered = array_values(array_filter($rows, function ($r) use (
+			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
 		) {
-			if ($dupes && !isset($dupKeys[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']])) return false;
+			if ($dupes && !isset($dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']])) return false;
 			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
 			if ($field !== '' && $r['fieldName'] !== $field) return false;
 
@@ -3692,6 +3694,23 @@ class ProcessImageLibrary extends Process {
 			}
 			return true;
 		}));
+
+		// Collapse each duplicate cluster to a single representative row, so
+		// the "Duplicates" filter lists every duplicate image once (the badge
+		// still shows the total copy count; the modal lists the copies).
+		if ($dupes) {
+			$seen = [];
+			$reps = [];
+			foreach ($filtered as $r) {
+				$h = $dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+				if ($h === null || isset($seen[$h])) continue;
+				$seen[$h] = true;
+				$reps[] = $r;
+			}
+			return $reps;
+		}
+
+		return $filtered;
 	}
 
 	/**
