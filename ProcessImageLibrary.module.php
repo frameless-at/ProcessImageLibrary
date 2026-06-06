@@ -766,17 +766,29 @@ class ProcessImageLibrary extends Process {
 		}
 		$this->applySort($rows, $sort, $dir);
 
+		// CONTEXTUAL duplicate detection: an image counts as a duplicate only
+		// when ≥2 of its byte-identical copies are present in THIS filtered
+		// result set. A copy whose twins are filtered out (other field /
+		// template / search) is not a duplicate here — no indicator, no
+		// toggle, no collapse. $keyHash maps each row to its global content
+		// hash (only images that are global duplicates appear); $ctxCount is
+		// how many of each hash survived the current filters.
+		$keyHash  = $this->loadDuplicateKeyHashes();
+		$ctxCount = [];
+		foreach ($rows as $r) {
+			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			if ($h !== null) $ctxCount[$h] = ($ctxCount[$h] ?? 0) + 1;
+		}
+
 		$pageSize = $this->readPageSize();
 
 		if ($this->getViewMode() !== self::VIEW_MASONRY) {
-			// Table view ALWAYS collapses duplicates: every image shows one
-			// row (the head, with the expand toggle); its other copies become
-			// hidden rows revealed on click. Paginate by display unit (unique
-			// images + cluster heads) so pageSize counts images and a cluster
-			// never straddles a page break — the head always sits with its
-			// copies. Works the same with or without the Duplicates filter
-			// (the filter just drops the unique images first).
-			$units      = $this->buildDisplayUnits($rows);
+			// Table view ALWAYS collapses (contextual) duplicates: every image
+			// shows one row (the head, with the expand toggle); its other
+			// copies become hidden rows revealed on click. Paginate by display
+			// unit (unique images + cluster heads) so pageSize counts images
+			// and a cluster never straddles a page break.
+			$units      = $this->buildDisplayUnits($rows, $keyHash, $ctxCount);
 			$total      = count($units);
 			$totalPages = max(1, (int) ceil($total / $pageSize));
 			$page       = min(max(1, $requestedPage), $totalPages);
@@ -793,7 +805,15 @@ class ProcessImageLibrary extends Process {
 			$slice      = array_slice($rows, $offset, $pageSize);
 		}
 		$slice = $this->hydrateSlice($slice);
-		$slice = $this->attachDuplicateCounts($slice);
+		// Annotate each visible row with its contextual duplicate count / hash
+		// (replaces the old global attachDuplicateCounts).
+		foreach ($slice as &$row) {
+			$h = $keyHash[$row['pageId'] . "\0" . $row['fieldName'] . "\0" . $row['basename']] ?? null;
+			$c = ($h !== null) ? ($ctxCount[$h] ?? 0) : 0;
+			$row['dupCount'] = $c >= 2 ? $c : 0;
+			$row['dupHash']  = $c >= 2 ? (string) $h : '';
+		}
+		unset($row);
 
 		$pager = $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir, $pageSize);
 
@@ -850,67 +870,6 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Attach a `dupCount` to each slice row: the number of byte-identical
-	 * copies of that image across the whole site (1 = unique, ≥2 = duplicate).
-	 * Two cheap queries — the duplicate-hash counts (one GROUP BY) and the
-	 * content hashes for just the slice's pages — so it costs nothing when
-	 * nothing has been scanned. Rows whose image isn't fingerprinted get 0.
-	 *
-	 * @param array<int,array<string,mixed>> $slice
-	 * @return array<int,array<string,mixed>>
-	 */
-	protected function attachDuplicateCounts(array $slice): array {
-		if (!$slice) return $slice;
-		$this->ensureHashTable();
-		$db = $this->wire('database');
-
-		$counts = [];
-		try {
-			$stmt = $db->query(
-				'SELECT content_hash, COUNT(*) c FROM `' . self::HASH_TABLE . '`
-				 WHERE content_hash IS NOT NULL GROUP BY content_hash HAVING c > 1'
-			);
-			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-				$counts[(string) $r['content_hash']] = (int) $r['c'];
-			}
-		} catch (\Throwable $e) {
-		}
-		if (!$counts) {
-			foreach ($slice as &$row) $row['dupCount'] = 0;
-			unset($row);
-			return $slice;
-		}
-
-		$pageIds = array_values(array_unique(array_map(
-			static fn($r) => (int) $r['pageId'], $slice
-		)));
-		$hashByKey = [];
-		try {
-			$in = implode(',', array_fill(0, count($pageIds), '?'));
-			$stmt = $db->prepare(
-				'SELECT page_id, field_name, basename, content_hash
-				 FROM `' . self::HASH_TABLE . '` WHERE page_id IN (' . $in . ')'
-			);
-			$stmt->execute($pageIds);
-			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-				$hashByKey[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']]
-					= (string) $r['content_hash'];
-			}
-		} catch (\Throwable $e) {
-		}
-
-		foreach ($slice as &$row) {
-			$k = $row['pageId'] . "\0" . $row['fieldName'] . "\0" . $row['basename'];
-			$h = $hashByKey[$k] ?? null;
-			$isDup = ($h !== null && isset($counts[$h]));
-			$row['dupCount'] = $isDup ? $counts[$h] : 0;
-			$row['dupHash']  = $isDup ? (string) $h : '';
-		}
-		unset($row);
-		return $slice;
-	}
-
-	/**
 	 * Collapse a sorted row set into display units for the table accordion:
 	 * one unit per image. A unique image is a single-row unit; a duplicated
 	 * image is a unit holding its head row (first occurrence, kept in sort
@@ -918,16 +877,21 @@ class ProcessImageLibrary extends Process {
 	 * positions to sit beneath the head). Units stay in the head's sort order.
 	 * Paginating by unit keeps each cluster intact on one page.
 	 *
+	 * Only CONTEXTUAL duplicates are grouped: a hash present fewer than twice
+	 * in the current result set ($ctxCount) is treated as a unique single-row
+	 * unit, so a copy whose twins were filtered out stays a plain row.
+	 *
 	 * @param array<int,array<string,mixed>> $rows
+	 * @param array<string,string> $keyHash  row-key => content hash
+	 * @param array<string,int>    $ctxCount content hash => count in this set
 	 * @return array<int,array<int,array<string,mixed>>>
 	 */
-	protected function buildDisplayUnits(array $rows): array {
-		$map    = $this->loadDuplicateKeyHashes();
+	protected function buildDisplayUnits(array $rows, array $keyHash, array $ctxCount): array {
 		$units  = [];
 		$byHash = [];   // content hash => index of its unit in $units
 		foreach ($rows as $r) {
-			$h = $map[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
-			if ($h === null) {            // unique image → its own unit
+			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			if ($h === null || ($ctxCount[$h] ?? 0) < 2) {  // unique in context
 				$units[] = [$r];
 				continue;
 			}
@@ -3769,15 +3733,20 @@ class ProcessImageLibrary extends Process {
 			return true;
 		}));
 
-		// "Duplicates" filter: keep EVERY byte-identical copy (drop uniques).
-		// The table collapses them into per-image accordion units after sorting
-		// — see buildDisplayUnits in renderResultsHtml. This filter only drops
-		// the unique images so just duplicates remain.
+		// "Duplicates" filter — CONTEXTUAL: keep only images that still have
+		// ≥2 byte-identical copies AMONG the already-filtered rows. A copy
+		// whose twins were filtered out (e.g. they live in a field this filter
+		// excludes) is not a duplicate in this view, so it's dropped too.
 		if ($dupes) {
+			$cnt = [];
+			foreach ($filtered as $r) {
+				$h = $dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+				if ($h !== null) $cnt[$h] = ($cnt[$h] ?? 0) + 1;
+			}
 			$kept = [];
 			foreach ($filtered as $r) {
-				$k = $r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename'];
-				if (isset($dupKeyHashes[$k])) $kept[] = $r;
+				$h = $dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+				if ($h !== null && ($cnt[$h] ?? 0) >= 2) $kept[] = $r;
 			}
 			return $kept;
 		}
