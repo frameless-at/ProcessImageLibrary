@@ -188,29 +188,13 @@
 .ml-replace-btn:hover { color: var(--pw-main-color, #5b8cd6); }
 .ml-delete-btn:hover  { color: #c33; }
 
-/* Duplicate indicator — bottom-right of the thumbnail, count of identical
-   copies. Always visible (not hover-gated, unlike the action buttons) so
-   duplicates are spottable at a glance. pointer-events:none keeps the
-   thumbnail itself clickable through the badge. */
-.ml-dup-badge {
-	position: absolute;
-	right: 4px;
+/* Duplicate-count badge (.ml-dup-count) reused from the duplicates view on
+   the regular table / gallery thumbnails: bottom-right here (the cluster
+   view keeps it top-right), and click-through so the thumb stays clickable. */
+.ml-cell-thumb .ml-dup-count {
+	top: auto;
 	bottom: 4px;
-	z-index: 2;
-	display: inline-flex;
-	align-items: center;
-	gap: 3px;
-	padding: 1px 6px;
-	border-radius: 10px;
-	background: rgba(0, 0, 0, 0.66);
-	color: #fff;
-	font-size: 0.72rem;
-	font-weight: 600;
-	line-height: 1.5;
 	pointer-events: none;
-}
-.ml-dup-badge .fa {
-	font-size: 0.9em;
 }
 /* Fade-out animation for rows being deleted — JS adds the class
    right before the row is removed from the DOM so the disappear is

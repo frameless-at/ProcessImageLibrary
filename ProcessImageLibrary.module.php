@@ -793,9 +793,10 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Small badge for the bottom-right of a thumbnail when the image is an
-	 * exact duplicate — shows how many byte-identical copies exist. Empty
-	 * string for non-duplicates (count < 2).
+	 * The duplicate-count badge — the SAME ".ml-dup-count" used on the
+	 * cluster thumbnails in the duplicates view ("N×"). Reused on the regular
+	 * table / gallery thumbnails (positioned bottom-right there via CSS).
+	 * Empty string for non-duplicates (count < 2).
 	 */
 	protected function renderDupBadge(int $count): string {
 		if ($count < 2) return '';
@@ -803,8 +804,8 @@ class ProcessImageLibrary extends Process {
 		$label = $san->entities(sprintf(
 			$this->_('%d identical copies of this image across the site'), $count
 		));
-		return '<span class="ml-dup-badge" title="' . $label . '" aria-label="' . $label . '">'
-			. '<i class="fa fa-clone" aria-hidden="true"></i>' . (int) $count . '</span>';
+		return '<span class="ml-dup-count" title="' . $label . '" aria-label="' . $label . '">'
+			. (int) $count . '×</span>';
 	}
 
 	/**
@@ -1111,7 +1112,7 @@ class ProcessImageLibrary extends Process {
 			if (!empty($hFirst['thumbUrl'])) {
 				$out .= '<img src="' . $san->entities((string) $hFirst['thumbUrl']) . '" alt="" loading="lazy">';
 			}
-			$out .= '<span class="ml-dup-count">' . count($members) . '×</span></div>';
+			$out .= $this->renderDupBadge(count($members)) . '</div>';
 
 			$out .= '<div class="ml-dup-body">';
 
