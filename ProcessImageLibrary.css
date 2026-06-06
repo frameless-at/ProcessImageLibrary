@@ -203,7 +203,7 @@
 .ml-dup-toggle {
 	cursor: pointer;
 	font-size: 0.95rem;
-	padding: 4px 10px;
+	padding: 8px 10px;
 	border-radius: 12px;
 }
 .ml-dup-toggle:hover,
