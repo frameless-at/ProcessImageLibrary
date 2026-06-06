@@ -82,50 +82,85 @@
 
 		// -- Picker mode ------------------------------------------------
 		// When the library is embedded as a picker (modal iframe in the page
-		// editor), each thumbnail carries a "Use" button. Clicking it copies
-		// the image into the target field server-side, then messages the
-		// parent editor to refresh that one field.
+		// editor), images are chosen via the normal selection checkboxes (in
+		// BOTH the table and the masonry view). A "Use selected" button at the
+		// top and bottom copies every selected image into the target field,
+		// then messages the parent editor to refresh that field.
 		if (root.dataset.picker === '1') {
 			root.classList.add('ml-picker');
 			var assignUrl = root.dataset.assignUrl || '';
-			results && results.addEventListener('click', function (e) {
-				var use = e.target.closest && e.target.closest('.ml-pick-use');
-				if (!use || !assignUrl) return;
-				e.preventDefault();
-				e.stopImmediatePropagation();   // beat the thumbnail / editor handlers
+
+			function pickKeys() {
+				return Array.prototype.map.call(
+					(results || document).querySelectorAll('.ml-select-row:checked'),
+					function (cb) { return cb.dataset.key || ''; }
+				).filter(Boolean);
+			}
+			function syncPickBar() {
+				var n = pickKeys().length;
+				root.querySelectorAll('.ml-pick-count').forEach(function (el) {
+					el.textContent = '(' + n + ')';
+				});
+				root.querySelectorAll('.ml-pick-confirm').forEach(function (btn) {
+					btn.disabled = n === 0;
+				});
+			}
+			// Selection changes (checkbox / select-all) update the bar.
+			results && results.addEventListener('change', function (e) {
+				if (e.target && e.target.classList &&
+					(e.target.classList.contains('ml-select-row') ||
+					 e.target.classList.contains('ml-select-all'))) {
+					setTimeout(syncPickBar, 0);   // after the row handler ran
+				}
+			});
+
+			// Assign one (pageId:field:basename) key to the target field.
+			function assignKey(key) {
+				var parts = String(key).split(':');
+				var pageId = parts.shift();
+				var field  = parts.shift();
+				var basename = parts.join(':');   // basenames may contain ':'? keep the rest
 				var fd = new FormData();
-				fd.append('srcPageId',    use.dataset.srcPage || '');
-				fd.append('srcField',     use.dataset.srcField || '');
-				fd.append('srcBasename',  use.dataset.srcBasename || '');
+				fd.append('srcPageId',    pageId || '');
+				fd.append('srcField',     field || '');
+				fd.append('srcBasename',  basename || '');
 				fd.append('targetPageId', root.dataset.targetPage || '');
 				fd.append('targetField',  root.dataset.targetField || '');
 				appendCsrf(fd);
-				use.disabled = true;
-				var prev = use.textContent;
-				use.textContent = labels.saving || 'Saving…';
-				fetch(assignUrl, {
+				return fetch(assignUrl, {
 					method: 'POST', credentials: 'same-origin',
 					headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
 				}).then(function (r) { return r.json(); }).then(function (d) {
-					if (!d || !d.ok) {
-						use.disabled = false; use.textContent = prev;
-						window.alert((d && d.error) || (labels.error || 'Failed'));
-						return;
-					}
-					use.textContent = labels.done || 'Added';
+					return !!(d && d.ok);
+				}).catch(function () { return false; });
+			}
+
+			root.addEventListener('click', function (e) {
+				var btn = e.target.closest && e.target.closest('.ml-pick-confirm');
+				if (!btn || !assignUrl) return;
+				e.preventDefault();
+				var keys = pickKeys();
+				if (!keys.length) return;
+				root.querySelectorAll('.ml-pick-confirm').forEach(function (b) { b.disabled = true; });
+				// Assign sequentially so the target field's saves don't race.
+				var ok = 0;
+				keys.reduce(function (p, k) {
+					return p.then(function () { return assignKey(k).then(function (good) { if (good) ok++; }); });
+				}, Promise.resolve()).then(function () {
 					if (window.parent && window.parent !== window) {
 						window.parent.postMessage({
 							mlPicked:    true,
 							targetField: root.dataset.targetField,
 							targetPage:  root.dataset.targetPage,
-							basename:    d.basename
+							count:       ok
 						}, location.origin);
+					} else {
+						window.alert((labels.done || 'Added') + ' (' + ok + ')');
 					}
-				}).catch(function () {
-					use.disabled = false; use.textContent = prev;
-					window.alert(labels.error || 'Failed');
 				});
-			}, true);   // capture: beat the thumbnail / editor handlers
+			});
+
+			syncPickBar();
 		}
 
 		// -- Inline edit ------------------------------------------------

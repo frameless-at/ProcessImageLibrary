@@ -881,7 +881,9 @@ class ProcessImageLibrary extends Process {
 			$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
 		}
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
+		$out .= $this->renderPickerBar('top');
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
+		$out .= $this->renderPickerBar('bottom');
 		// Column picker lives in a sibling <dialog> so it survives
 		// AJAX re-renders of .ml-results — the drag/toggle handlers
 		// stay bound to the same DOM nodes for the life of the page.
@@ -1096,18 +1098,18 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * The "Use this image" button shown on every thumbnail in picker mode —
-	 * carries the source identity the assign endpoint needs. Empty string
-	 * outside picker mode.
+	 * The picker confirm bar (rendered above AND below the results in picker
+	 * mode): a "Use selected" button that assigns every checkbox-selected
+	 * image to the target field. JS keeps the count + enabled state in sync.
 	 */
-	protected function renderPickButton(array $row): string {
+	protected function renderPickerBar(string $pos): string {
 		if (!$this->pickerMode) return '';
 		$san = $this->wire('sanitizer');
-		return '<button type="button" class="ml-pick-use uk-button uk-button-primary uk-button-small"'
-			. ' data-src-page="' . (int) ($row['pageId'] ?? 0) . '"'
-			. ' data-src-field="' . $san->entities((string) ($row['fieldName'] ?? '')) . '"'
-			. ' data-src-basename="' . $san->entities((string) ($row['basename'] ?? '')) . '">'
-			. $san->entities($this->_('Use')) . '</button>';
+		return '<div class="ml-picker-bar ml-picker-bar--' . $san->entities($pos) . '">'
+			. '<button type="button" class="ml-pick-confirm uk-button uk-button-primary" disabled>'
+			. $san->entities($this->_('Use selected')) . ' <span class="ml-pick-count">(0)</span>'
+			. '</button>'
+			. '</div>';
 	}
 
 	/**
@@ -1238,6 +1240,18 @@ class ProcessImageLibrary extends Process {
 			}
 			$out .= '<div class="ml-row ml-card"' . $rowAttrs . '>';
 
+			// Picker mode: a selection checkbox per tile (same .ml-select-row
+			// the table uses, so the shared selection logic applies in both
+			// views). Rendered for every image — sources need not be editable.
+			if ($this->pickerMode) {
+				$selKey = $this->rowKey(
+					(int) $row['pageId'], (string) $row['fieldName'], (string) $row['basename']
+				);
+				$out .= '<label class="ml-card-select">'
+					. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
+					. $san->entities($selKey) . '"></label>';
+			}
+
 			if ($editable) {
 				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 					$this->_('Open editor for %s'), (string) $row['basename']
@@ -1271,7 +1285,6 @@ class ProcessImageLibrary extends Process {
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
 			}
 			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
-			$out .= $this->renderPickButton($row);
 			$out .= '</div>'; // .ml-cell-thumb
 			$out .= '</div>'; // .ml-card
 		}
@@ -5176,7 +5189,6 @@ class ProcessImageLibrary extends Process {
 			if ($isDupHead) {
 				$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
 			}
-			$out .= $this->renderPickButton($row);
 			$out .= '</td>';
 
 			$pageTitle = $this->normalizeDescription($row['pageTitle']);

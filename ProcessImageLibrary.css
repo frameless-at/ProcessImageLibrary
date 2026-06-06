@@ -188,21 +188,48 @@
 .ml-replace-btn:hover { color: var(--pw-main-color, #5b8cd6); }
 .ml-delete-btn:hover  { color: #c33; }
 
-/* Picker mode: the library embedded (modal iframe) to choose an existing
-   image for a page's image field. Each thumbnail gets a "Use" action. */
+/* Picker mode: the library embedded (modal iframe) to choose existing
+   image(s) for a page's image field. Selection is via the normal checkboxes
+   (table + masonry); a "Use selected" bar sits above and below the results. */
 .ml-picker-hint {
 	margin: 0 0 0.7rem;
 	color: var(--pw-muted-color, #6c8dae);
 }
-.ml-pick-use {
-	position: absolute;
-	left: 4px;
-	right: 4px;
-	bottom: 4px;
-	z-index: 2;
+.ml-picker-bar {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.6rem 0;
 }
-.ml-root--picker .ml-cell-thumb {
-	cursor: default;
+.ml-picker-bar--top {
+	position: sticky;
+	top: 0;
+	z-index: 5;
+	background: var(--pw-main-background, #fff);
+	border-bottom: 1px solid var(--pw-border-color, #e0e0e0);
+}
+.ml-picker-bar--bottom {
+	border-top: 1px solid var(--pw-border-color, #e0e0e0);
+}
+.ml-root--picker .ml-card {
+	position: relative;
+}
+/* Selection checkbox overlay on a masonry tile (top-left). */
+.ml-card-select {
+	position: absolute;
+	top: 6px;
+	left: 6px;
+	z-index: 3;
+	background: rgba(255, 255, 255, 0.85);
+	border-radius: 3px;
+	padding: 2px;
+	line-height: 0;
+	cursor: pointer;
+}
+.ml-card-select .ml-select-row {
+	width: 20px;
+	height: 20px;
+	cursor: pointer;
 }
 
 /* Duplicate indicator pill ("N", bottom-right of the thumbnail). On a
