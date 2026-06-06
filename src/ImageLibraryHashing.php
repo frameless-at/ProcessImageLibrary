@@ -383,11 +383,17 @@ trait ImageLibraryHashing {
 		return ['scanned' => $scanned, 'clusters' => $clusters];
 	}
 
-	/** dHash Hamming distance at/under which two images count as the same
-	 *  picture (different size/format/recompression). Tests put resize +
-	 *  webp re-encode at 0–1 and unrelated images at ~35, so 8 is a safe,
-	 *  low-false-positive cut. */
-	const NEAR_DHASH_THRESHOLD = 8;
+	/** dHash Hamming distance at/under which two images may be the same
+	 *  picture (different size/format/recompression). Genuine variants test
+	 *  at 0–1; different photos that merely share a tonal layout (sky over
+	 *  ground) sit higher, so this is kept TIGHT — combined with the aspect-
+	 *  ratio gate below it avoids grouping unrelated landscapes. */
+	const NEAR_DHASH_THRESHOLD = 3;
+
+	/** Two images can only be near-dup candidates if their aspect ratios
+	 *  match within this factor. A real "same photo, smaller" keeps its
+	 *  ratio exactly; this alone rules out portrait-vs-landscape mismatches. */
+	const NEAR_ASPECT_TOLERANCE = 1.02;
 
 	/** Pairwise near-dup clustering is O(n²); above this many fingerprinted
 	 *  images it's skipped (with a note) to keep the view responsive. */
@@ -426,6 +432,26 @@ trait ImageLibraryHashing {
 			return ['capped' => false, 'groups' => []];
 		}
 
+		// Attach each image's aspect ratio (from the live rows) and drop
+		// anything we can't size. The aspect gate is the main thing that
+		// stops unrelated photos which merely share a tonal layout (sky over
+		// ground) — or worse, a portrait vs a landscape — from grouping.
+		$dims = [];
+		foreach ($this->loadRows() as $r) {
+			$w = (int) ($r['width'] ?? 0); $h = (int) ($r['height'] ?? 0);
+			if ($w > 0 && $h > 0) {
+				$dims[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] = $w / $h;
+			}
+		}
+		$sized = [];
+		foreach ($items as $it) {
+			$k = $it['pageId'] . "\0" . $it['fieldName'] . "\0" . $it['basename'];
+			if (!isset($dims[$k])) continue;
+			$it['aspect'] = $dims[$k];
+			$sized[] = $it;
+		}
+		$items = $sized;
+
 		$n = count($items);
 		if ($n < 2) return ['capped' => false, 'groups' => []];
 		if ($n > self::NEAR_MAX_IMAGES) return ['capped' => true, 'groups' => []];
@@ -437,8 +463,14 @@ trait ImageLibraryHashing {
 			return $x;
 		};
 		for ($a = 0; $a < $n; $a++) {
-			$ba = $items[$a]['bin'];
+			$ba = $items[$a]['bin']; $aspA = $items[$a]['aspect'];
 			for ($b = $a + 1; $b < $n; $b++) {
+				// Aspect gate first — a different shape can't be the same
+				// photo resized, so it's never a near-duplicate.
+				$aspB = $items[$b]['aspect'];
+				$ratio = $aspA > $aspB ? ($aspA / $aspB) : ($aspB / $aspA);
+				if ($ratio > self::NEAR_ASPECT_TOLERANCE) continue;
+
 				$bb = $items[$b]['bin'];
 				$d = 0;
 				for ($i = 0; $i < 8; $i++) {
