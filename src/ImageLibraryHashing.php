@@ -60,6 +60,14 @@ trait ImageLibraryHashing {
 		return $algo;
 	}
 
+	/** Combined fingerprint version stored per row: content-hash algorithm +
+	 *  perceptual-hash version. A scanned row whose stored value differs from
+	 *  this is recomputed on the next scan, so an algorithm change re-hashes
+	 *  even files that haven't changed on disk. */
+	protected function expectedAlgo(): string {
+		return $this->hashAlgo() . '/' . self::PERCEPTUAL_VERSION;
+	}
+
 	/**
 	 * Create the fingerprint table if it isn't there yet. Runs its CREATE at
 	 * most once per request (static guard) and only when a hashing path is
@@ -199,13 +207,18 @@ trait ImageLibraryHashing {
 	}
 
 	/**
-	 * 64-bit perceptual difference hash (dHash) as 16 hex chars, or null on
-	 * decode failure. Algorithm: downscale to 9×8, greyscale luminance, and
-	 * for each row emit one bit per adjacent pixel pair (right brighter than
-	 * left → 1) — 8 rows × 8 comparisons = 64 bits. Downscaling normalises
-	 * away resolution differences, so the same photo at 1600px and 800px (or
-	 * jpg vs webp) yields a near-identical dHash. Robust by design: any
-	 * failure returns null rather than throwing.
+	 * 64-bit perceptual hash (pHash, DCT-based) as 16 hex chars, or null on
+	 * decode failure. Stored in the same `dhash` column as the old difference
+	 * hash — the format is identical (64 bits), only far more discriminating.
+	 *
+	 * Algorithm (the standard pHash): downscale to 32×32 greyscale, take the
+	 * 2-D DCT, keep the top-left 8×8 low-frequency block (the gist of the
+	 * image), and set each of those 64 coefficients to 1 if it's above the
+	 * block's median, else 0. Because it captures frequency STRUCTURE rather
+	 * than adjacent-pixel brightness, the same photo at any size/format hashes
+	 * within a handful of bits, while genuinely different photos that merely
+	 * share a tonal layout (sky over ground, dark scene with a bright spot)
+	 * land 25–35 bits apart — exactly the separation the 9×8 dHash lacked.
 	 */
 	protected function computeDHash(string $path): ?string {
 		if (!function_exists('imagecreatefromstring')) return null;
@@ -215,31 +228,58 @@ trait ImageLibraryHashing {
 		$src = @imagecreatefromstring($data);
 		if (!$src) return null;
 
-		$w = 9; $h = 8;
-		$small = @imagecreatetruecolor($w, $h);
+		$N = 32;   // sample size
+		$M = 8;    // low-frequency block kept (M×M = 64 bits)
+		$small = @imagecreatetruecolor($N, $N);
 		if (!$small) { imagedestroy($src); return null; }
-
-		$ok = @imagecopyresampled($small, $src, 0, 0, 0, 0, $w, $h, imagesx($src), imagesy($src));
+		$ok = @imagecopyresampled($small, $src, 0, 0, 0, 0, $N, $N, imagesx($src), imagesy($src));
 		imagedestroy($src);
 		if (!$ok) { imagedestroy($small); return null; }
 
-		$bits = '';
-		for ($y = 0; $y < $h; $y++) {
-			$prevLum = 0;
-			for ($x = 0; $x < $w; $x++) {
+		$g = [];
+		for ($y = 0; $y < $N; $y++) {
+			for ($x = 0; $x < $N; $x++) {
 				$rgb = imagecolorat($small, $x, $y);
-				$r = ($rgb >> 16) & 0xFF;
-				$g = ($rgb >> 8) & 0xFF;
-				$b = $rgb & 0xFF;
-				$lum = (int) (0.299 * $r + 0.587 * $g + 0.114 * $b);
-				if ($x > 0) $bits .= ($lum > $prevLum) ? '1' : '0';
-				$prevLum = $lum;
+				$g[$y][$x] = 0.299 * (($rgb >> 16) & 0xFF)
+					+ 0.587 * (($rgb >> 8) & 0xFF)
+					+ 0.114 * ($rgb & 0xFF);
 			}
 		}
 		imagedestroy($small);
 
-		if (strlen($bits) !== 64) return null;
-		// 64 bits → 16 hex nibbles.
+		// Cosine table (memoised) for the M×N DCT basis.
+		static $cos = null;
+		if ($cos === null) {
+			$cos = [];
+			for ($u = 0; $u < $M; $u++) {
+				for ($x = 0; $x < $N; $x++) {
+					$cos[$u][$x] = cos((2 * $x + 1) * $u * M_PI / (2 * $N));
+				}
+			}
+		}
+
+		$dct = [];
+		for ($u = 0; $u < $M; $u++) {
+			for ($v = 0; $v < $M; $v++) {
+				$sum = 0.0;
+				for ($y = 0; $y < $N; $y++) {
+					$cy = $cos[$v][$y];
+					$row = $g[$y];
+					for ($x = 0; $x < $N; $x++) {
+						$sum += $row[$x] * $cos[$u][$x] * $cy;
+					}
+				}
+				$dct[] = $sum;
+			}
+		}
+
+		$sorted = $dct;
+		sort($sorted);
+		$median = ($sorted[31] + $sorted[32]) / 2;
+
+		$bits = '';
+		for ($i = 0; $i < 64; $i++) $bits .= ($dct[$i] > $median) ? '1' : '0';
+
 		$hex = '';
 		for ($i = 0; $i < 64; $i += 4) {
 			$hex .= dechex(bindec(substr($bits, $i, 4)));
@@ -275,7 +315,7 @@ trait ImageLibraryHashing {
 		$out = [];
 		try {
 			$stmt = $this->wire('database')->prepare(
-				'SELECT field_name, basename, filesize, filemtime, content_hash, dhash
+				'SELECT field_name, basename, filesize, filemtime, content_hash, dhash, algo
 				 FROM `' . self::HASH_TABLE . '` WHERE page_id = ?'
 			);
 			$stmt->execute([$pageId]);
@@ -286,6 +326,7 @@ trait ImageLibraryHashing {
 					'filemtime'    => (int) $r['filemtime'],
 					'content_hash' => $r['content_hash'],
 					'dhash'        => $r['dhash'],
+					'algo'         => (string) $r['algo'],
 				];
 			}
 		} catch (\Throwable $e) {
@@ -314,7 +355,7 @@ trait ImageLibraryHashing {
 			);
 			$stmt->execute([
 				$pageId, $fieldName, $basename, $filesize, $filemtime,
-				$contentHash, $dhash, $this->hashAlgo(),
+				$contentHash, $dhash, $this->expectedAlgo(),
 			]);
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: hash store failed for '
@@ -383,12 +424,16 @@ trait ImageLibraryHashing {
 		return ['scanned' => $scanned, 'clusters' => $clusters];
 	}
 
-	/** dHash Hamming distance at/under which two images may be the same
-	 *  picture (different size/format/recompression). Genuine variants test
-	 *  at 0–1; different photos that merely share a tonal layout (sky over
-	 *  ground) sit higher, so this is kept TIGHT — combined with the aspect-
-	 *  ratio gate below it avoids grouping unrelated landscapes. */
-	const NEAR_DHASH_THRESHOLD = 3;
+	/** pHash Hamming distance at/under which two images count as the same
+	 *  picture (different size/format/recompression). With the DCT pHash,
+	 *  genuine variants test at 0–5 while structurally different photos land
+	 *  ~25–35 apart, so 10 sits comfortably in the gap. */
+	const NEAR_DHASH_THRESHOLD = 10;
+
+	/** Bumped whenever the perceptual-hash ALGORITHM changes, so already-
+	 *  scanned images are recomputed on the next scan even though their files
+	 *  haven't changed. p1 = 9×8 dHash (retired); p2 = 32→8 DCT pHash. */
+	const PERCEPTUAL_VERSION = 'p2';
 
 	/** Two images can only be near-dup candidates if their aspect ratios
 	 *  match within this factor. A real "same photo, smaller" keeps its
@@ -561,7 +606,8 @@ trait ImageLibraryHashing {
 			if ($existing
 				&& $existing['content_hash'] !== null
 				&& (int) $existing['filesize'] === (int) $size
-				&& (int) $existing['filemtime'] === (int) $mt) {
+				&& (int) $existing['filemtime'] === (int) $mt
+				&& ($existing['algo'] ?? '') === $this->expectedAlgo()) {
 				$skipped++;
 				continue;
 			}
