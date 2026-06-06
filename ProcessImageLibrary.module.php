@@ -927,8 +927,8 @@ class ProcessImageLibrary extends Process {
 	 *
 	 * A toolbar carries the Scan / Re-scan button (the JS drives
 	 * ___executeScanHashes in chunks) and a summary; when nothing is
-	 * fingerprinted yet it prompts for a first scan. Near-duplicates (dHash)
-	 * are a later phase — this is exact only.
+	 * fingerprinted yet it prompts for a first scan. Exact byte-identical
+	 * duplicates only.
 	 */
 	protected function renderDuplicates(array $filters): string {
 		$san  = $this->wire('sanitizer');
@@ -954,32 +954,6 @@ class ProcessImageLibrary extends Process {
 				$clusters[] = ['hash' => (string) $c['hash'], 'members' => $members];
 				foreach ($members as $mr) $pool[] = $mr;
 			}
-		}
-
-		// Near-duplicate groups (same picture, different size/format). Each
-		// group is resolved to live rows and collapsed to one representative
-		// per distinct content hash (= one entry per genuinely-different
-		// version). Their rows join the hydrate pool too.
-		$near = $scanned ? $this->loadNearClusters() : ['capped' => false, 'groups' => []];
-		$nearGroups = [];
-		foreach ($near['groups'] as $g) {
-			$versions = [];           // contentHash => representative row
-			$copies   = [];           // contentHash => copy count
-			foreach ($g as $m) {
-				$k = $m['pageId'] . "\0" . $m['fieldName'] . "\0" . $m['basename'];
-				if (!isset($byKey[$k]) || $m['contentHash'] === null) continue;
-				$ch = (string) $m['contentHash'];
-				$copies[$ch] = ($copies[$ch] ?? 0) + 1;
-				if (!isset($versions[$ch])) $versions[$ch] = $byKey[$k];
-			}
-			if (count($versions) < 2) continue;   // needs ≥2 distinct versions
-			$list = [];
-			foreach ($versions as $ch => $row) {
-				$row['_copies'] = $copies[$ch];
-				$list[] = $row;
-				$pool[] = $row;
-			}
-			$nearGroups[] = $list;
 		}
 
 		// One hydrate pass for every member's thumbnail, then re-index.
@@ -1108,57 +1082,6 @@ class ProcessImageLibrary extends Process {
 				$out .= '</li>';
 			}
 			$out .= '</ul></div></div>';
-		}
-
-		// Near-duplicate groups — read-only, review-gated. Distinct versions
-		// of the same picture (different size / format), each linking to its
-		// page. Not byte-identical, so no hardlink / auto-merge offered.
-		if ($near['capped']) {
-			$out .= '<p class="ml-dups-note">'
-				. $san->entities(sprintf(
-					$this->_('Too many images (over %d) to compute similar-image groups right now.'),
-					self::NEAR_MAX_IMAGES
-				)) . '</p>';
-		} elseif ($nearGroups) {
-			$out .= '<h3 class="ml-dups-near-h">'
-				. $san->entities(sprintf($this->_('Similar images — %d group(s), please review'), count($nearGroups)))
-				. '</h3>'
-				. '<p class="ml-dups-note">'
-				. $san->entities($this->_('The same picture in a different size or format. Not byte-identical, so these can’t be hardlinked or auto-merged — review and tidy up manually.'))
-				. '</p>';
-			foreach ($nearGroups as $versions) {
-				$out .= '<div class="ml-dup-near">';
-				foreach ($versions as $v) {
-					$vKey = $v['pageId'] . "\0" . $v['fieldName'] . "\0" . $v['basename'];
-					$hv   = $hByKey[$vKey] ?? $v;
-					$w = (int) ($v['width'] ?? 0); $h = (int) ($v['height'] ?? 0);
-					$dims = ($w && $h) ? ($w . '×' . $h) : '';
-					$meta = trim($dims . ' · ' . $this->formatFilesize((int) ($v['filesize'] ?? 0)), ' ·');
-					$editUrl = (string) ($v['pageEditUrl'] ?? '');
-					$title = (string) ($v['pageTitle'] ?? '');
-					if ($title === '') $title = '#' . (int) $v['pageId'];
-
-					$out .= '<div class="ml-dup-near-ver"><div class="ml-dup-near-thumb">';
-					if (!empty($hv['thumbUrl'])) {
-						$out .= '<img src="' . $san->entities((string) $hv['thumbUrl']) . '" alt="" loading="lazy">';
-					}
-					$out .= '</div><div class="ml-dup-near-meta">'
-						. '<span class="ml-dup-near-dims">' . $san->entities($meta) . '</span>';
-					if ((int) $v['_copies'] > 1) {
-						$out .= ' <span class="ml-dup-near-copies">'
-							. $san->entities(sprintf($this->_('×%d copies'), (int) $v['_copies'])) . '</span>';
-					}
-					$label = $san->entities($title)
-						. ' <span class="ml-dup-field">' . $san->entities((string) $v['fieldName']) . '</span> '
-						. '<code>' . $san->entities((string) $v['basename']) . '</code>';
-					$out .= '<div class="ml-dup-near-where">'
-						. ($editUrl
-							? '<a href="' . $san->entities($editUrl) . '" target="_blank" rel="noopener">' . $label . '</a>'
-							: $label)
-						. '</div></div></div>';
-				}
-				$out .= '</div>';
-			}
 		}
 
 		$out .= '</div>';
@@ -5524,9 +5447,9 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * AJAX endpoint: compute + store content fingerprints (exact byte hash +
-	 * perceptual dHash) for the managed image set, one time-budgeted chunk per
-	 * call. The fingerprints feed duplicate detection (a later phase).
+	 * AJAX endpoint: compute + store the exact byte-content hash of every
+	 * managed image, one time-budgeted chunk per call. The fingerprints feed
+	 * the duplicates view (exact-duplicate clusters) and hardlink reclaim.
 	 *
 	 * Internal plumbing — there is no UI trigger yet. A client drives it to
 	 * completion by re-POSTing with the returned `nextOffset` as `offset`

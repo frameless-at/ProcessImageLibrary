@@ -1,18 +1,20 @@
 <?php namespace ProcessWire;
 
 /**
- * Content-identity layer for ProcessImageLibrary (deduplication, phase 1).
+ * Content-identity layer for ProcessImageLibrary (exact-duplicate detection +
+ * hardlink reclaim).
  *
- * Gives every managed image two fingerprints and stores them so duplicate
- * detection (a later phase) can group copies cheaply:
+ * Fingerprints every managed image by its EXACT byte content so duplicate
+ * copies can be grouped, managed together, and optionally collapsed:
  *
  *   - content_hash : exact byte hash (xxh128 where available, else md5).
  *                    Two rows with the same content_hash are byte-identical
  *                    copies of the same file.
- *   - dhash        : a 64-bit perceptual "difference hash" (pure PHP + GD),
- *                    stored as 16 hex chars. Small Hamming distance between
- *                    two dhashes => the same picture at a different size or
- *                    format (a NEAR-duplicate exact hashing can't catch).
+ *
+ * (A `dhash` column also exists in the table but is unused — a perceptual
+ * near-duplicate hash was tried and dropped: it grouped unrelated photos that
+ * merely shared a tonal layout, even with a DCT pHash, so it was not reliable
+ * enough. The column is left in place to avoid a schema migration.)
  *
  * Storage is the module's own table `process_imagelibrary_hashes`, keyed by
  * the same identity the rest of the module uses — (page_id, field_name,
@@ -21,14 +23,9 @@
  * (CREATE TABLE IF NOT EXISTS) so it appears on already-installed sites
  * without an upgrade hook, and is dropped on uninstall.
  *
- * This trait is the engine only — it computes, caches and exposes
- * fingerprints. It does NOT change any rendering or default behaviour;
- * surfacing duplicates (a "duplicates" view / filter, where-used per cluster,
- * edit-once-propagate, optional hardlink reclaim) is built on top in later
- * phases. The one entry point that populates the table is the time-budgeted
- * scan (___executeScanHashes), which has no UI trigger yet.
- *
- * Composed into ProcessImageLibrary via `use`.
+ * Also home to the hardlink-reclaim engine (collapse byte-identical copies to
+ * one inode) and its reversible manifest. Composed into ProcessImageLibrary
+ * via `use`.
  */
 trait ImageLibraryHashing {
 
@@ -58,14 +55,6 @@ trait ImageLibraryHashing {
 			$algo = in_array('xxh128', hash_algos(), true) ? 'xxh128' : 'md5';
 		}
 		return $algo;
-	}
-
-	/** Combined fingerprint version stored per row: content-hash algorithm +
-	 *  perceptual-hash version. A scanned row whose stored value differs from
-	 *  this is recomputed on the next scan, so an algorithm change re-hashes
-	 *  even files that haven't changed on disk. */
-	protected function expectedAlgo(): string {
-		return $this->hashAlgo() . '/' . self::PERCEPTUAL_VERSION;
 	}
 
 	/**
@@ -207,105 +196,6 @@ trait ImageLibraryHashing {
 	}
 
 	/**
-	 * 64-bit perceptual hash (pHash, DCT-based) as 16 hex chars, or null on
-	 * decode failure. Stored in the same `dhash` column as the old difference
-	 * hash — the format is identical (64 bits), only far more discriminating.
-	 *
-	 * Algorithm (the standard pHash): downscale to 32×32 greyscale, take the
-	 * 2-D DCT, keep the top-left 8×8 low-frequency block (the gist of the
-	 * image), and set each of those 64 coefficients to 1 if it's above the
-	 * block's median, else 0. Because it captures frequency STRUCTURE rather
-	 * than adjacent-pixel brightness, the same photo at any size/format hashes
-	 * within a handful of bits, while genuinely different photos that merely
-	 * share a tonal layout (sky over ground, dark scene with a bright spot)
-	 * land 25–35 bits apart — exactly the separation the 9×8 dHash lacked.
-	 */
-	protected function computeDHash(string $path): ?string {
-		if (!function_exists('imagecreatefromstring')) return null;
-		$data = @file_get_contents($path);
-		if ($data === false || $data === '') return null;
-
-		$src = @imagecreatefromstring($data);
-		if (!$src) return null;
-
-		$N = 32;   // sample size
-		$M = 8;    // low-frequency block kept (M×M = 64 bits)
-		$small = @imagecreatetruecolor($N, $N);
-		if (!$small) { imagedestroy($src); return null; }
-		$ok = @imagecopyresampled($small, $src, 0, 0, 0, 0, $N, $N, imagesx($src), imagesy($src));
-		imagedestroy($src);
-		if (!$ok) { imagedestroy($small); return null; }
-
-		$g = [];
-		for ($y = 0; $y < $N; $y++) {
-			for ($x = 0; $x < $N; $x++) {
-				$rgb = imagecolorat($small, $x, $y);
-				$g[$y][$x] = 0.299 * (($rgb >> 16) & 0xFF)
-					+ 0.587 * (($rgb >> 8) & 0xFF)
-					+ 0.114 * ($rgb & 0xFF);
-			}
-		}
-		imagedestroy($small);
-
-		// Cosine table (memoised) for the M×N DCT basis.
-		static $cos = null;
-		if ($cos === null) {
-			$cos = [];
-			for ($u = 0; $u < $M; $u++) {
-				for ($x = 0; $x < $N; $x++) {
-					$cos[$u][$x] = cos((2 * $x + 1) * $u * M_PI / (2 * $N));
-				}
-			}
-		}
-
-		$dct = [];
-		for ($u = 0; $u < $M; $u++) {
-			for ($v = 0; $v < $M; $v++) {
-				$sum = 0.0;
-				for ($y = 0; $y < $N; $y++) {
-					$cy = $cos[$v][$y];
-					$row = $g[$y];
-					for ($x = 0; $x < $N; $x++) {
-						$sum += $row[$x] * $cos[$u][$x] * $cy;
-					}
-				}
-				$dct[] = $sum;
-			}
-		}
-
-		$sorted = $dct;
-		sort($sorted);
-		$median = ($sorted[31] + $sorted[32]) / 2;
-
-		$bits = '';
-		for ($i = 0; $i < 64; $i++) $bits .= ($dct[$i] > $median) ? '1' : '0';
-
-		$hex = '';
-		for ($i = 0; $i < 64; $i += 4) {
-			$hex .= dechex(bindec(substr($bits, $i, 4)));
-		}
-		return $hex;
-	}
-
-	/**
-	 * Hamming distance (0–64) between two 16-hex dHashes; 64 (max) when
-	 * either is malformed. Used to cluster near-duplicates. Byte-wise XOR +
-	 * popcount avoids any 64-bit signed-int pitfalls.
-	 */
-	protected function dhashDistance(?string $a, ?string $b): int {
-		if (!is_string($a) || !is_string($b) || strlen($a) !== 16 || strlen($b) !== 16) return 64;
-		$ba = @hex2bin($a);
-		$bb = @hex2bin($b);
-		if ($ba === false || $bb === false || strlen($ba) !== 8 || strlen($bb) !== 8) return 64;
-		$d = 0;
-		for ($i = 0; $i < 8; $i++) {
-			$x = ord($ba[$i]) ^ ord($bb[$i]);
-			$d += substr_count(decbin($x), '1');
-		}
-		return $d;
-	}
-
-	/**
 	 * Load all stored fingerprints for one page, keyed "field\0basename", so
 	 * a scan checks a whole page's images with a single query.
 	 *
@@ -355,7 +245,7 @@ trait ImageLibraryHashing {
 			);
 			$stmt->execute([
 				$pageId, $fieldName, $basename, $filesize, $filemtime,
-				$contentHash, $dhash, $this->expectedAlgo(),
+				$contentHash, $dhash, $this->hashAlgo(),
 			]);
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: hash store failed for '
@@ -424,139 +314,15 @@ trait ImageLibraryHashing {
 		return ['scanned' => $scanned, 'clusters' => $clusters];
 	}
 
-	/** pHash Hamming distance at/under which two images count as the same
-	 *  picture (different size/format/recompression). With the DCT pHash,
-	 *  genuine variants test at 0–5 while structurally different photos land
-	 *  ~25–35 apart, so 10 sits comfortably in the gap. */
-	const NEAR_DHASH_THRESHOLD = 10;
-
-	/** Bumped whenever the perceptual-hash ALGORITHM changes, so already-
-	 *  scanned images are recomputed on the next scan even though their files
-	 *  haven't changed. p1 = 9×8 dHash (retired); p2 = 32→8 DCT pHash. */
-	const PERCEPTUAL_VERSION = 'p2';
-
-	/** Two images can only be near-dup candidates if their aspect ratios
-	 *  match within this factor. A real "same photo, smaller" keeps its
-	 *  ratio exactly; this alone rules out portrait-vs-landscape mismatches. */
-	const NEAR_ASPECT_TOLERANCE = 1.02;
-
-	/** Pairwise near-dup clustering is O(n²); above this many fingerprinted
-	 *  images it's skipped (with a note) to keep the view responsive. */
-	const NEAR_MAX_IMAGES = 6000;
-
 	/**
-	 * Near-duplicate groups: images whose perceptual hashes are within
-	 * NEAR_DHASH_THRESHOLD of each other (the same picture at a different
-	 * size / format / recompression). Built by union-find over pairwise
-	 * Hamming distance. Only groups that span ≥2 DISTINCT content hashes are
-	 * returned — a group that's all one content hash is just an exact
-	 * duplicate (already shown), not a near one.
-	 *
-	 * @return array{capped:bool, groups:array<int,array<int,array{pageId:int,fieldName:string,basename:string,contentHash:?string}>>}
-	 */
-	protected function loadNearClusters(int $threshold = self::NEAR_DHASH_THRESHOLD): array {
-		$this->ensureHashTable();
-		$items = [];
-		try {
-			$stmt = $this->wire('database')->query(
-				'SELECT page_id, field_name, basename, content_hash, dhash
-				 FROM `' . self::HASH_TABLE . '` WHERE dhash IS NOT NULL'
-			);
-			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-				$bin = @hex2bin((string) $r['dhash']);
-				if ($bin === false || strlen($bin) !== 8) continue;
-				$items[] = [
-					'pageId'      => (int) $r['page_id'],
-					'fieldName'   => (string) $r['field_name'],
-					'basename'    => (string) $r['basename'],
-					'contentHash' => $r['content_hash'],
-					'bin'         => $bin,
-				];
-			}
-		} catch (\Throwable $e) {
-			return ['capped' => false, 'groups' => []];
-		}
-
-		// Attach each image's aspect ratio (from the live rows) and drop
-		// anything we can't size. The aspect gate is the main thing that
-		// stops unrelated photos which merely share a tonal layout (sky over
-		// ground) — or worse, a portrait vs a landscape — from grouping.
-		$dims = [];
-		foreach ($this->loadRows() as $r) {
-			$w = (int) ($r['width'] ?? 0); $h = (int) ($r['height'] ?? 0);
-			if ($w > 0 && $h > 0) {
-				$dims[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] = $w / $h;
-			}
-		}
-		$sized = [];
-		foreach ($items as $it) {
-			$k = $it['pageId'] . "\0" . $it['fieldName'] . "\0" . $it['basename'];
-			if (!isset($dims[$k])) continue;
-			$it['aspect'] = $dims[$k];
-			$sized[] = $it;
-		}
-		$items = $sized;
-
-		$n = count($items);
-		if ($n < 2) return ['capped' => false, 'groups' => []];
-		if ($n > self::NEAR_MAX_IMAGES) return ['capped' => true, 'groups' => []];
-
-		// Union-find (iterative path-halving — no recursion).
-		$parent = range(0, $n - 1);
-		$find = function (int $x) use (&$parent): int {
-			while ($parent[$x] !== $x) { $parent[$x] = $parent[$parent[$x]]; $x = $parent[$x]; }
-			return $x;
-		};
-		for ($a = 0; $a < $n; $a++) {
-			$ba = $items[$a]['bin']; $aspA = $items[$a]['aspect'];
-			for ($b = $a + 1; $b < $n; $b++) {
-				// Aspect gate first — a different shape can't be the same
-				// photo resized, so it's never a near-duplicate.
-				$aspB = $items[$b]['aspect'];
-				$ratio = $aspA > $aspB ? ($aspA / $aspB) : ($aspB / $aspA);
-				if ($ratio > self::NEAR_ASPECT_TOLERANCE) continue;
-
-				$bb = $items[$b]['bin'];
-				$d = 0;
-				for ($i = 0; $i < 8; $i++) {
-					$x = ord($ba[$i]) ^ ord($bb[$i]);
-					$d += substr_count(decbin($x), '1');
-					if ($d > $threshold) break;
-				}
-				if ($d <= $threshold) {
-					$ra = $find($a); $rb = $find($b);
-					if ($ra !== $rb) $parent[$ra] = $rb;
-				}
-			}
-		}
-
-		// Collect connected components.
-		$byRoot = [];
-		for ($k = 0; $k < $n; $k++) {
-			unset($items[$k]['bin']);
-			$byRoot[$find($k)][] = $items[$k];
-		}
-		// Keep only genuinely-near groups: ≥2 members AND ≥2 content hashes.
-		$groups = [];
-		foreach ($byRoot as $g) {
-			if (count($g) < 2) continue;
-			$hashes = [];
-			foreach ($g as $m) if ($m['contentHash'] !== null) $hashes[$m['contentHash']] = true;
-			if (count($hashes) < 2) continue;
-			$groups[] = $g;
-		}
-		return ['capped' => false, 'groups' => $groups];
-	}
-
-	/**
-	 * Time-budgeted fingerprint scan over the whole managed image set.
+	 * Time-budgeted content-hash scan over the whole managed image set.
 	 *
 	 * Walks the cached row list from $offset, skipping images whose stored
 	 * (filesize, filemtime) still match the file on disk, computing + storing
-	 * the content hash and dHash for the rest, until HASH_SCAN_BUDGET_MS is
-	 * spent or the list ends. Pages are loaded once and their stored hashes
-	 * fetched once, so the per-image cost is a stat plus (when stale) the two
-	 * hashes. Returns progress so a client can drive it to completion.
+	 * the content hash for the rest, until HASH_SCAN_BUDGET_MS is spent or the
+	 * list ends. Pages are loaded once and their stored hashes fetched once,
+	 * so the per-image cost is a stat plus (when stale) one hash. Returns
+	 * progress so a client can drive it to completion.
 	 *
 	 * @return array{total:int,processed:int,hashed:int,skipped:int,nextOffset:int,complete:bool}
 	 */
@@ -606,15 +372,13 @@ trait ImageLibraryHashing {
 			if ($existing
 				&& $existing['content_hash'] !== null
 				&& (int) $existing['filesize'] === (int) $size
-				&& (int) $existing['filemtime'] === (int) $mt
-				&& ($existing['algo'] ?? '') === $this->expectedAlgo()) {
+				&& (int) $existing['filemtime'] === (int) $mt) {
 				$skipped++;
 				continue;
 			}
 
 			$content = $this->computeContentHash($path);
-			$dhash   = $this->computeDHash($path);
-			$this->storeImageHash($pid, $fn, $bn, (int) $size, (int) $mt, $content, $dhash);
+			$this->storeImageHash($pid, $fn, $bn, (int) $size, (int) $mt, $content, null);
 			$hashed++;
 		}
 
