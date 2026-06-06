@@ -200,7 +200,9 @@
 /* Duplicates filter accordion: the "N×" indicator on a cluster head row is
    a button that expands / collapses the hidden copy rows. Larger than the
    plain badge so it reads as the tap target it is. */
-.ml-dup-toggle {
+/* Two classes so this beats the later, equal-specificity .ml-dup-count
+   base rule (which would otherwise win on source order). */
+.ml-dup-count.ml-dup-toggle {
 	cursor: pointer;
 	font-size: 0.95rem;
 	padding: 20px 11px;
