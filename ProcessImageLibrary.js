@@ -739,6 +739,52 @@
 			};
 		}
 
+		// Copy ONE just-saved subfield from the edited image to every
+		// other byte-identical copy in its cluster (the duplicate
+		// "apply to all" action wired into the edit popup). Fire-and-
+		// refresh: the source already holds the value, so the server
+		// reads it and writes the rest; a deferred re-render lets any
+		// on-screen copies catch up. Locked copies are skipped server-side.
+		function propagateToCopies(hash, pageId, field, basename, subfield) {
+			if (!config.propagateUrl || !hash) return;
+			var fd = new FormData();
+			fd.append('hash',      hash);
+			fd.append('subfield',  subfield || 'description');
+			fd.append('pageId',    pageId || '');
+			fd.append('fieldName', field || '');
+			fd.append('basename',  basename || '');
+			appendCsrf(fd);
+			fetch(config.propagateUrl, {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
+			}).then(function (r) { return r.json(); }).then(function (d) {
+				if (d && d.ok && (d.applied | 0) > 0) {
+					setTimeout(function () { replaceFromQs(location.search, false); }, 1200);
+				}
+			}).catch(function () {});
+		}
+
+		// Lock / unlock one placement so cluster-wide propagation leaves
+		// its caption alone ("keep own text"). Shared by the duplicates
+		// view's inline locks and the edit popup's where-used list; both
+		// read the row identity off the [data-page-id] host and revert
+		// the checkbox on failure.
+		function sendMetaLock(li, lockCb) {
+			if (!li || !config.metaLockUrl) return;
+			var fd = new FormData();
+			fd.append('pageId',    li.dataset.pageId || '');
+			fd.append('fieldName', li.dataset.field || '');
+			fd.append('basename',  li.dataset.basename || '');
+			fd.append('locked',    lockCb.checked ? '1' : '0');
+			appendCsrf(fd);
+			fetch(config.metaLockUrl, {
+				method: 'POST', credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
+			}).then(function (r) { return r.json(); }).then(function (d) {
+				if (!d || !d.ok) lockCb.checked = !lockCb.checked;
+			}).catch(function () { lockCb.checked = !lockCb.checked; });
+		}
+
 		// All cell edits run through one popup. The native <dialog>
 		// gives a roomy editing canvas regardless of subfield type
 		// (textarea, single-line text, whitelisted-tag checkboxes) and
@@ -850,6 +896,108 @@
 			document.body.appendChild(dialog);
 
 			var committed = false;
+
+			// Duplicate affordances — single-edit mode, for the prose
+			// subfields the propagate endpoint supports. Ask the server
+			// whether this image has byte-identical twins; if so, grow
+			// the popup with an "apply to all copies" toggle (default on)
+			// and a collapsible where-used list whose non-source rows
+			// carry a per-copy "keep own text" lock. On save the edit is
+			// pushed to every unlocked copy via propagateToCopies.
+			var dupApplyCb = null, dupHash = '';
+			if (!batch
+				&& (td.dataset.subfield === 'description' || td.dataset.subfield === 'tags')
+				&& config.dupInfoUrl) {
+				var dupSection = document.createElement('div');
+				dupSection.className = 'ml-dup-popup';
+				dupSection.hidden = true;
+				dialog.insertBefore(dupSection, footer);
+				// The popup lives on document.body, outside .ml-results, so
+				// the delegated lock handler can't see these checkboxes —
+				// wire them straight to the shared helper here.
+				dupSection.addEventListener('change', function (e) {
+					var lock = e.target.closest && e.target.closest('.ml-dup-lock');
+					if (!lock) return;
+					var li = lock.closest('[data-page-id]');
+					if (li) sendMetaLock(li, lock);
+				});
+				var dupFd = new FormData();
+				dupFd.append('pageId',    td.dataset.pageId);
+				dupFd.append('fieldName', td.dataset.field);
+				dupFd.append('basename',  td.dataset.basename);
+				appendCsrf(dupFd);
+				fetch(config.dupInfoUrl, {
+					method: 'POST', credentials: 'same-origin',
+					headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: dupFd
+				}).then(function (r) { return r.json(); }).then(function (d) {
+					if (committed) return;                 // popup already closed
+					if (!d || !d.ok || !d.isDup || (d.count | 0) < 2) return;
+					dupHash = d.hash || '';
+					var count = d.count | 0;
+
+					// "Apply to all N copies" toggle, default on.
+					var toggle = document.createElement('label');
+					toggle.className = 'ml-dup-popup-toggle';
+					dupApplyCb = document.createElement('input');
+					dupApplyCb.type = 'checkbox';
+					dupApplyCb.className = 'uk-checkbox';
+					dupApplyCb.checked = true;
+					toggle.appendChild(dupApplyCb);
+					toggle.appendChild(document.createTextNode(' '
+						+ (labels.applyToCopies || 'Apply to all %d identical copies').replace('%d', count)));
+					dupSection.appendChild(toggle);
+
+					// Collapsible where-used list: every placement links to
+					// its page editor; non-source copies get a "keep own
+					// text" lock so propagation skips them.
+					var details = document.createElement('details');
+					details.className = 'ml-dup-popup-used';
+					var summary = document.createElement('summary');
+					summary.textContent = (labels.dupUsedIn || 'Used in %d places').replace('%d', count);
+					details.appendChild(summary);
+					var ul = document.createElement('ul');
+					(d.members || []).forEach(function (m) {
+						var li = document.createElement('li');
+						li.setAttribute('data-page-id', m.pageId);
+						li.setAttribute('data-field', m.fieldName);
+						li.setAttribute('data-basename', m.basename);
+						var nameEl;
+						if (m.editUrl) {
+							nameEl = document.createElement('a');
+							nameEl.href = m.editUrl;
+							nameEl.target = '_blank';
+							nameEl.rel = 'noopener';
+						} else {
+							nameEl = document.createElement('span');
+						}
+						nameEl.className = 'ml-dup-popup-page';
+						nameEl.textContent = m.pageTitle + ' · ' + m.fieldName;
+						li.appendChild(nameEl);
+						if (m.isSource) {
+							var here = document.createElement('em');
+							here.className = 'ml-dup-popup-here';
+							here.textContent = ' (' + (labels.dupThisCopy || 'this copy') + ')';
+							li.appendChild(here);
+						} else {
+							var lockLbl = document.createElement('label');
+							lockLbl.className = 'ml-dup-popup-lock';
+							lockLbl.title = labels.dupKeepOwn || 'keep own text';
+							var lockCb = document.createElement('input');
+							lockCb.type = 'checkbox';
+							lockCb.className = 'ml-dup-lock uk-checkbox';
+							lockCb.checked = !!m.locked;
+							lockLbl.appendChild(lockCb);
+							lockLbl.appendChild(document.createTextNode(' '
+								+ (labels.dupKeepOwn || 'keep own text')));
+							li.appendChild(lockLbl);
+						}
+						ul.appendChild(li);
+					});
+					details.appendChild(ul);
+					dupSection.appendChild(details);
+					dupSection.hidden = false;
+				}).catch(function () {});
+			}
 
 			function teardown() {
 				td.classList.remove('ml-editing');
@@ -1245,7 +1393,17 @@
 					return;
 				}
 
-				if (!isMultilang && primaryValue === original) { teardown(); return; }
+				if (!isMultilang && primaryValue === original) {
+					teardown();
+					// Nothing changed, but the user may have opened the
+					// popup just to push the existing caption to the other
+					// copies — honour the toggle even without an edit.
+					if (dupApplyCb && dupApplyCb.checked && dupHash) {
+						propagateToCopies(dupHash, td.dataset.pageId,
+							td.dataset.field, td.dataset.basename, td.dataset.subfield);
+					}
+					return;
+				}
 
 				teardown();
 				// Optimistic update — resolve placeholders client-side
@@ -1305,6 +1463,12 @@
 						td.title = '';
 						flashCell(td, true);
 						fadeRowIfMismatched(td, result.data);
+						// Duplicate "apply to all": the source now holds the
+						// new value, so push it to every unlocked copy.
+						if (dupApplyCb && dupApplyCb.checked && dupHash) {
+							propagateToCopies(dupHash, td.dataset.pageId,
+								td.dataset.field, td.dataset.basename, td.dataset.subfield);
+						}
 					} else {
 						if (!typedInput) setCellText(td, original);
 						var reason = (result && result.data && result.data.error)
@@ -2248,9 +2412,6 @@
 						e.target.classList.contains('ml-select-row') ||
 						e.target.classList.contains('ml-select-all')
 					)) return;
-					// Duplicate badge → its own handler opens the cluster
-					// modal; don't also open the image editor underneath.
-					if (e.target.closest('.ml-dup-count[data-dup-hash]')) return;
 					// Thumbnail → PW image editor modal. The td only carries
 					// the page-edit data attrs when the host page is
 					// editable, so unauthorised users just see the thumb
@@ -2973,14 +3134,7 @@
 					}
 					status.textContent = msg;
 				}
-				// In the badge modal, re-fetch the cluster so it stays open
-				// with the updated descriptions; in the cluster view, re-render.
-				var modal = apply.closest('.ml-dup-modal');
-				if (modal) {
-					reloadDupModal(modal, apply.dataset.hash || '');
-				} else {
-					setTimeout(function () { replaceFromQs(location.search, false); }, 900);
-				}
+				setTimeout(function () { replaceFromQs(location.search, false); }, 900);
 			}).catch(function () {
 				apply.disabled = false;
 				if (status) { status.hidden = false; status.textContent = labels.error || 'Failed'; }
@@ -2990,73 +3144,7 @@
 			var lock = e.target.closest && e.target.closest('.ml-dup-lock');
 			if (!lock || !config.metaLockUrl) return;
 			var li = lock.closest('[data-page-id]');
-			if (!li) return;
-			var fd = new FormData();
-			fd.append('pageId',    li.dataset.pageId || '');
-			fd.append('fieldName', li.dataset.field || '');
-			fd.append('basename',  li.dataset.basename || '');
-			fd.append('locked',    lock.checked ? '1' : '0');
-			appendCsrf(fd);
-			fetch(config.metaLockUrl, {
-				method: 'POST', credentials: 'same-origin',
-				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
-			}).then(function (r) { return r.json(); }).then(function (d) {
-				if (!d || !d.ok) lock.checked = !lock.checked; // revert on failure
-			}).catch(function () { lock.checked = !lock.checked; });
-		});
-
-		// -- Duplicate cluster modal (click the "N×" badge) ------------
-		// Renders the cluster-detail table INSIDE .ml-results, so the same
-		// delegated handlers above (inline editor, apply, lock) work in it.
-		function fillDupModal(dialog, hash) {
-			var body  = dialog.querySelector('.ml-dup-modal-body');
-			var title = dialog.querySelector('.ml-dup-modal-title');
-			if (body) body.innerHTML = '<p class="ml-dups-note">' + ((labels && labels.loading) || 'Loading…') + '</p>';
-			var fd = new FormData();
-			fd.append('hash', hash);
-			appendCsrf(fd);
-			fetch(config.dupClusterUrl, {
-				method: 'POST', credentials: 'same-origin',
-				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
-			}).then(function (r) { return r.json(); }).then(function (d) {
-				if (!d || !d.ok) throw new Error('cluster fetch failed');
-				if (body) body.innerHTML = d.html;
-				if (title) {
-					title.textContent = (labels.dupModalTitle || '%d identical copies').replace('%d', d.count | 0);
-				}
-			}).catch(function () {
-				if (body) body.innerHTML = '<p class="ml-dups-note">' + ((labels && labels.error) || 'Failed') + '</p>';
-			});
-		}
-		function reloadDupModal(modal, hash) {
-			fillDupModal(modal, hash || modal.dataset.hash || '');
-		}
-		function openDupModal(hash) {
-			if (!hash || !config.dupClusterUrl || !results) return;
-			var ex = results.querySelector('.ml-dup-modal');
-			if (ex) ex.remove();
-			var dialog = document.createElement('dialog');
-			dialog.className = 'ml-dup-modal';
-			dialog.dataset.hash = hash;
-			dialog.innerHTML =
-				'<div class="ml-dup-modal-bar">'
-				+ '<strong class="ml-dup-modal-title"></strong>'
-				+ '<button type="button" class="uk-button uk-button-default ml-dup-modal-close">'
-				+ ((labels && labels.close) || 'Close') + '</button>'
-				+ '</div><div class="ml-dup-modal-body"></div>';
-			results.appendChild(dialog);
-			dialog.querySelector('.ml-dup-modal-close').addEventListener('click', function () {
-				if (dialog.open) dialog.close();
-			});
-			dialog.addEventListener('close', function () { dialog.remove(); });
-			fillDupModal(dialog, hash);
-			dialog.showModal();
-		}
-		results && results.addEventListener('click', function (e) {
-			var badge = e.target.closest && e.target.closest('.ml-dup-count[data-dup-hash]');
-			if (!badge) return;
-			e.preventDefault();
-			openDupModal(badge.dataset.dupHash);
+			if (li) sendMetaLock(li, lock);
 		});
 
 		// Leaving the duplicates view via any bookmark tab dims the

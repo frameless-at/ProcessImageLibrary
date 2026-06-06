@@ -190,19 +190,11 @@
 
 /* Duplicate-count badge (.ml-dup-count) reused from the duplicates view on
    the regular table / gallery thumbnails: bottom-right here (the cluster
-   view keeps it top-right). Clickable (opens the cluster modal) — only the
-   badge itself, so the rest of the thumb still opens the image editor. */
+   view keeps it top-right). A pure indicator — managing the duplicate
+   happens in the normal edit popup. */
 .ml-cell-thumb .ml-dup-count {
 	top: auto;
 	bottom: 4px;
-}
-.ml-dup-count-btn {
-	cursor: pointer;
-}
-.ml-dup-count-btn:hover,
-.ml-dup-count-btn:focus-visible {
-	filter: brightness(1.15);
-	outline: none;
 }
 /* Fade-out animation for rows being deleted — JS adds the class
    right before the row is removed from the DOM so the disappear is
@@ -857,93 +849,61 @@ textarea.ml-cell-input {
 	font-style: italic;
 }
 
-/* Cluster-detail modal opened from the duplicate badge — a table of every
-   copy with where-used + inline-editable description + apply + lock. */
-.ml-dup-modal {
-	width: min(900px, 94vw);
-	max-height: 88vh;
-	overflow: auto;
-	padding: 1.25rem;
-	border: 1px solid var(--pw-border-color, #ccc);
-	border-radius: 4px;
-	background: var(--pw-blocks-background, #fff);
-	color: var(--pw-text-color, inherit);
-	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+/* Duplicate affordances grown into the normal edit popup when the edited
+   image has byte-identical twins: an "apply to all copies" toggle plus a
+   collapsible where-used list with per-copy "keep own text" locks. Sits
+   between the editor widget and the Save / Cancel footer. */
+.ml-dup-popup {
+	margin-top: 0.75rem;
+	padding-top: 0.75rem;
+	border-top: 1px solid var(--pw-border-color, #e0e0e0);
+	font-size: 0.92em;
 }
-.ml-dup-modal::backdrop {
-	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
+.ml-dup-popup-toggle {
+	display: flex;
+	align-items: center;
+	gap: 0.45rem;
+	font-weight: 600;
+	cursor: pointer;
 }
-.ml-dup-modal-bar {
+.ml-dup-popup-used {
+	margin-top: 0.55rem;
+}
+.ml-dup-popup-used summary {
+	cursor: pointer;
+	color: var(--pw-muted-color, #6c8dae);
+}
+.ml-dup-popup-used ul {
+	list-style: none;
+	margin: 0.4rem 0 0;
+	padding: 0;
+}
+.ml-dup-popup-used li {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
-	gap: 1rem;
-	margin-bottom: 0.75rem;
+	gap: 0.75rem;
+	padding: 0.25rem 0;
+	border-bottom: 1px solid var(--pw-border-color, #eee);
 }
-.ml-dup-modal-title {
-	font-size: 1.05em;
-	font-weight: 600;
+.ml-dup-popup-used li:last-child {
+	border-bottom: 0;
 }
-.ml-dup-modal-table {
-	width: 100%;
-	border-collapse: collapse;
-}
-.ml-dup-modal-table th {
-	text-align: left;
-	font-weight: 600;
-	color: var(--pw-muted-color, #6c8dae);
-	border-bottom: 1px solid var(--pw-border-color, #ddd);
-	padding: 0.3rem 0.5rem;
+.ml-dup-popup-page {
+	overflow: hidden;
+	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.ml-dup-modal-table td {
-	padding: 0.4rem 0.5rem;
-	border-bottom: 1px solid var(--pw-border-color, #eee);
-	vertical-align: middle;
+.ml-dup-popup-here {
+	color: var(--pw-muted-color, #999);
+	white-space: nowrap;
 }
-.ml-dup-modal-thumb img {
-	display: block;
-	width: 56px;
-	height: 56px;
-	object-fit: cover;
-	border: 1px solid var(--pw-border-color, #e5e5e5);
-	border-radius: 3px;
-	background: var(--pw-inputs-background, #fafafa);
-}
-.ml-dup-modal-table code {
-	font-size: 0.85em;
-	color: var(--pw-code-color, inherit);
-}
-.ml-dup-modal-desc {
-	min-width: 14rem;
-}
-.ml-dup-modal-desc .ml-cell-editable {
-	display: inline-block;
-	min-width: 9rem;
-	min-height: 1.4em;
-	padding: 0.15rem 0.35rem;
-	border: 1px dashed var(--pw-border-color, #ccc);
-	border-radius: 3px;
-	cursor: text;
-	vertical-align: middle;
-}
-.ml-dup-apply-row {
-	margin-left: 0.4rem;
-	padding: 0.1rem 0.4rem;
-	border: 0;
-	background: transparent;
-	color: var(--pw-main-color, #eb1d61);
-	cursor: pointer;
-	font-size: 1rem;
-	vertical-align: middle;
-}
-.ml-dup-apply-row:hover {
-	filter: brightness(1.15);
-}
-.ml-dup-modal-lock {
-	text-align: center;
-}
-.ml-dup-modal-lock label {
+.ml-dup-popup-lock {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.3rem;
+	white-space: nowrap;
+	color: var(--pw-muted-color, #777);
 	cursor: pointer;
 }
 
