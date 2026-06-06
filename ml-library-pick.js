@@ -10,6 +10,16 @@
 (function () {
 	'use strict';
 
+	// The button lives on the page editor, which doesn't load the module CSS —
+	// inject the one rule we need (a smaller icon) once.
+	(function injectStyle() {
+		if (document.getElementById('ml-lib-pick-style')) return;
+		var s = document.createElement('style');
+		s.id = 'ml-lib-pick-style';
+		s.textContent = '.ml-lib-pick .fa{font-size:.78em}';
+		document.head.appendChild(s);
+	})();
+
 	function openPicker(btn) {
 		var url = btn.getAttribute('data-picker-url');
 		if (!url) return;
