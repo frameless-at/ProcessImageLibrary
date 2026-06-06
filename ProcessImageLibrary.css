@@ -214,10 +214,11 @@
 .ml-root--picker .ml-card {
 	position: relative;
 }
-/* Selection checkbox overlay on a masonry tile (top-left). */
+/* Selection checkbox overlay on a masonry tile — bottom-left, clear of the
+   replace / delete icons (top) and the duplicate badge (bottom-right). */
 .ml-card-select {
 	position: absolute;
-	top: 6px;
+	bottom: 6px;
 	left: 6px;
 	z-index: 3;
 	background: rgba(255, 255, 255, 0.85);

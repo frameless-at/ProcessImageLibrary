@@ -59,27 +59,19 @@
 		else dlg.setAttribute('open', '');
 	}
 
-	// Refresh one image field in place: re-fetch the current edit page and
-	// swap just this field's wrapper, so other fields' unsaved edits remain.
-	// Falls back to a notice (never an automatic reload that would discard
-	// unsaved work).
+	// Refresh just this image field in place via ProcessWire's own native
+	// field reload (InputfieldReloadEvent): it re-fetches the field over ajax
+	// AND re-runs InputfieldsInit, so InputfieldImage rebuilds its thumbnails
+	// correctly. Other fields' unsaved edits are untouched. A naive DOM swap
+	// would leave empty placeholders because the field's init scripts wouldn't
+	// run — this avoids that entirely.
 	function reloadField(field) {
-		var id = 'wrap_Inputfield_' + field;
-		var wrap = document.getElementById(id);
-		if (!wrap) { notice(field); return; }
-		fetch(location.href, { credentials: 'same-origin' })
-			.then(function (r) { return r.text(); })
-			.then(function (html) {
-				var doc = new DOMParser().parseFromString(html, 'text/html');
-				var fresh = doc.getElementById(id);
-				if (!fresh) { notice(field); return; }
-				wrap.replaceWith(fresh);
-				// Re-init PW's InputfieldImage JS on the new nodes.
-				if (window.jQuery) {
-					try { window.jQuery(document).trigger('reloaded', [window.jQuery(fresh)]); } catch (e) {}
-				}
-			})
-			.catch(function () { notice(field); });
+		var wrap = document.getElementById('wrap_Inputfield_' + field);
+		if (wrap && window.jQuery) {
+			window.jQuery(wrap).trigger('reload');
+			return;
+		}
+		notice();
 	}
 
 	function notice() {
