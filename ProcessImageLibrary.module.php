@@ -5458,6 +5458,7 @@ class ProcessImageLibrary extends Process {
 			'field'          => $filters['field'],
 			'no_desc'        => $filters['no_desc'] ? '1' : '',
 			'no_tags'        => $filters['no_tags'] ? '1' : '',
+			'dupes'          => !empty($filters['dupes']) ? '1' : '',
 			'p'              => $page > 1 ? (string) $page : '',
 			'sort'           => ($sort !== '' && $sort !== $defSort) ? $sort : '',
 			'dir'            => ($dir !== '' && $dir !== $defDir) ? $dir : '',
