@@ -673,16 +673,32 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Add failed: ' . $e->getMessage());
 		}
 
-		// Carry the source caption / tags over as a sensible default (current
-		// language; best effort — never fail the assign over this).
+		// Carry the source metadata over: caption, tags, AND every custom
+		// subfield the target field shares with the source (by name). Each is
+		// copied language-aware (all languages on a multilang install). Best
+		// effort — never fail the assign over this.
 		$new = $images->last();
 		if ($new) {
 			try {
-				$desc = (string) $srcImg->get('description');
-				$tags = (string) $srcImg->get('tags');
+				$copy = ['description', 'tags'];
+				$srcCustoms = $this->getCustomByField()[$srcField] ?? [];
+				foreach (($this->getCustomByField()[$tgtField] ?? []) as $cName) {
+					if (in_array($cName, $srcCustoms, true)) $copy[] = $cName;
+				}
 				$touched = false;
-				if ($desc !== '') { $new->description = $desc; $touched = true; }
-				if ($tags !== '') { $new->tags = $tags; $touched = true; }
+				foreach ($copy as $sf) {
+					$langs = $this->readLangValues($srcImg, $sf);   // null on single-lang
+					if ($langs !== null) {
+						$this->applyLangValues($new, $sf, $langs);
+						$touched = true;
+					} else {
+						$val = $srcImg->get($sf);
+						if ($val !== null && $val !== '') {
+							$new->set($sf, $val);
+							$touched = true;
+						}
+					}
+				}
 				if ($touched) $tgtPage->save($tgtField);
 			} catch (\Throwable $e) {}
 		}
