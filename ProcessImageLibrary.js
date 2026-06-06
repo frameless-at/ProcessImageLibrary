@@ -739,6 +739,15 @@
 			};
 		}
 
+		// Grow a duplicate-editor textarea to fit its content (one line
+		// minimum), capped at ~30vh so a long caption scrolls instead of
+		// pushing the popup off-screen.
+		function autosizeDup(el) {
+			el.style.height = 'auto';
+			var cap = Math.round(window.innerHeight * 0.3);
+			el.style.height = Math.min(el.scrollHeight, cap) + 'px';
+		}
+
 		// Per-copy duplicate editor. When an image has byte-identical
 		// twins, editing its description / tags opens THIS popup instead
 		// of the single-cell one: it lists every copy with its OWN current
@@ -826,6 +835,7 @@
 				var list = document.createElement('div');
 				list.className = 'ml-dup-editor-list';
 				var sourceInput = null;
+				var editableCount = d.members.filter(function (m) { return m.editable; }).length;
 				d.members.forEach(function (m) {
 					var row = document.createElement('div');
 					row.className = 'ml-dup-editor-row';
@@ -854,13 +864,19 @@
 
 					var field;
 					if (subfield === 'tags') {
+						// Tags are a single token line — a one-line input
+						// (full width) rather than a multi-line textarea.
 						field = document.createElement('input');
 						field.type = 'text';
+						field.className = 'ml-dup-editor-input ml-dup-editor-tags uk-input';
 					} else {
+						// Description grows from one line to fit its text,
+						// capped, so empty / short copies stay compact.
 						field = document.createElement('textarea');
-						field.rows = 2;
+						field.rows = 1;
+						field.className = 'ml-dup-editor-input uk-textarea';
+						field.addEventListener('input', function () { autosizeDup(field); });
 					}
-					field.className = 'ml-dup-editor-input uk-textarea';
 					field.value = m.value || '';
 					if (!m.editable) {
 						field.disabled = true;
@@ -871,30 +887,37 @@
 							pageId: m.pageId, field: m.fieldName, basename: m.basename
 						});
 					}
+					row.appendChild(field);
+					if (field.tagName === 'TEXTAREA') autosizeDup(field);
 
-					var inputWrap = document.createElement('div');
-					inputWrap.className = 'ml-dup-editor-inputwrap';
-					inputWrap.appendChild(field);
-
-					if (m.editable) {
-						var applyBtn = document.createElement('button');
-						applyBtn.type = 'button';
-						applyBtn.className = 'ml-dup-editor-apply uk-button uk-button-link';
-						applyBtn.textContent = '→ ' + (labels.dupApplyRow || 'Use this text for all copies');
-						applyBtn.addEventListener('click', function () {
-							var v = field.value;
-							rows.forEach(function (rr) {
-								if (rr.input !== field) rr.input.value = v;
-							});
-						});
-						inputWrap.appendChild(applyBtn);
-					} else {
+					// Footer line under the field: the per-copy "use this
+					// text for all" action (only when more than one copy is
+					// editable), or the read-only note. Kept on its own line
+					// so the field always spans the full popup width.
+					var actions = document.createElement('div');
+					actions.className = 'ml-dup-editor-actions';
+					if (!m.editable) {
 						var ro = document.createElement('span');
 						ro.className = 'ml-dup-editor-ro';
 						ro.textContent = '(' + (labels.dupReadonly || 'not editable') + ')';
-						inputWrap.appendChild(ro);
+						actions.appendChild(ro);
+					} else if (editableCount > 1) {
+						var applyBtn = document.createElement('button');
+						applyBtn.type = 'button';
+						applyBtn.className = 'ml-dup-editor-apply uk-button uk-button-link';
+						applyBtn.textContent = '↳ ' + (labels.dupApplyRow || 'Use this text for all copies');
+						applyBtn.addEventListener('click', function () {
+							var v = field.value;
+							rows.forEach(function (rr) {
+								if (rr.input !== field) {
+									rr.input.value = v;
+									if (rr.input.tagName === 'TEXTAREA') autosizeDup(rr.input);
+								}
+							});
+						});
+						actions.appendChild(applyBtn);
 					}
-					row.appendChild(inputWrap);
+					if (actions.childNodes.length) row.appendChild(actions);
 					list.appendChild(row);
 					if (m.isSource && m.editable) sourceInput = field;
 				});

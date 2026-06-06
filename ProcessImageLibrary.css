@@ -893,25 +893,39 @@ textarea.ml-cell-input {
 	color: var(--pw-muted-color, #999);
 	white-space: nowrap;
 }
-.ml-dup-editor-inputwrap {
-	display: flex;
-	align-items: flex-start;
-	gap: 0.5rem;
-}
+/* The field always spans the full popup width; the per-copy action sits
+   on its own line beneath it (so nothing squeezes the input on mobile). */
 .ml-dup-editor-input {
-	flex: 1 1 auto;
-	min-width: 0;
+	display: block;
+	width: 100%;
+	box-sizing: border-box;
+}
+textarea.ml-dup-editor-input {
+	min-height: 2.2em;
+	line-height: 1.35;
+	resize: none;          /* height is managed by autosize */
+	overflow-y: auto;
+}
+.ml-dup-editor-tags {
+	height: auto;
 }
 .ml-dup-editor-input:disabled {
 	opacity: 0.6;
 }
+.ml-dup-editor-actions {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 0.2rem;
+	min-height: 1.2em;
+}
 .ml-dup-editor-apply {
-	flex: 0 0 auto;
-	white-space: nowrap;
 	padding: 0;
+	min-height: 0;
+	line-height: 1.2;
+	font-size: 0.85em;
+	white-space: nowrap;
 }
 .ml-dup-editor-ro {
-	flex: 0 0 auto;
 	color: var(--pw-muted-color, #999);
 	font-size: 0.85em;
 	white-space: nowrap;
