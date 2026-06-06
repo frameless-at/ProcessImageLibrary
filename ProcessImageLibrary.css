@@ -727,8 +727,13 @@ textarea.ml-cell-input {
 	margin-bottom: 1rem;
 }
 .ml-dups-summary,
-.ml-dups-progress {
+.ml-dups-progress,
+.ml-dups-reclaim-progress {
 	color: var(--pw-muted-color, #555);
+}
+.ml-dups-reclaimed {
+	color: var(--pw-success-color, #2c7a3f);
+	font-weight: 600;
 }
 .ml-dup-cluster {
 	display: flex;

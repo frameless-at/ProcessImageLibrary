@@ -964,7 +964,13 @@ class ProcessImageLibrary extends Process {
 		$lockSet = $this->loadLockSet();
 
 		$redundant = 0;
-		foreach ($clusters as $cl) $redundant += count($cl['members']) - 1;
+		$potentialBytes = 0;
+		foreach ($clusters as $cl) {
+			$n = count($cl['members']);
+			$redundant += $n - 1;
+			$potentialBytes += (int) ($cl['members'][0]['filesize'] ?? 0) * ($n - 1);
+		}
+		$reclaimedBytes = $this->totalReclaimedBytes();
 
 		$out = '<div class="ml-dups">';
 
@@ -984,8 +990,26 @@ class ProcessImageLibrary extends Process {
 				count($clusters), $redundant
 			);
 		}
-		$out .= '<span class="ml-dups-summary">' . $san->entities($summary) . '</span>'
-			. '</div>';
+		$out .= '<span class="ml-dups-summary">' . $san->entities($summary) . '</span>';
+
+		// Space-reclaim controls: collapse exact copies to one inode. Show
+		// the still-reclaimable amount (gross potential minus what's already
+		// shared), so the button disappears once everything is collapsed.
+		$remainingBytes = max(0, $potentialBytes - $reclaimedBytes);
+		if ($scanned && $clusters && $remainingBytes > 0) {
+			$out .= '<button type="button" class="uk-button uk-button-default ml-dups-reclaim">'
+				. $san->entities(sprintf($this->_('Reclaim space (~%s)'), $this->formatFilesize($remainingBytes)))
+				. '</button>'
+				. '<span class="ml-dups-reclaim-progress" hidden></span>';
+		}
+		if ($reclaimedBytes > 0) {
+			$out .= '<span class="ml-dups-reclaimed">'
+				. $san->entities(sprintf($this->_('%s reclaimed'), $this->formatFilesize($reclaimedBytes)))
+				. '</span>'
+				. '<button type="button" class="uk-button uk-button-link ml-dups-expand">'
+				. $san->entities($this->_('Un-share')) . '</button>';
+		}
+		$out .= '</div>';
 
 		// Cluster cards. The lead copy's description is a normal editable
 		// cell — the existing inline editor opens on it — and "apply to all"
@@ -4160,6 +4184,8 @@ class ProcessImageLibrary extends Process {
 			'scanHashesUrl' => $this->wire('page')->url . 'scan-hashes/',
 			'propagateUrl'  => $this->wire('page')->url . 'propagate/',
 			'metaLockUrl'   => $this->wire('page')->url . 'meta-lock/',
+			'reclaimUrl'    => $this->wire('page')->url . 'reclaim/',
+			'expandUrl'     => $this->wire('page')->url . 'expand/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -4220,6 +4246,12 @@ class ProcessImageLibrary extends Process {
 				// Propagate result (JS substitutes %d).
 				'propagated'       => $this->_('Applied to %d cop(y/ies)'),
 				'propagatedLocked' => $this->_('(%d kept own)'),
+				// Space reclaim (JS substitutes %1$d / %2$d).
+				'working'          => $this->_('Working…'),
+				'reclaimProgress'  => $this->_('Reclaiming… %1$d / %2$d'),
+				'reclaimConfirm'   => $this->_('Collapse identical copies to one shared file to save disk space? This is reversible (Un-share).'),
+				'expandProgress'   => $this->_('Un-sharing… %1$d / %2$d'),
+				'expandConfirm'    => $this->_('Give every collapsed copy its own file again? This undoes the space saving.'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
 				'importing'        => $this->_('Importing…'),
@@ -5443,6 +5475,55 @@ class ProcessImageLibrary extends Process {
 
 		$offset = (int) $this->wire('input')->post('offset');
 		$result = $this->scanHashes($offset);
+		$result['ok'] = true;
+		return $this->jsonResponse($result);
+	}
+
+	/**
+	 * AJAX endpoint: reclaim disk by collapsing exact-duplicate copies onto a
+	 * single canonical inode (hardlinks), one time-budgeted chunk of clusters
+	 * per call. Re-verifies byte-identity before linking and records a
+	 * reversible manifest. POST + CSRF.
+	 */
+	public function ___executeReclaim() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		@set_time_limit(60);
+		$result = $this->reclaimAll((int) $this->wire('input')->post('offset'));
+		$result['ok'] = true;
+		return $this->jsonResponse($result);
+	}
+
+	/**
+	 * AJAX endpoint: un-share — give every collapsed copy its own independent
+	 * file again and clear the manifest, one time-budgeted chunk per call.
+	 * The reverse of reclaim. POST + CSRF.
+	 */
+	public function ___executeExpand() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		@set_time_limit(60);
+		$result = $this->expandManifest((int) $this->wire('input')->post('offset'));
 		$result['ok'] = true;
 		return $this->jsonResponse($result);
 	}

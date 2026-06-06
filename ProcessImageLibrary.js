@@ -3007,6 +3007,57 @@
 			});
 		}
 
+		// -- Space reclaim (hardlink) + un-share -----------------------
+		// Generic chunked runner: POST {offset} until the server reports
+		// complete, showing progress, then re-render so the savings update.
+		function runDedupJob(url, btn, progress, fmt, confirmMsg) {
+			if (!btn || btn.disabled || !url) return;
+			if (confirmMsg && !window.confirm(confirmMsg)) return;
+			btn.disabled = true;
+			if (progress) { progress.hidden = false; progress.textContent = (labels.working || 'Working…'); }
+			(function chunk(offset) {
+				var fd = new FormData();
+				fd.append('offset', String(offset));
+				appendCsrf(fd);
+				fetch(url, {
+					method: 'POST', credentials: 'same-origin',
+					headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
+				}).then(function (r) { return r.json(); }).then(function (d) {
+					if (!d || !d.ok) throw new Error('job failed');
+					var total = (d.totalClusters != null ? d.totalClusters : d.total) | 0;
+					var done  = d.nextOffset | 0;
+					if (progress && fmt) {
+						progress.textContent = fmt.replace('%1$d', Math.min(done, total)).replace('%2$d', total);
+					}
+					if (!d.complete) chunk(done);
+					else setTimeout(function () { replaceFromQs(location.search, false); }, 600);
+				}).catch(function () {
+					btn.disabled = false;
+					if (progress) progress.textContent = labels.error || 'Failed';
+				});
+			})(0);
+		}
+		results && results.addEventListener('click', function (e) {
+			var reclaim = e.target.closest && e.target.closest('.ml-dups-reclaim');
+			if (reclaim) {
+				e.preventDefault();
+				runDedupJob(config.reclaimUrl, reclaim,
+					results.querySelector('.ml-dups-reclaim-progress'),
+					labels.reclaimProgress || 'Reclaiming… %1$d / %2$d',
+					labels.reclaimConfirm || 'Collapse identical copies to one shared file to save disk space? This is reversible (Un-share).');
+				return;
+			}
+			var expand = e.target.closest && e.target.closest('.ml-dups-expand');
+			if (expand) {
+				e.preventDefault();
+				runDedupJob(config.expandUrl, expand,
+					results.querySelector('.ml-dups-reclaim-progress'),
+					labels.expandProgress || 'Un-sharing… %1$d / %2$d',
+					labels.expandConfirm || 'Give every collapsed copy its own file again? This undoes the space saving.');
+				return;
+			}
+		});
+
 		// -- Bookmarks -------------------------------------------------
 		// Tab strip above the filter bar; each tab is a saved filter
 		// combination. State lives in $user->meta via the existing
