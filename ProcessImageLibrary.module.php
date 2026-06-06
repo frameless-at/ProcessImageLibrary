@@ -3021,7 +3021,7 @@ class ProcessImageLibrary extends Process {
 		$keep = [];
 		foreach ($params as $k => $v) {
 			$k = (string) $k;
-			$ok = in_array($k, ['q', 'template', 'field', 'tags', 'no_desc', 'no_tags'], true)
+			$ok = in_array($k, ['q', 'template', 'field', 'tags', 'no_desc', 'no_tags', 'dupes'], true)
 				|| strncmp($k, 'no_custom_', 10) === 0;
 			if (!$ok) continue;
 			if (is_array($v)) {
@@ -3434,6 +3434,7 @@ class ProcessImageLibrary extends Process {
 			|| !empty($filters['no_desc'])
 			|| !empty($filters['no_tags'])
 			|| !empty($filters['no_custom'])
+			|| !empty($filters['dupes'])
 			|| !empty($filters['tags']);
 		if (!$anyFilter) {
 			return ['vanished' => [], 'newTotal' => -1];
@@ -3501,6 +3502,7 @@ class ProcessImageLibrary extends Process {
 			'no_desc'        => (bool) $input->get('no_desc'),
 			'no_tags'        => (bool) $input->get('no_tags'),
 			'no_custom'      => $noCustom,
+			'dupes'          => (bool) $input->get('dupes'),
 			'tags'           => $tags,
 		];
 	}
@@ -3633,10 +3635,15 @@ class ProcessImageLibrary extends Process {
 		$noDesc   = $filters['no_desc'];
 		$noTags   = $filters['no_tags'];
 		$noCustom = $filters['no_custom'] ?? [];
+		$dupes    = !empty($filters['dupes']);
 
-		if (!$hasQ && $tplName === '' && $field === '' && !$noDesc && !$noTags && !$noCustom) {
+		if (!$hasQ && $tplName === '' && $field === '' && !$noDesc && !$noTags && !$noCustom && !$dupes) {
 			return $rows;
 		}
+
+		// "Duplicates only" — keep rows whose image is a byte-identical copy
+		// (its key is in the duplicate set). Needs a scan; empty before one.
+		$dupKeys = $dupes ? $this->loadDuplicateKeys() : [];
 
 		// Template filter operates at PHP level now (was SQL before caching),
 		// so we resolve the name → id once and compare to row['templateId'].
@@ -3647,8 +3654,9 @@ class ProcessImageLibrary extends Process {
 		}
 
 		return array_values(array_filter($rows, function ($r) use (
-			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $noCustom
+			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeys
 		) {
+			if ($dupes && !isset($dupKeys[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']])) return false;
 			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
 			if ($field !== '' && $r['fieldName'] !== $field) return false;
 
@@ -4517,7 +4525,7 @@ class ProcessImageLibrary extends Process {
 		if (!empty($filters['tags']) && is_array($filters['tags'])) {
 			$out['tags'] = implode(',', $filters['tags']);
 		}
-		foreach (['no_desc', 'no_tags'] as $k) {
+		foreach (['no_desc', 'no_tags', 'dupes'] as $k) {
 			if (!empty($filters[$k])) $out[$k] = '1';
 		}
 		if (!empty($filters['no_custom']) && is_array($filters['no_custom'])) {
@@ -4674,6 +4682,16 @@ class ProcessImageLibrary extends Process {
 			}
 			$outer->add($cb);
 		}
+
+		// "Duplicates only" — narrow the current view (table / gallery) to
+		// images that are byte-identical copies of another. Needs a scan
+		// (run once from the Duplicates tab); empty before that.
+		$dupCb = $modules->get('InputfieldCheckbox');
+		$dupCb->name        = 'dupes';
+		$dupCb->label       = $this->_('Duplicates');
+		$dupCb->columnWidth = 25;
+		if (!empty($filters['dupes'])) $dupCb->attr('checked', 'checked');
+		$outer->add($dupCb);
 
 		// Apply + Reset as raw UIkit buttons inside an InputfieldMarkup.
 		// PW's InputfieldSubmit / InputfieldButton render their <button>

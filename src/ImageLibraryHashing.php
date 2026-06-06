@@ -188,6 +188,41 @@ trait ImageLibraryHashing {
 	}
 
 	/**
+	 * Set of every image that is a byte-identical duplicate of another, keyed
+	 * "pageId\0fieldName\0basename" — i.e. every member of every exact cluster.
+	 * Used by the "Duplicates" view filter. Empty before a scan.
+	 *
+	 * @return array<string,bool>
+	 */
+	protected function loadDuplicateKeys(): array {
+		$this->ensureHashTable();
+		$db = $this->wire('database');
+		$keys = [];
+		try {
+			$hashes = [];
+			$stmt = $db->query(
+				'SELECT content_hash FROM `' . self::HASH_TABLE . '`
+				 WHERE content_hash IS NOT NULL
+				 GROUP BY content_hash HAVING COUNT(*) > 1'
+			);
+			while (($h = $stmt->fetchColumn()) !== false) $hashes[] = (string) $h;
+			if ($hashes) {
+				$in   = implode(',', array_fill(0, count($hashes), '?'));
+				$rows = $db->prepare(
+					'SELECT page_id, field_name, basename
+					 FROM `' . self::HASH_TABLE . '` WHERE content_hash IN (' . $in . ')'
+				);
+				$rows->execute($hashes);
+				while ($r = $rows->fetch(\PDO::FETCH_ASSOC)) {
+					$keys[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']] = true;
+				}
+			}
+		} catch (\Throwable $e) {
+		}
+		return $keys;
+	}
+
+	/**
 	 * Exact byte hash of a file, or null if unreadable.
 	 */
 	protected function computeContentHash(string $path): ?string {
