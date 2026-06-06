@@ -543,6 +543,98 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * AJAX endpoint: assign an EXISTING library image to a target page's image
+	 * field — "use this image here" — without the user re-uploading it. Native
+	 * FieldtypeImage can only reference files in its own page's folder, so the
+	 * only way is to copy the bytes in; we do that for the user and save just
+	 * that one field (which is form-safe: a later page save won't drop it). The
+	 * on-save auto-hash hook then hardlinks the fresh copy to the byte-identical
+	 * original, so it costs ~no extra disk. POST + CSRF. Returns { ok, basename }.
+	 */
+	public function ___executeAssign() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input = $this->wire('input');
+		$san   = $this->wire('sanitizer');
+		$srcPid   = (int) $input->post('srcPageId');
+		$srcField = $san->fieldName((string) $input->post('srcField'));
+		$srcBase  = basename((string) $input->post('srcBasename'));
+		$tgtPid   = (int) $input->post('targetPageId');
+		$tgtField = $san->fieldName((string) $input->post('targetField'));
+		if (!$srcPid || $srcField === '' || $srcBase === '' || !$tgtPid || $tgtField === '') {
+			return $this->jsonError('Missing parameter');
+		}
+
+		// Target: an editable page whose template carries this image field.
+		$tgtPage = $this->wire('pages')->get($tgtPid);
+		if (!$tgtPage->id) return $this->jsonError('Target page not found', 404);
+		if (!$tgtPage->editable()) return $this->jsonError('Target page not editable', 403);
+		$field = $this->wire('fields')->get($tgtField);
+		if (!$field || !($field->type instanceof FieldtypeImage)) {
+			return $this->jsonError('Target field is not an image field');
+		}
+		if (!$tgtPage->template->hasField($tgtField)) {
+			return $this->jsonError('Target page has no such field');
+		}
+
+		// Source image file (must exist on disk to copy).
+		$srcPage = $this->wire('pages')->get($srcPid);
+		if (!$srcPage->id) return $this->jsonError('Source page not found', 404);
+		$srcImg = $this->resolvePageimage($srcPage, $srcField, $srcBase);
+		if (!$srcImg) return $this->jsonError('Source image not found', 404);
+		$srcPath = (string) $srcImg->filename;
+		if ($srcPath === '' || !is_file($srcPath)) return $this->jsonError('Source file missing', 404);
+
+		$tgtPage->of(false);
+		$images   = $tgtPage->get($tgtField);
+		$maxFiles = (int) $field->maxFiles;
+		if ($maxFiles === 1) {
+			$images->removeAll();                         // single-image field → replace
+		} elseif ($maxFiles > 0 && count($images) >= $maxFiles) {
+			return $this->jsonError(sprintf(
+				$this->_('Field already holds its maximum of %d image(s)'), $maxFiles
+			));
+		}
+
+		try {
+			$images->add($srcPath);
+			$tgtPage->save($tgtField);
+		} catch (\Throwable $e) {
+			return $this->jsonError('Add failed: ' . $e->getMessage());
+		}
+
+		// Carry the source caption / tags over as a sensible default (current
+		// language; best effort — never fail the assign over this).
+		$new = $images->last();
+		if ($new) {
+			try {
+				$desc = (string) $srcImg->get('description');
+				$tags = (string) $srcImg->get('tags');
+				$touched = false;
+				if ($desc !== '') { $new->description = $desc; $touched = true; }
+				if ($tags !== '') { $new->tags = $tags; $touched = true; }
+				if ($touched) $tgtPage->save($tgtField);
+			} catch (\Throwable $e) {}
+		}
+
+		$this->wire('cache')->deleteFor($this);
+		return $this->jsonResponse([
+			'ok'       => true,
+			'basename' => $new ? (string) $new->basename : '',
+		]);
+	}
+
+	/**
 	 * Pages::saved listener. Drops the module's row-cache entries
 	 * whenever a saved page hosts one of the managed image fields,
 	 * so the table picks up changes made outside the module (e.g.
