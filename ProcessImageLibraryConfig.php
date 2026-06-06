@@ -13,6 +13,32 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 	public function getInputfields() {
 		$inputfields = parent::getInputfields();
 		$modules = $this->wire('modules');
+		$instance = $modules->get('ProcessImageLibrary');
+
+		// Manual dedup triggers (scan / revert) arrive as a GET action on this
+		// config page, guarded by a CSRF token in the link. Run the action,
+		// flash a result, then redirect to the clean config URL so a reload
+		// doesn't re-fire it.
+		$session    = $this->wire('session');
+		$tokenName  = $session->CSRF->getTokenName();
+		$tokenValue = $session->CSRF->getTokenValue();
+		$action     = (string) $this->wire('input')->get('ml_dedup');
+		if ($action !== '' && $instance instanceof ProcessImageLibrary
+			&& (string) $this->wire('input')->get($tokenName) === $tokenValue) {
+			if ($action === 'scan') {
+				$s = $instance->runMaintenanceNow(20);
+				$this->message(sprintf(
+					$this->_('Scan complete — %1$s reclaimed across %2$d shared file(s).'),
+					$s['reclaimedHuman'], (int) $s['linkedCount']
+				));
+			} elseif ($action === 'revert') {
+				$n = $instance->revertAllNow(20);
+				$this->message(sprintf(
+					$this->_('Revert complete — %d file(s) un-shared.'), (int) $n
+				));
+			}
+			$session->redirect($this->wire('config')->urls->admin . 'module/edit?name=ProcessImageLibrary');
+		}
 
 		// --- Thumbnail rendering ---
 		$fs = $modules->get('InputfieldFieldset');
@@ -227,6 +253,41 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$f->value = is_array($val) ? $val : [];
 		$f->notes = $this->_('Default: none');
 		$f->columnWidth = 50;
+		$fs->add($f);
+
+		$inputfields->add($fs);
+
+		// --- Deduplication ---
+		$fs = $modules->get('InputfieldFieldset');
+		$fs->label = $this->_('Deduplication');
+		$fs->description = $this->_('Byte-identical images are fingerprinted and collapsed to one shared file (hardlink) automatically — on upload and via an hourly background pass — so duplicate copies cost disk space only once. It is lossless and reversible. The controls below show the current saving and let you run the pass now or undo it.');
+
+		$san   = $this->wire('sanitizer');
+		$stats = ($instance instanceof ProcessImageLibrary)
+			? $instance->dedupStats()
+			: ['reclaimedHuman' => '0', 'linkedCount' => 0, 'clusterCount' => 0];
+
+		$base      = $this->wire('config')->urls->admin . 'module/edit?name=ProcessImageLibrary';
+		$scanUrl   = $base . '&ml_dedup=scan&'   . $tokenName . '=' . urlencode($tokenValue);
+		$revertUrl = $base . '&ml_dedup=revert&' . $tokenName . '=' . urlencode($tokenValue);
+		$revertConfirm = $this->_('Give every collapsed copy its own independent file again? This undoes the space saving (the next pass will re-collapse them).');
+
+		$f = $modules->get('InputfieldMarkup');
+		$f->label = $this->_('Status');
+		$f->value =
+			'<ul class="uk-list uk-list-divider" style="margin-top:0">'
+			. '<li>' . $san->entities($this->_('Disk space reclaimed')) . ': <strong>' . $san->entities((string) $stats['reclaimedHuman']) . '</strong></li>'
+			. '<li>' . $san->entities($this->_('Copies sharing a file')) . ': <strong>' . (int) $stats['linkedCount'] . '</strong></li>'
+			. '<li>' . $san->entities($this->_('Exact-duplicate clusters')) . ': <strong>' . (int) $stats['clusterCount'] . '</strong></li>'
+			. '</ul>'
+			. '<p>'
+			. '<a class="ui-button uk-button uk-button-primary" href="' . $san->entities($scanUrl) . '">'
+			. '<i class="fa fa-refresh" aria-hidden="true"></i> ' . $san->entities($this->_('Scan & reclaim now')) . '</a> '
+			. '<a class="ui-button uk-button uk-button-default" href="' . $san->entities($revertUrl) . '"'
+			. ' onclick="return confirm(' . $san->entities(json_encode($revertConfirm, JSON_UNESCAPED_SLASHES)) . ')">'
+			. '<i class="fa fa-undo" aria-hidden="true"></i> ' . $san->entities($this->_('Revert (un-share all)')) . '</a>'
+			. '</p>'
+			. '<p class="description">' . $san->entities($this->_('A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.')) . '</p>';
 		$fs->add($f);
 
 		$inputfields->add($fs);

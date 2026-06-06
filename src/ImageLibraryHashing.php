@@ -548,6 +548,18 @@ trait ImageLibraryHashing {
 		}
 	}
 
+	/** Number of copies currently collapsed onto a shared inode (manifest rows). */
+	protected function countHardlinks(): int {
+		$this->ensureHardlinkTable();
+		try {
+			return (int) $this->wire('database')->query(
+				'SELECT COUNT(*) FROM `' . self::HARDLINK_TABLE . '`'
+			)->fetchColumn();
+		} catch (\Throwable $e) {
+			return 0;
+		}
+	}
+
 	/** True if both paths already point at the same inode (already linked). */
 	protected function sameInode(string $a, string $b): bool {
 		$ia = @fileinode($a); $ib = @fileinode($b);

@@ -491,6 +491,57 @@ class ProcessImageLibrary extends Process {
 		$this->runMaintenancePass(8);
 	}
 
+	// ------------------------------------------------------------------
+	// Public hooks for the module config page (status + manual triggers).
+	// ------------------------------------------------------------------
+
+	/**
+	 * Deduplication status for the config page: reclaimed disk space (raw +
+	 * human-readable), how many copies are currently sharing an inode, and how
+	 * many exact-duplicate clusters exist right now.
+	 *
+	 * @return array{reclaimedBytes:int,reclaimedHuman:string,linkedCount:int,clusterCount:int}
+	 */
+	public function dedupStats(): array {
+		$bytes = $this->totalReclaimedBytes();
+		return [
+			'reclaimedBytes' => $bytes,
+			'reclaimedHuman' => $this->formatFilesize($bytes),
+			'linkedCount'    => $this->countHardlinks(),
+			'clusterCount'   => count($this->loadExactClusters()['clusters']),
+		];
+	}
+
+	/**
+	 * Manual "scan now" trigger: run one bounded fingerprint + reclaim pass
+	 * immediately (the same work LazyCron does hourly). Returns the resulting
+	 * stats so the caller can report what changed.
+	 */
+	public function runMaintenanceNow(int $seconds = 20): array {
+		@set_time_limit($seconds + 30);
+		$this->runMaintenancePass($seconds);
+		return $this->dedupStats();
+	}
+
+	/**
+	 * Manual "revert" trigger: un-share every collapsed copy (give each its own
+	 * independent file again) and clear the manifest — the reverse of reclaim.
+	 * Time-budgeted; loops the chunked un-share until done or the budget runs
+	 * out. Returns the total number of files expanded.
+	 */
+	public function revertAllNow(int $seconds = 20): int {
+		@set_time_limit($seconds + 30);
+		$stop = microtime(true) + max(1, $seconds);
+		$expanded = 0;
+		$off = 0;
+		do {
+			$r = $this->expandManifest($off);
+			$expanded += (int) ($r['expanded'] ?? 0);
+			$off = (int) $r['nextOffset'];
+		} while (empty($r['complete']) && microtime(true) < $stop);
+		return $expanded;
+	}
+
 	/**
 	 * Pages::saved listener. Drops the module's row-cache entries
 	 * whenever a saved page hosts one of the managed image fields,
