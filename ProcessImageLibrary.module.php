@@ -500,7 +500,6 @@ class ProcessImageLibrary extends Process {
 		$btn->attr('value', $label);
 		$btn->attr('type', 'button');
 		$btn->icon = 'clone';
-		$btn->setSecondary(true);
 		$btn->addClass('ml-lib-pick');
 		$btn->attr('data-picker-url', $pickerUrl);
 		$btn->attr('data-field', $fname);
