@@ -554,7 +554,6 @@
 			return {
 				element: ta,
 				getValue: function () { return ta.value; },
-				setValue: function (v) { ta.value = v; },
 				focus:    function () { ta.focus(); ta.select(); }
 			};
 		}
@@ -568,7 +567,6 @@
 			return {
 				element: input,
 				getValue: function () { return input.value; },
-				setValue: function (v) { input.value = v; },
 				focus:    function () { input.focus(); input.select(); }
 			};
 		}
@@ -734,275 +732,11 @@
 					var sel = wrap.querySelectorAll('input[type="checkbox"]:checked');
 					return Array.prototype.map.call(sel, function (cb) { return cb.value; }).join(' ');
 				},
-				setValue: function (v) {
-					var set = Object.create(null);
-					String(v).split(/\s+/).filter(Boolean).forEach(function (t) { set[t] = true; });
-					wrap.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
-						cb.checked = !!set[cb.value];
-					});
-				},
 				focus: function () {
 					var first = wrap.querySelector('input[type="checkbox"]');
 					if (first) first.focus();
 				}
 			};
-		}
-
-		// Grow a duplicate-editor textarea to fit its content (one line
-		// minimum), capped at ~30vh so a long caption scrolls instead of
-		// pushing the popup off-screen.
-		function autosizeDup(el) {
-			el.style.height = 'auto';
-			var cap = Math.round(window.innerHeight * 0.3);
-			el.style.height = Math.min(el.scrollHeight, cap) + 'px';
-		}
-
-		// Make a reused popup widget read-only (copy on a non-editable
-		// page): disable the field itself and any inputs it contains
-		// (tag-checkbox list), and dim it.
-		function disableWidget(el) {
-			if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') {
-				el.disabled = true;
-			}
-			if (el.querySelectorAll) {
-				el.querySelectorAll('input, textarea, select').forEach(function (x) { x.disabled = true; });
-			}
-			el.classList.add('ml-dup-editor-disabled');
-		}
-
-		// Per-copy duplicate editor. When an image has byte-identical
-		// twins, editing its description / tags opens THIS popup instead
-		// of the single-cell one: it lists every copy with its OWN current
-		// text in an editable field, so the user can see each version and
-		// set them individually — or hit a copy's "use for all" to push
-		// that text into the other fields. Save writes only the copies
-		// whose text actually changed (one save per page). Copies on
-		// non-editable pages are shown read-only.
-		function openDuplicateEditor(td) {
-			if (td.classList.contains('ml-editing')) return;
-			td.classList.add('ml-editing');
-			var subfield = td.dataset.subfield;            // 'description' | 'tags'
-
-			var dialog = document.createElement('dialog');
-			dialog.className = 'ml-popup-editor ml-dup-editor';
-
-			var header = document.createElement('header');
-			header.textContent = columnLabelFor(td);
-			dialog.appendChild(header);
-
-			var body = document.createElement('div');
-			body.className = 'ml-dup-editor-body';
-			body.textContent = labels.loading || 'Loading…';
-			dialog.appendChild(body);
-
-			var footer = document.createElement('footer');
-			var cancelBtn = document.createElement('button');
-			cancelBtn.type = 'button';
-			cancelBtn.className = 'ml-popup-cancel uk-button uk-button-secondary';
-			cancelBtn.textContent = labels.cancel || 'Cancel';
-			var saveBtn = document.createElement('button');
-			saveBtn.type = 'button';
-			saveBtn.className = 'ml-popup-save uk-button uk-button-primary';
-			saveBtn.textContent = labels.save || 'Save';
-			saveBtn.disabled = true;
-			footer.appendChild(cancelBtn);
-			footer.appendChild(saveBtn);
-			dialog.appendChild(footer);
-
-			document.body.appendChild(dialog);
-			var committed = false;
-			var rows = [];   // { input, original, pageId, field, basename }
-
-			function teardown() {
-				td.classList.remove('ml-editing');
-				if (dialog.open) dialog.close();
-				dialog.remove();
-			}
-			function cancel() {
-				if (committed) return;
-				committed = true;
-				teardown();
-			}
-
-			cancelBtn.addEventListener('click', cancel);
-			dialog.addEventListener('close', function () { if (!committed) cancel(); });
-
-			// Fetch the cluster (members + each copy's current value).
-			var fd = new FormData();
-			fd.append('pageId',    td.dataset.pageId);
-			fd.append('fieldName', td.dataset.field);
-			fd.append('basename',  td.dataset.basename);
-			fd.append('subfield',  subfield);
-			appendCsrf(fd);
-			fetch(config.dupInfoUrl, {
-				method: 'POST', credentials: 'same-origin',
-				headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
-			}).then(function (r) { return r.json(); }).then(function (d) {
-				if (committed) return;
-				if (!d || !d.ok || !d.isDup || !d.members || d.members.length < 2) {
-					// Lost its twins between render and open — fall back to
-					// the normal single-cell editor.
-					teardown();
-					activateEditor(td);
-					return;
-				}
-				body.textContent = '';
-				var count = d.count | 0;
-				var heading = document.createElement('p');
-				heading.className = 'ml-dup-editor-heading';
-				heading.textContent = (labels.dupHeading
-					|| 'This file exists %d× — edit each copy or copy one text to all:').replace('%d', count);
-				body.appendChild(heading);
-
-				var list = document.createElement('div');
-				list.className = 'ml-dup-editor-list';
-				var sourceWidget = null;
-				var editableCount = d.members.filter(function (m) { return m.editable; }).length;
-				d.members.forEach(function (m) {
-					var row = document.createElement('div');
-					row.className = 'ml-dup-editor-row';
-
-					var head = document.createElement('div');
-					head.className = 'ml-dup-editor-rowhead';
-					var nameEl;
-					if (m.editUrl) {
-						nameEl = document.createElement('a');
-						nameEl.href = m.editUrl;
-						nameEl.target = '_blank';
-						nameEl.rel = 'noopener';
-					} else {
-						nameEl = document.createElement('span');
-					}
-					nameEl.className = 'ml-dup-editor-page';
-					nameEl.textContent = m.pageTitle + ' · ' + m.fieldName;
-					head.appendChild(nameEl);
-					if (m.isSource) {
-						var here = document.createElement('em');
-						here.className = 'ml-dup-editor-here';
-						here.textContent = ' (' + (labels.dupThisCopy || 'this copy') + ')';
-						head.appendChild(here);
-					}
-					row.appendChild(head);
-
-					// Reuse the SAME editor widget the single-cell popup
-					// uses, so tags get their real UI (whitelist checkboxes /
-					// autocomplete) instead of a raw text field. A detached
-					// element carries this subfield's config, cloned from the
-					// clicked cell (duplicate copies share the field family).
-					// No lang attrs → the widget stays single-language, which
-					// matches the current-language value we loaded.
-					var cell = document.createElement('div');
-					cell.dataset.subfield = subfield;
-					cell.dataset.input    = td.dataset.input || (subfield === 'tags' ? 'text' : 'textarea');
-					if (td.dataset.tagsMode)    cell.dataset.tagsMode    = td.dataset.tagsMode;
-					if (td.dataset.tagsAllowed) cell.dataset.tagsAllowed = td.dataset.tagsAllowed;
-					if (td.dataset.tagsListId)  cell.dataset.tagsListId  = td.dataset.tagsListId;
-
-					var widget = buildPopupWidget(cell, m.value || '');
-					var el = widget.element;
-					// Full-width only for real field elements; the tag
-					// checkbox list keeps its own grid layout.
-					if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
-						el.classList.add('ml-dup-editor-input');
-					}
-					if (el.tagName === 'TEXTAREA') {
-						// Description: grow from one line, don't start tall.
-						el.rows = 1;
-						el.addEventListener('input', function () { autosizeDup(el); });
-					}
-					if (!m.editable) {
-						disableWidget(el);
-						el.title = labels.dupReadonly || 'not editable';
-					} else {
-						rows.push({
-							widget: widget, original: m.value || '',
-							pageId: m.pageId, field: m.fieldName, basename: m.basename
-						});
-					}
-					row.appendChild(el);
-					if (el.tagName === 'TEXTAREA') autosizeDup(el);
-
-					// Footer line under the field: the per-copy "use this
-					// text for all" action (only when more than one copy is
-					// editable), or the read-only note. Kept on its own line
-					// so the field always spans the full popup width.
-					var actions = document.createElement('div');
-					actions.className = 'ml-dup-editor-actions';
-					if (!m.editable) {
-						var ro = document.createElement('span');
-						ro.className = 'ml-dup-editor-ro';
-						ro.textContent = '(' + (labels.dupReadonly || 'not editable') + ')';
-						actions.appendChild(ro);
-					} else if (editableCount > 1) {
-						var applyBtn = document.createElement('button');
-						applyBtn.type = 'button';
-						applyBtn.className = 'ml-dup-editor-apply uk-button uk-button-link';
-						applyBtn.textContent = '↳ ' + (labels.dupApplyRow || 'Use this text for all copies');
-						(function (srcWidget) {
-							applyBtn.addEventListener('click', function () {
-								var v = srcWidget.getValue();
-								rows.forEach(function (rr) {
-									if (rr.widget !== srcWidget && rr.widget.setValue) {
-										rr.widget.setValue(v);
-										var rel = rr.widget.element;
-										if (rel.tagName === 'TEXTAREA') autosizeDup(rel);
-									}
-								});
-							});
-						})(widget);
-						actions.appendChild(applyBtn);
-					}
-					if (actions.childNodes.length) row.appendChild(actions);
-					list.appendChild(row);
-					if (m.isSource && m.editable) sourceWidget = widget;
-				});
-				body.appendChild(list);
-				saveBtn.disabled = false;
-				if (sourceWidget) sourceWidget.focus();
-				else if (rows[0]) rows[0].widget.focus();
-			}).catch(function () {
-				if (committed) return;
-				teardown();
-				activateEditor(td);
-			});
-
-			function commit() {
-				if (committed) return;
-				// Only the copies whose text actually changed.
-				var changed = rows.filter(function (r) { return r.widget.getValue() !== r.original; });
-				if (!changed.length) { cancel(); return; }
-				committed = true;
-				saveBtn.disabled = true;
-				saveBtn.textContent = labels.saving || 'Saving…';
-
-				var saves = changed.map(function (r) {
-					return enqueueSave(r.pageId, function () {
-						return postSave({
-							pageId:    r.pageId,
-							fieldName: r.field,
-							basename:  r.basename,
-							subfield:  subfield,
-							value:     r.widget.getValue()
-						});
-					}).then(function (result) {
-						return !!(result && result.data && result.data.ok);
-					}).catch(function () { return false; });
-				});
-				Promise.all(saves).then(function () {
-					teardown();
-					// Re-render so every changed copy on screen catches up.
-					replaceFromQs(location.search, false);
-				});
-			}
-			saveBtn.addEventListener('click', commit);
-			dialog.addEventListener('keydown', function (e) {
-				if (e.key !== 'Enter') return;
-				if (e.target && e.target.tagName === 'TEXTAREA' && !(e.ctrlKey || e.metaKey)) return;
-				e.preventDefault();
-				commit();
-			});
-
-			dialog.showModal();
 		}
 
 		// Lock / unlock one placement so cluster-wide propagation leaves
@@ -1024,21 +758,6 @@
 			}).then(function (r) { return r.json(); }).then(function (d) {
 				if (!d || !d.ok) lockCb.checked = !lockCb.checked;
 			}).catch(function () { lockCb.checked = !lockCb.checked; });
-		}
-
-		// Dispatch a cell edit: a duplicate image's description / tags
-		// opens the per-copy duplicate editor (so the other copies' texts
-		// are visible and individually editable); everything else uses the
-		// single-cell popup. data-dup-count rides on the cell server-side.
-		function openCellEditor(td) {
-			var sf = td.dataset.subfield;
-			if (config.dupInfoUrl
-				&& parseInt(td.dataset.dupCount || '0', 10) >= 2
-				&& (sf === 'description' || sf === 'tags')) {
-				openDuplicateEditor(td);
-			} else {
-				activateEditor(td);
-			}
 		}
 
 		// All cell edits run through one popup. The native <dialog>
@@ -2567,7 +2286,7 @@
 				var td = e.target.closest && e.target.closest('.ml-cell-editable');
 				if (!td) return;
 				if (td.classList.contains('ml-editing')) return;
-				openCellEditor(td);
+				activateEditor(td);
 			});
 
 			// Keyboard activation: editable cells + thumb cells carry
@@ -2584,7 +2303,7 @@
 				var editTd = e.target.closest && e.target.closest('.ml-cell-editable');
 				if (editTd && e.target === editTd && !editTd.classList.contains('ml-editing')) {
 					e.preventDefault();
-					openCellEditor(editTd);
+					activateEditor(editTd);
 				}
 			});
 

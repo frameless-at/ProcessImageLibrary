@@ -766,6 +766,13 @@ class ProcessImageLibrary extends Process {
 		}
 		$this->applySort($rows, $sort, $dir);
 
+		// Duplicates filter: re-order the sorted rows so each cluster's
+		// copies sit together (grouped, not collapsed). Done after sort so
+		// column sorting still orders rows inside each cluster.
+		if (!empty($filters['dupes'])) {
+			$rows = $this->groupDuplicateRows($rows);
+		}
+
 		$pageSize   = $this->readPageSize();
 		$total      = count($rows);
 		$totalPages = max(1, (int) ceil($total / $pageSize));
@@ -872,6 +879,35 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Re-order an already-sorted, duplicates-only row set so the copies of
+	 * each cluster sit together. Buckets by content hash, keeping the input
+	 * (sorted) order inside each cluster; clusters appear in order of first
+	 * appearance. Purely a grouping pass — it neither adds nor drops rows, so
+	 * the count / pagination are unchanged.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function groupDuplicateRows(array $rows): array {
+		$map     = $this->loadDuplicateKeyHashes();
+		$buckets = [];   // hash => [rows]
+		$order   = [];   // hash => first-seen index
+		$i = 0;
+		foreach ($rows as $r) {
+			$h = $map[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			if ($h === null) continue;
+			if (!isset($buckets[$h])) { $buckets[$h] = []; $order[$h] = $i++; }
+			$buckets[$h][] = $r;
+		}
+		asort($order);
+		$out = [];
+		foreach (array_keys($order) as $h) {
+			foreach ($buckets[$h] as $r) $out[] = $r;
+		}
+		return $out;
+	}
+
+	/**
 	 * Masonry / gallery layout: a CSS-grid of thumbnail tiles packed by
 	 * row span, nothing else. Each tile spans an integer number of fine
 	 * grid rows computed from the image's natural aspect ratio, so tiles
@@ -909,11 +945,6 @@ class ProcessImageLibrary extends Process {
 				$san->entities((string) $row['basename']),
 				md5((string) $row['basename'])
 			);
-			// Mark editable cells of a duplicate so the JS opens the
-			// per-copy duplicate editor instead of the single-cell popup.
-			if ((int) ($row['dupCount'] ?? 0) >= 2) {
-				$editAttrs .= ' data-dup-count="' . (int) $row['dupCount'] . '"';
-			}
 
 			// Tile identity attrs mirror the table <tr> so replace /
 			// delete / drag-drop resolve the same target.
@@ -3704,19 +3735,17 @@ class ProcessImageLibrary extends Process {
 			return true;
 		}));
 
-		// Collapse each duplicate cluster to a single representative row, so
-		// the "Duplicates" filter lists every duplicate image once (the badge
-		// still shows the total copy count; the modal lists the copies).
+		// "Duplicates" filter: keep EVERY byte-identical copy (drop uniques).
+		// They are grouped into clusters AFTER sorting — see groupDuplicateRows
+		// in renderResultsHtml — so the cluster grouping survives any column
+		// sort. Grouped, not collapsed, so copies bulk-edit like any rows.
 		if ($dupes) {
-			$seen = [];
-			$reps = [];
+			$kept = [];
 			foreach ($filtered as $r) {
-				$h = $dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
-				if ($h === null || isset($seen[$h])) continue;
-				$seen[$h] = true;
-				$reps[] = $r;
+				$k = $r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename'];
+				if (isset($dupKeyHashes[$k])) $kept[] = $r;
 			}
-			return $reps;
+			return $kept;
 		}
 
 		return $filtered;
@@ -4299,7 +4328,6 @@ class ProcessImageLibrary extends Process {
 			'metaLockUrl'   => $this->wire('page')->url . 'meta-lock/',
 			'reclaimUrl'    => $this->wire('page')->url . 'reclaim/',
 			'expandUrl'     => $this->wire('page')->url . 'expand/',
-			'dupInfoUrl'    => $this->wire('page')->url . 'dup-info/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
 			'adminUrl'  => $config->urls->admin,
@@ -4360,13 +4388,6 @@ class ProcessImageLibrary extends Process {
 				// Propagate result (JS substitutes %d).
 				'propagated'       => $this->_('Applied to %d cop(y/ies)'),
 				'propagatedLocked' => $this->_('(%d kept own)'),
-				// Per-copy duplicate editor in the popup (JS substitutes %d
-				// with the copy count).
-				'dupHeading'       => $this->_('This file exists %d× — edit each copy or copy one text to all:'),
-				'dupThisCopy'      => $this->_('this copy'),
-				'dupApplyRow'      => $this->_('Use this text for all copies'),
-				'dupReadonly'      => $this->_('not editable'),
-				'dupSavedCopies'   => $this->_('Saved %d cop(y/ies)'),
 				// Space reclaim (JS substitutes %1$d / %2$d).
 				'working'          => $this->_('Working…'),
 				'reclaimProgress'  => $this->_('Reclaiming… %1$d / %2$d'),
@@ -4910,6 +4931,15 @@ class ProcessImageLibrary extends Process {
 		}
 		$out .= '</tr></thead><tbody>';
 
+		// In the "Duplicates" filter the slice arrives grouped by cluster
+		// (consecutive rows share a content hash). Tag each row with its
+		// cluster so the table can shade alternate clusters and draw a
+		// separator where one ends — purely visual; selection + bulk edit
+		// work exactly as on any other rows.
+		$dupesMode   = !empty($filters['dupes']);
+		$prevDupHash = null;
+		$groupParity = 0;
+
 		foreach ($slice as $row) {
 			$desc = $this->normalizeDescription($row['description']);
 			$tags = (string) $row['tags'];
@@ -4925,11 +4955,6 @@ class ProcessImageLibrary extends Process {
 				$san->entities((string) $row['basename']),
 				md5((string) $row['basename'])
 			);
-			// Mark editable cells of a duplicate so the JS opens the
-			// per-copy duplicate editor instead of the single-cell popup.
-			if ((int) ($row['dupCount'] ?? 0) >= 2) {
-				$editAttrs .= ' data-dup-count="' . (int) $row['dupCount'] . '"';
-			}
 			// A11y: editable cells expose themselves as buttons so
 			// keyboard users can Tab to them and Enter / Space to
 			// open the inline editor (handled in JS). Per-cell labels
@@ -4960,7 +4985,21 @@ class ProcessImageLibrary extends Process {
 					$san->entities((string) ($row['pageName']  ?? ''))
 				);
 			}
-			$out .= '<tr class="ml-row"' . $rowAttrs . '>';
+			// Cluster grouping (Duplicates filter only): alternate cluster
+			// shading + a separator above each new cluster.
+			$rowClass = 'ml-row';
+			if ($dupesMode) {
+				$dupHash = (string) ($row['dupHash'] ?? '');
+				if ($dupHash !== '') {
+					if ($dupHash !== $prevDupHash) {
+						$groupParity ^= 1;
+						if ($prevDupHash !== null) $rowClass .= ' ml-dup-group-start';
+					}
+					$rowClass .= $groupParity ? ' ml-dup-group-a' : ' ml-dup-group-b';
+					$prevDupHash = $dupHash;
+				}
+			}
+			$out .= '<tr class="' . $rowClass . '"' . $rowAttrs . '>';
 
 			$out .= '<td class="ml-cell-select">'
 				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
@@ -5582,123 +5621,6 @@ class ProcessImageLibrary extends Process {
 
 		$this->setMetaLock($pageId, $fieldName, $basename, $locked);
 		return $this->jsonResponse(['ok' => true, 'locked' => $locked]);
-	}
-
-	/**
-	 * AJAX endpoint: the full exact-duplicate cluster of ONE image, for the
-	 * per-copy duplicate editor in the popup. Given (pageId, fieldName,
-	 * basename, subfield) it returns every byte-identical copy with its page
-	 * title + edit URL, whether it is editable, and its CURRENT value of the
-	 * requested subfield (description / tags) in the editor's language — so
-	 * the editor can show every copy's text side by side and let the user set
-	 * each one (or push one text to all). The queried image is flagged as the
-	 * source. Non-duplicates return { ok:true, isDup:false }. POST + CSRF.
-	 */
-	public function ___executeDupInfo() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
-
-		$input     = $this->wire('input');
-		$sanitizer = $this->wire('sanitizer');
-		$pageId    = (int) $input->post('pageId');
-		$fieldName = $sanitizer->fieldName((string) $input->post('fieldName'));
-		$basename  = basename((string) $input->post('basename'));
-		$subfield  = $sanitizer->fieldName((string) $input->post('subfield'));
-		if (!$pageId || $fieldName === '' || $basename === '') {
-			return $this->jsonError('Missing parameter');
-		}
-		if (!in_array($subfield, ['description', 'tags'], true)) {
-			return $this->jsonError('Subfield not supported');
-		}
-
-		// One GROUP BY over the fingerprint table tells us in a single pass
-		// whether this image has twins and, if so, the cluster's hash.
-		$dupKeys = $this->loadDuplicateKeyHashes();
-		$key     = $pageId . "\0" . $fieldName . "\0" . $basename;
-		if (!isset($dupKeys[$key])) {
-			return $this->jsonResponse(['ok' => true, 'isDup' => false]);
-		}
-		$hash    = $dupKeys[$key];
-		$members = $this->loadClusterMembers($hash);
-		if (count($members) < 2) {
-			return $this->jsonResponse(['ok' => true, 'isDup' => false]);
-		}
-
-		$imageFields = $this->discoverImageFields();
-		$pageCache   = [];
-		$out         = [];
-		foreach ($members as $m) {
-			$pid = (int) $m['pageId']; $fn = (string) $m['fieldName']; $bn = (string) $m['basename'];
-			if (!array_key_exists($pid, $pageCache)) {
-				$pageCache[$pid] = $this->wire('pages')->get($pid);
-			}
-			$page  = $pageCache[$pid];
-			if (!$page->id) continue;
-			$title = (string) $page->get('title|name');
-			if ($title === '') $title = '#' . $pid;
-
-			// Editable only if the host page is editable AND this image
-			// field actually carries the requested subfield.
-			$editable = $page->editable()
-				&& in_array($fn, $imageFields, true)
-				&& in_array($subfield, $this->editableSubfields($fn), true);
-
-			// Read the copy's current value in the editor's language —
-			// the same value executeSave would overwrite, so what the
-			// editor shows matches what a save writes.
-			$value = '';
-			$page->of(false);
-			$img = $this->resolvePageimage($page, $fn, $bn);
-			if ($img) $value = $this->readEditableValue($img, $subfield);
-
-			$out[] = [
-				'pageId'    => $pid,
-				'fieldName' => $fn,
-				'basename'  => $bn,
-				'pageTitle' => $title,
-				'editUrl'   => $page->editable() ? $page->editUrl() : '',
-				'editable'  => $editable,
-				'value'     => $value,
-				'isSource'  => ($pid === $pageId && $fn === $fieldName && $bn === $basename),
-			];
-		}
-		if (count($out) < 2) {
-			return $this->jsonResponse(['ok' => true, 'isDup' => false]);
-		}
-
-		return $this->jsonResponse([
-			'ok'       => true,
-			'isDup'    => true,
-			'hash'     => $hash,
-			'subfield' => $subfield,
-			'count'    => count($out),
-			'members'  => $out,
-		]);
-	}
-
-	/**
-	 * The current-language value of an image subfield as plain editable text
-	 * (description / tags) — the value the popup shows and executeSave would
-	 * overwrite. Single-lang installs read the raw value; multilang reads the
-	 * editor's current language slot (falling back to the default language).
-	 */
-	protected function readEditableValue(Pageimage $img, string $subfield): string {
-		$langs = $this->readLangValues($img, $subfield);   // null on single-lang
-		if ($langs === null) {
-			return (string) $img->get($subfield);
-		}
-		$cur = $this->getCurrentLangKey();
-		if (array_key_exists($cur, $langs)) return (string) $langs[$cur];
-		return (string) ($langs[0] ?? '');
 	}
 
 	/**

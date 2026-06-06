@@ -196,6 +196,16 @@
 	top: auto;
 	bottom: 4px;
 }
+
+/* Duplicates filter: cluster grouping in the table. Alternate clusters get
+   a faint shade and each new cluster gets a separator line above it, so the
+   copies of one image read as a block you can select and bulk-edit. */
+.ml-dup-group-b td {
+	background: color-mix(in srgb, var(--pw-main-background, #f7f7f7) 92%, var(--pw-text-color, #000) 8%);
+}
+.ml-dup-group-start td {
+	border-top: 2px solid var(--pw-main-color, #eb1d61);
+}
 /* Fade-out animation for rows being deleted — JS adds the class
    right before the row is removed from the DOM so the disappear is
    visible instead of jarring. */
@@ -847,86 +857,6 @@ textarea.ml-cell-input {
 .ml-dup-desc-cur {
 	color: var(--pw-muted-color, #777);
 	font-style: italic;
-}
-
-/* Per-copy duplicate editor — opened from a duplicate image's description /
-   tags cell. A wider popup that lists every byte-identical copy with its own
-   current text, each individually editable, plus a per-row "use this text for
-   all" action. Reuses .ml-popup-editor's chrome; .ml-dup-editor widens it. */
-.ml-dup-editor {
-	width: min(640px, 94vw);
-}
-.ml-dup-editor-body {
-	margin: 0.25rem 0 0.5rem;
-}
-.ml-dup-editor-heading {
-	margin: 0 0 0.6rem;
-	color: var(--pw-muted-color, #6c8dae);
-}
-.ml-dup-editor-list {
-	display: flex;
-	flex-direction: column;
-	gap: 0.6rem;
-	max-height: 56vh;
-	overflow: auto;
-}
-.ml-dup-editor-row {
-	padding-bottom: 0.55rem;
-	border-bottom: 1px solid var(--pw-border-color, #eee);
-}
-.ml-dup-editor-row:last-child {
-	border-bottom: 0;
-}
-.ml-dup-editor-rowhead {
-	display: flex;
-	align-items: baseline;
-	gap: 0.4rem;
-	margin-bottom: 0.25rem;
-	font-size: 0.92em;
-}
-.ml-dup-editor-page {
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
-}
-.ml-dup-editor-here {
-	color: var(--pw-muted-color, #999);
-	white-space: nowrap;
-}
-/* The field always spans the full popup width; the per-copy action sits
-   on its own line beneath it (so nothing squeezes the input on mobile). */
-.ml-dup-editor-input {
-	display: block;
-	width: 100%;
-	box-sizing: border-box;
-}
-textarea.ml-dup-editor-input {
-	min-height: 2.2em;
-	line-height: 1.35;
-	resize: none;          /* height is managed by autosize */
-	overflow-y: auto;
-}
-.ml-dup-editor-input:disabled,
-.ml-dup-editor-disabled {
-	opacity: 0.6;
-}
-.ml-dup-editor-actions {
-	display: flex;
-	justify-content: flex-end;
-	margin-top: 0.2rem;
-	min-height: 1.2em;
-}
-.ml-dup-editor-apply {
-	padding: 0;
-	min-height: 0;
-	line-height: 1.2;
-	font-size: 0.85em;
-	white-space: nowrap;
-}
-.ml-dup-editor-ro {
-	color: var(--pw-muted-color, #999);
-	font-size: 0.85em;
-	white-space: nowrap;
 }
 
 /* Variations cell renders just a count — right-align like other
