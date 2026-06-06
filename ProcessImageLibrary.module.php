@@ -768,20 +768,22 @@ class ProcessImageLibrary extends Process {
 
 		$pageSize = $this->readPageSize();
 
-		if (!empty($filters['dupes'])) {
-			// Duplicates filter: paginate by CLUSTER (after sort, so column
-			// sorting still orders the copies within each cluster). pageSize
-			// counts images here — one cluster per slot — and a cluster never
-			// straddles a page break, so the accordion always has its head row
-			// and that head's hidden copies together on the same page.
-			$clusters   = $this->clusterDuplicateRows($rows);
-			$total      = count($clusters);
+		if ($this->getViewMode() !== self::VIEW_MASONRY) {
+			// Table view ALWAYS collapses duplicates: every image shows one
+			// row (the head, with the expand toggle); its other copies become
+			// hidden rows revealed on click. Paginate by display unit (unique
+			// images + cluster heads) so pageSize counts images and a cluster
+			// never straddles a page break — the head always sits with its
+			// copies. Works the same with or without the Duplicates filter
+			// (the filter just drops the unique images first).
+			$units      = $this->buildDisplayUnits($rows);
+			$total      = count($units);
 			$totalPages = max(1, (int) ceil($total / $pageSize));
 			$page       = min(max(1, $requestedPage), $totalPages);
 			$offset     = ($page - 1) * $pageSize;
 			$slice      = [];
-			foreach (array_slice($clusters, $offset, $pageSize) as $cluster) {
-				foreach ($cluster as $r) $slice[] = $r;
+			foreach (array_slice($units, $offset, $pageSize) as $unit) {
+				foreach ($unit as $r) $slice[] = $r;
 			}
 		} else {
 			$total      = count($rows);
@@ -825,14 +827,15 @@ class ProcessImageLibrary extends Process {
 			$this->_('%d identical copies'), $count
 		));
 		return '<span class="ml-dup-count" title="' . $label . '" aria-label="' . $label . '">'
-			. (int) $count . '×</span>';
+			. (int) $count . '</span>';
 	}
 
 	/**
-	 * The "N×" indicator as an expand/collapse toggle, used on the head row
-	 * of a cluster in the Duplicates filter. Clicking it shows / hides the
-	 * cluster's other copies (the hidden `tr.ml-dup-member` rows sharing this
-	 * content hash). Same ".ml-dup-count" pill, plus button semantics.
+	 * The duplicate indicator as an expand/collapse toggle, shown on the head
+	 * row of every collapsed cluster in the table. Clicking it shows / hides
+	 * the cluster's other copies (the hidden `tr.ml-dup-member` rows sharing
+	 * this content hash). Same ".ml-dup-count" pill, plus button semantics +
+	 * a caret. The "×" is dropped — just the count + caret.
 	 */
 	protected function renderDupToggle(int $count, string $hash): string {
 		if ($count < 2 || $hash === '') return '';
@@ -843,7 +846,7 @@ class ProcessImageLibrary extends Process {
 		return '<span class="ml-dup-count ml-dup-toggle" data-dup-hash="' . $san->entities($hash) . '"'
 			. ' role="button" tabindex="0" aria-expanded="false"'
 			. ' title="' . $label . '" aria-label="' . $label . '">'
-			. (int) $count . '×</span>';
+			. (int) $count . '</span>';
 	}
 
 	/**
@@ -908,31 +911,34 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Group an already-sorted, duplicates-only row set into clusters: one
-	 * sub-array per content hash, holding that image's copies in the input
-	 * (sorted) order. Clusters appear in order of first appearance. Used to
-	 * paginate by image and render the expand/collapse accordion.
+	 * Collapse a sorted row set into display units for the table accordion:
+	 * one unit per image. A unique image is a single-row unit; a duplicated
+	 * image is a unit holding its head row (first occurrence, kept in sort
+	 * position) followed by its other copies (pulled out of their own
+	 * positions to sit beneath the head). Units stay in the head's sort order.
+	 * Paginating by unit keeps each cluster intact on one page.
 	 *
 	 * @param array<int,array<string,mixed>> $rows
 	 * @return array<int,array<int,array<string,mixed>>>
 	 */
-	protected function clusterDuplicateRows(array $rows): array {
-		$map     = $this->loadDuplicateKeyHashes();
-		$buckets = [];   // hash => [rows]
-		$order   = [];   // hash => first-seen index
-		$i = 0;
+	protected function buildDisplayUnits(array $rows): array {
+		$map    = $this->loadDuplicateKeyHashes();
+		$units  = [];
+		$byHash = [];   // content hash => index of its unit in $units
 		foreach ($rows as $r) {
 			$h = $map[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
-			if ($h === null) continue;
-			if (!isset($buckets[$h])) { $buckets[$h] = []; $order[$h] = $i++; }
-			$buckets[$h][] = $r;
+			if ($h === null) {            // unique image → its own unit
+				$units[] = [$r];
+				continue;
+			}
+			if (!isset($byHash[$h])) {     // first copy → head of a new unit
+				$units[] = [$r];
+				$byHash[$h] = count($units) - 1;
+			} else {                       // further copy → attach under head
+				$units[$byHash[$h]][] = $r;
+			}
 		}
-		asort($order);
-		$out = [];
-		foreach (array_keys($order) as $h) {
-			$out[] = $buckets[$h];
-		}
-		return $out;
+		return $units;
 	}
 
 	/**
@@ -3764,9 +3770,9 @@ class ProcessImageLibrary extends Process {
 		}));
 
 		// "Duplicates" filter: keep EVERY byte-identical copy (drop uniques).
-		// They are grouped into clusters AFTER sorting — see clusterDuplicateRows
-		// in renderResultsHtml — so the cluster grouping survives any column
-		// sort. Grouped, not collapsed, so copies bulk-edit like any rows.
+		// The table collapses them into per-image accordion units after sorting
+		// — see buildDisplayUnits in renderResultsHtml. This filter only drops
+		// the unique images so just duplicates remain.
 		if ($dupes) {
 			$kept = [];
 			foreach ($filtered as $r) {
@@ -4959,13 +4965,12 @@ class ProcessImageLibrary extends Process {
 		}
 		$out .= '</tr></thead><tbody>';
 
-		// In the "Duplicates" filter the slice arrives grouped by cluster
-		// (consecutive rows share a content hash). Only the FIRST row of each
-		// cluster is shown — it carries the "N×" indicator, which toggles its
-		// other copies (the remaining rows, rendered hidden right beneath it).
-		// The copies carry no indicator; once revealed they bulk-edit like any
-		// other rows.
-		$dupesMode   = !empty($filters['dupes']);
+		// The slice arrives collapsed into per-image units (buildDisplayUnits):
+		// a duplicated image's copies sit consecutively, head first. Only the
+		// head is shown — it carries the indicator, which toggles its other
+		// copies (rendered hidden right beneath it). The copies carry no
+		// indicator; once revealed they bulk-edit like any other rows. Applies
+		// in every table view, not just the Duplicates filter.
 		$prevDupHash = null;
 
 		foreach ($slice as $row) {
@@ -5013,17 +5018,15 @@ class ProcessImageLibrary extends Process {
 					$san->entities((string) ($row['pageName']  ?? ''))
 				);
 			}
-			// Duplicates filter accordion: the first row of each cluster is
-			// the visible "head" (carries the toggle indicator); the rest are
-			// hidden copy rows revealed by clicking it.
+			// Accordion: the first row of each cluster is the visible "head"
+			// (carries the toggle indicator); the rest are hidden copy rows
+			// revealed by clicking it.
 			$isDupHead = false; $isDupMember = false; $rowDupHash = '';
-			if ($dupesMode) {
-				$rowDupHash = (string) ($row['dupHash'] ?? '');
-				if ($rowDupHash !== '') {
-					if ($rowDupHash !== $prevDupHash) { $isDupHead = true; }
-					else { $isDupMember = true; }
-					$prevDupHash = $rowDupHash;
-				}
+			$rowDupHash = (string) ($row['dupHash'] ?? '');
+			if ($rowDupHash !== '') {
+				if ($rowDupHash !== $prevDupHash) { $isDupHead = true; }
+				else { $isDupMember = true; }
+				$prevDupHash = $rowDupHash;
 			}
 			$rowClass = 'ml-row';
 			$rowExtra = '';
@@ -5120,14 +5123,10 @@ class ProcessImageLibrary extends Process {
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
 					. '</button>';
 			}
-			if ($dupesMode) {
-				// Head row: the indicator becomes the expand/collapse toggle.
-				// Copy rows carry no indicator.
-				if ($isDupHead) {
-					$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
-				}
-			} else {
-				$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0));
+			// Head of a duplicate cluster → expand/collapse toggle. Copy rows
+			// and unique images carry no indicator.
+			if ($isDupHead) {
+				$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
 			}
 			$out .= '</td>';
 
