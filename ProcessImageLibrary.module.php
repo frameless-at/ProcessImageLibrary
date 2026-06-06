@@ -36,6 +36,12 @@ class ProcessImageLibrary extends Process {
 	use ImageLibraryExportImport;
 	use ImageLibraryHashing;
 
+	// Picker mode: the view is embedded (modal iframe) to pick an existing
+	// image to assign to a page's image field. Set from ?picker + target_*.
+	protected bool $pickerMode = false;
+	protected int $pickerTargetPage = 0;
+	protected string $pickerTargetField = '';
+
 	const ADMIN_PAGE_NAME = 'image-library';
 	const PERMISSION_NAME = 'image-library-access';
 	const CACHE_PREFIX = 'image-library-';
@@ -454,6 +460,51 @@ class ProcessImageLibrary extends Process {
 		// missed. Both are no-ops once everything is hashed + linked.
 		$this->addHookAfter('Pages::saved', $this, 'autoHashOnPageSave');
 		$this->addHook('LazyCron::everyHour', $this, 'autoMaintenance');
+
+		// "Choose from library" button on every image field in the page
+		// editor — opens the library as a picker to assign an existing image
+		// without re-uploading.
+		$this->addHookAfter('InputfieldImage::render', $this, 'addLibraryPickButton');
+	}
+
+	/**
+	 * Append a "Choose from library" button to an InputfieldImage in the page
+	 * editor. The button opens the library in picker mode (modal iframe) scoped
+	 * to this page + field; the small ml-library-pick.js glue handles the modal
+	 * and refreshes the field after an image is assigned.
+	 */
+	public function addLibraryPickButton(HookEvent $event): void {
+		$inputfield = $event->object;
+		$page  = $inputfield->hasPage;
+		$field = $inputfield->hasField;
+		if (!$page instanceof Page || !$page->id || !$field) return;
+		if (!$page->editable()) return;
+
+		$libUrl = $this->libraryPageUrl();
+		if ($libUrl === '') return;
+
+		$config = $this->wire('config');
+		$san    = $this->wire('sanitizer');
+		$jsVer  = @filemtime($config->paths($this) . 'ml-library-pick.js') ?: '1';
+		$config->scripts->add($config->urls($this) . 'ml-library-pick.js?v=' . $jsVer);
+
+		$fname     = (string) $field->name;
+		$pickerUrl = $libUrl . '?picker=1&modal=1&target_page=' . (int) $page->id
+			. '&target_field=' . urlencode($fname);
+		$label = $this->_('Choose from library');
+		$event->return .= '<div class="ml-lib-pick-wrap">'
+			. '<button type="button" class="ml-lib-pick uk-button uk-button-text"'
+			. ' data-picker-url="' . $san->entities($pickerUrl) . '"'
+			. ' data-field="' . $san->entities($fname) . '"'
+			. ' data-title="' . $san->entities($label) . '">'
+			. '<i class="fa fa-clone" aria-hidden="true"></i> ' . $san->entities($label)
+			. '</button></div>';
+	}
+
+	/** URL of the module's own admin page (for building picker links). */
+	protected function libraryPageUrl(): string {
+		$p = $this->wire('pages')->get('template=admin, name=' . self::ADMIN_PAGE_NAME . ', include=all');
+		return ($p && $p->id) ? $p->url : '';
 	}
 
 	/**
@@ -695,6 +746,23 @@ class ProcessImageLibrary extends Process {
 
 		$this->loadAssets();
 
+		// Picker mode: embedded (modal iframe) to pick an image for a page's
+		// image field. Needs a valid, editable target + an image field on it.
+		$pIn = $this->wire('input');
+		if ($pIn->get('picker')) {
+			$tp = (int) $pIn->get('target_page');
+			$tf = $this->wire('sanitizer')->fieldName((string) $pIn->get('target_field'));
+			$tpPage = $tp ? $this->wire('pages')->get($tp) : null;
+			$tFld   = $tf !== '' ? $this->wire('fields')->get($tf) : null;
+			if ($tpPage && $tpPage->id && $tpPage->editable()
+				&& $tFld && $tFld->type instanceof FieldtypeImage
+				&& $tpPage->template->hasField($tf)) {
+				$this->pickerMode        = true;
+				$this->pickerTargetPage  = $tp;
+				$this->pickerTargetField = $tf;
+			}
+		}
+
 		$imageFields = $this->discoverImageFields();
 		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
 		if (!$imageFields || !$eligibleTemplates) {
@@ -751,35 +819,54 @@ class ProcessImageLibrary extends Process {
 			(int) $thumbDims['longerSide'], $cellWidth,
 			rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.')
 		);
+		$pickerAttrs = '';
+		if ($this->pickerMode) {
+			$pickerAttrs = sprintf(
+				' data-picker="1" data-target-page="%d" data-target-field="%s"',
+				$this->pickerTargetPage, $sanitizer->entities($this->pickerTargetField)
+			);
+		}
 		$rootAttrs = sprintf(
-			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-csrf-name="%s" data-csrf-value="%s" style="%s"',
+			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-assign-url="%s" data-csrf-name="%s" data-csrf-value="%s"%s style="%s"',
 			$sanitizer->entities($this->wire('page')->url . 'save/'),
 			$sanitizer->entities($this->wire('page')->url . 'data/'),
 			$sanitizer->entities($this->wire('page')->url . 'bulk/'),
+			$sanitizer->entities($this->wire('page')->url . 'assign/'),
 			$sanitizer->entities($session->CSRF->getTokenName()),
 			$sanitizer->entities($session->CSRF->getTokenValue()),
+			$pickerAttrs,
 			$sanitizer->entities($rootStyle)
 		);
 
-		$out  = '<div class="ml-root"' . $rootAttrs . '>';
+		$out  = '<div class="ml-root' . ($this->pickerMode ? ' ml-root--picker' : '') . '"' . $rootAttrs . '>';
 		// Visually-hidden status region for JS to announce inline-edit
 		// save outcomes to assistive tech ("Saved", "Save failed: …").
 		// aria-live=polite ⇒ won't interrupt other speech.
 		$out .= '<div class="ml-live-region" role="status" aria-live="polite" aria-atomic="true"></div>';
-		// Module-settings link. Position-absolute via CSS so it sits
-		// in the heading row instead of taking a row of its own.
-		// collapse_info=1 asks PW to render the edit screen with the
-		// upper info panel pre-collapsed so the actual config inputs
-		// are above the fold.
-		$cfgUrl = $this->wire('config')->urls->admin . 'module/edit/?name='
-			. urlencode($this->className()) . '&collapse_info=1';
-		$cfgTitle = $this->_('Module settings');
-		$cfgLabel = $this->_('Config');
-		$out .= '<a class="ml-config-link" href="' . $sanitizer->entities($cfgUrl) . '"'
-			. ' title="' . $sanitizer->entities($cfgTitle) . '"'
-			. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
-			. $sanitizer->entities($cfgLabel)
-			. '</a>';
+
+		if ($this->pickerMode) {
+			// Picker chrome: a focused header + the filter bar + results.
+			// No config link / bookmarks / export-import — this view exists
+			// only to pick an image to drop into the target field.
+			$out .= '<p class="ml-picker-hint">'
+				. $sanitizer->entities($this->_('Pick an image to add it to the field — it is copied in for you (and de-duplicated automatically).'))
+				. '</p>';
+		} else {
+			// Module-settings link. Position-absolute via CSS so it sits
+			// in the heading row instead of taking a row of its own.
+			// collapse_info=1 asks PW to render the edit screen with the
+			// upper info panel pre-collapsed so the actual config inputs
+			// are above the fold.
+			$cfgUrl = $this->wire('config')->urls->admin . 'module/edit/?name='
+				. urlencode($this->className()) . '&collapse_info=1';
+			$cfgTitle = $this->_('Module settings');
+			$cfgLabel = $this->_('Config');
+			$out .= '<a class="ml-config-link" href="' . $sanitizer->entities($cfgUrl) . '"'
+				. ' title="' . $sanitizer->entities($cfgTitle) . '"'
+				. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
+				. $sanitizer->entities($cfgLabel)
+				. '</a>';
+		}
 		// Load PW's native tab module — same one Page Edit etc. use,
 		// so the WireTabs uk-tab markup picks up the admin's tab
 		// styling without us shipping new CSS.
@@ -789,8 +876,10 @@ class ProcessImageLibrary extends Process {
 		// — visually identical to InputfieldImage's own size slider —
 		// instead of a browser-styled <input type=range>.
 		$this->wire('modules')->get('JqueryUI');
-		$prefs = $this->getUserPrefs();
-		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
+		if (!$this->pickerMode) {
+			$prefs = $this->getUserPrefs();
+			$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
+		}
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
 		// Column picker lives in a sibling <dialog> so it survives
@@ -799,7 +888,9 @@ class ProcessImageLibrary extends Process {
 		// Full $customCols set (not the field-narrowed one) so the
 		// picker shows every column regardless of the active filter.
 		$out .= $this->renderColumnsDialog($customCols);
-		$out .= $this->renderExportImportBar($filters);
+		if (!$this->pickerMode) {
+			$out .= $this->renderExportImportBar($filters);
+		}
 		$out .= '</div>';
 
 		return $out;
@@ -1005,6 +1096,21 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * The "Use this image" button shown on every thumbnail in picker mode —
+	 * carries the source identity the assign endpoint needs. Empty string
+	 * outside picker mode.
+	 */
+	protected function renderPickButton(array $row): string {
+		if (!$this->pickerMode) return '';
+		$san = $this->wire('sanitizer');
+		return '<button type="button" class="ml-pick-use uk-button uk-button-primary uk-button-small"'
+			. ' data-src-page="' . (int) ($row['pageId'] ?? 0) . '"'
+			. ' data-src-field="' . $san->entities((string) ($row['fieldName'] ?? '')) . '"'
+			. ' data-src-basename="' . $san->entities((string) ($row['basename'] ?? '')) . '">'
+			. $san->entities($this->_('Use')) . '</button>';
+	}
+
+	/**
 	 * The duplicate-count badge — the SAME ".ml-dup-count" used on the
 	 * cluster thumbnails in the duplicates view ("N×"). Reused on the regular
 	 * table / gallery thumbnails (positioned bottom-right there via CSS).
@@ -1165,6 +1271,7 @@ class ProcessImageLibrary extends Process {
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
 			}
 			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
+			$out .= $this->renderPickButton($row);
 			$out .= '</div>'; // .ml-cell-thumb
 			$out .= '</div>'; // .ml-card
 		}
@@ -5069,6 +5176,7 @@ class ProcessImageLibrary extends Process {
 			if ($isDupHead) {
 				$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
 			}
+			$out .= $this->renderPickButton($row);
 			$out .= '</td>';
 
 			$pageTitle = $this->normalizeDescription($row['pageTitle']);

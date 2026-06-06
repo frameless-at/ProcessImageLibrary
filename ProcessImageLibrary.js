@@ -80,6 +80,54 @@
 			return fd;
 		}
 
+		// -- Picker mode ------------------------------------------------
+		// When the library is embedded as a picker (modal iframe in the page
+		// editor), each thumbnail carries a "Use" button. Clicking it copies
+		// the image into the target field server-side, then messages the
+		// parent editor to refresh that one field.
+		if (root.dataset.picker === '1') {
+			root.classList.add('ml-picker');
+			var assignUrl = root.dataset.assignUrl || '';
+			results && results.addEventListener('click', function (e) {
+				var use = e.target.closest && e.target.closest('.ml-pick-use');
+				if (!use || !assignUrl) return;
+				e.preventDefault();
+				e.stopImmediatePropagation();   // beat the thumbnail / editor handlers
+				var fd = new FormData();
+				fd.append('srcPageId',    use.dataset.srcPage || '');
+				fd.append('srcField',     use.dataset.srcField || '');
+				fd.append('srcBasename',  use.dataset.srcBasename || '');
+				fd.append('targetPageId', root.dataset.targetPage || '');
+				fd.append('targetField',  root.dataset.targetField || '');
+				appendCsrf(fd);
+				use.disabled = true;
+				var prev = use.textContent;
+				use.textContent = labels.saving || 'Saving…';
+				fetch(assignUrl, {
+					method: 'POST', credentials: 'same-origin',
+					headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
+				}).then(function (r) { return r.json(); }).then(function (d) {
+					if (!d || !d.ok) {
+						use.disabled = false; use.textContent = prev;
+						window.alert((d && d.error) || (labels.error || 'Failed'));
+						return;
+					}
+					use.textContent = labels.done || 'Added';
+					if (window.parent && window.parent !== window) {
+						window.parent.postMessage({
+							mlPicked:    true,
+							targetField: root.dataset.targetField,
+							targetPage:  root.dataset.targetPage,
+							basename:    d.basename
+						}, location.origin);
+					}
+				}).catch(function () {
+					use.disabled = false; use.textContent = prev;
+					window.alert(labels.error || 'Failed');
+				});
+			}, true);   // capture: beat the thumbnail / editor handlers
+		}
+
 		// -- Inline edit ------------------------------------------------
 
 		function enqueueSave(pageId, task) {
@@ -2255,6 +2303,11 @@
 						}
 						return;
 					}
+					// Picker mode: sort / pagination / view (handled above) stay
+					// live, but no editing — a thumbnail click must not open the
+					// PW image editor inside the picker. The "Use" button is
+					// handled by its own capture-phase listener.
+					if (root.dataset.picker === '1') return;
 					// Bulk-selection checkboxes handle their own state via the
 					// change listener below — don't open an editor for them.
 					if (e.target.classList && (

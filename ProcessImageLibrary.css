@@ -188,6 +188,23 @@
 .ml-replace-btn:hover { color: var(--pw-main-color, #5b8cd6); }
 .ml-delete-btn:hover  { color: #c33; }
 
+/* Picker mode: the library embedded (modal iframe) to choose an existing
+   image for a page's image field. Each thumbnail gets a "Use" action. */
+.ml-picker-hint {
+	margin: 0 0 0.7rem;
+	color: var(--pw-muted-color, #6c8dae);
+}
+.ml-pick-use {
+	position: absolute;
+	left: 4px;
+	right: 4px;
+	bottom: 4px;
+	z-index: 2;
+}
+.ml-root--picker .ml-cell-thumb {
+	cursor: default;
+}
+
 /* Duplicate indicator pill ("N", bottom-right of the thumbnail). On a
    cluster head row it doubles as the expand/collapse toggle (.ml-dup-toggle
    below adds the cursor + caret). */
