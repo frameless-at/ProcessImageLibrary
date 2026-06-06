@@ -492,13 +492,22 @@ class ProcessImageLibrary extends Process {
 		$pickerUrl = $libUrl . '?picker=1&modal=1&target_page=' . (int) $page->id
 			. '&target_field=' . urlencode($fname);
 		$label = $this->_('Choose from library');
-		$event->return .= '<div class="ml-lib-pick-wrap">'
-			. '<button type="button" class="ml-lib-pick uk-button uk-button-text"'
-			. ' data-picker-url="' . $san->entities($pickerUrl) . '"'
-			. ' data-field="' . $san->entities($fname) . '"'
-			. ' data-title="' . $san->entities($label) . '">'
-			. '<i class="fa fa-clone" aria-hidden="true"></i> ' . $san->entities($label)
-			. '</button></div>';
+
+		// Built from PW's own InputfieldButton so it matches the native
+		// "Choose File" button (size, theme). type=button + the JS handler's
+		// preventDefault keep it from submitting the page-edit form.
+		$btn = $this->wire('modules')->get('InputfieldButton');
+		$btn->attr('value', $label);
+		$btn->attr('type', 'button');
+		$btn->icon = 'th-large';
+		$btn->setSecondary(true);
+		$btn->addClass('ml-lib-pick');
+		$btn->attr('data-picker-url', $pickerUrl);
+		$btn->attr('data-field', $fname);
+		$btn->attr('data-title', $label);
+
+		$event->return .= '<div class="ml-lib-pick-wrap" style="margin-top:.4rem">'
+			. $btn->render() . '</div>';
 	}
 
 	/** URL of the module's own admin page (for building picker links). */
@@ -888,9 +897,8 @@ class ProcessImageLibrary extends Process {
 			$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
 		}
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
-		$out .= $this->renderPickerBar('top');
+		$out .= $this->renderPickerBar('top');   // sticky — stays in the viewport
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
-		$out .= $this->renderPickerBar('bottom');
 		// Column picker lives in a sibling <dialog> so it survives
 		// AJAX re-renders of .ml-results — the drag/toggle handlers
 		// stay bound to the same DOM nodes for the life of the page.
