@@ -3513,6 +3513,11 @@ class ProcessImageLibrary extends Process {
 	protected function flattenRows(array $rawData, array $imageFields): array {
 		$standardKeys = array_flip(self::STANDARD_SUBFIELDS);
 		$rows = [];
+		// A physical image is uniquely (pageId, fieldName, basename). Guard
+		// against the same file being emitted more than once — e.g. duplicate
+		// rows in field_<name> (seen with RepeaterMatrix) would otherwise show
+		// as phantom "extra copies" and inflate duplicate clusters.
+		$seen = [];
 		foreach ($rawData as $pageId => $pageData) {
 			if (!is_array($pageData)) continue;
 			$pageTitle  = $pageData['title'] ?? '';
@@ -3526,6 +3531,9 @@ class ProcessImageLibrary extends Process {
 				foreach ($items as $img) {
 					if (!is_array($img) || empty($img['data'])) continue;
 					$basename = (string) $img['data'];
+					$seenKey  = $pageId . "\0" . $fieldName . "\0" . $basename;
+					if (isset($seen[$seenKey])) continue;   // same physical file already emitted
+					$seen[$seenKey] = true;
 					$rows[] = [
 						'pageId'      => (int) $pageId,
 						'pageTitle'   => $pageTitle,
