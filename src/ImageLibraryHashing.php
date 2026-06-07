@@ -728,6 +728,27 @@ trait ImageLibraryHashing {
 		return $out;
 	}
 
+	/**
+	 * Real space currently saved by hardlinks, measured from the filesystem and
+	 * CACHED (the audit is a full tree walk, too heavy for every page load).
+	 *
+	 * This is the truth the displayed "reclaimed" figure should use — unlike the
+	 * manifest sum, it can't drift: pruning a manifest row never un-shares the
+	 * inode, so the manifest under-counts, but the disk measurement always
+	 * reflects reality. Pass $refresh=true after a reclaim/revert run to re-walk.
+	 */
+	protected function diskSavedBytesCached(bool $refresh = false): int {
+		$cache = $this->wire('cache');
+		$key   = 'ml_disk_saved';
+		if (!$refresh) {
+			$v = $cache->getFor($this, $key);
+			if ($v !== null && $v !== '') return (int) $v;
+		}
+		$saved = $this->diskAudit()['saved'];
+		$cache->saveFor($this, $key, (string) $saved, 3600); // 1h TTL; refreshed on runs
+		return $saved;
+	}
+
 	/** Total bytes currently reclaimed (sum of the manifest). */
 	protected function totalReclaimedBytes(): int {
 		$this->ensureHardlinkTable();

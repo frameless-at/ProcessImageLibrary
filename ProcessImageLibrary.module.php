@@ -565,7 +565,10 @@ class ProcessImageLibrary extends Process {
 	 * @return array{reclaimedBytes:int,reclaimedHuman:string,linkedCount:int,clusterCount:int}
 	 */
 	public function dedupStats(): array {
-		$bytes = $this->totalReclaimedBytes();
+		// Reclaimed space is read from the FILESYSTEM (cached), not the manifest:
+		// the manifest under-counts because pruning its rows never un-shares the
+		// inode, whereas the disk measurement always reflects the real saving.
+		$bytes = $this->diskSavedBytesCached();
 		return [
 			'reclaimedBytes' => $bytes,
 			'reclaimedHuman' => $this->formatFilesize($bytes),
@@ -640,7 +643,14 @@ class ProcessImageLibrary extends Process {
 		@set_time_limit(60);
 		$r = $this->reclaimStep((int) $this->wire('input')->post('offset'), 4);
 		$r['ok']             = true;
-		$r['reclaimedBytes'] = $this->totalReclaimedBytes();
+		// While the run is in progress the manifest sum is a fine live indicator;
+		// once complete, report the REAL saving measured from disk (and refresh
+		// the cache so the Status block above is immediately correct too).
+		if (!empty($r['complete'])) {
+			$r['reclaimedBytes'] = $this->diskSavedBytesCached(true);
+		} else {
+			$r['reclaimedBytes'] = $this->totalReclaimedBytes();
+		}
 		$r['reclaimedHuman'] = $this->formatFilesize($r['reclaimedBytes']);
 		$r['linkedTotal']    = $this->countHardlinks();
 		return $this->jsonResponse($r);
@@ -668,6 +678,8 @@ class ProcessImageLibrary extends Process {
 		@set_time_limit(120);
 		$a = $this->diskAudit();
 		$a['ok'] = true;
+		// Refresh the cached saved-figure so the Status block matches the audit.
+		$this->wire('cache')->saveFor($this, 'ml_disk_saved', (string) $a['saved'], 3600);
 		$a['apparentHuman']        = $this->formatFilesize($a['apparent']);
 		$a['actualHuman']          = $this->formatFilesize($a['actual']);
 		$a['savedHuman']           = $this->formatFilesize($a['saved']);
