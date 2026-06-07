@@ -644,9 +644,22 @@ class ProcessImageLibrary extends Process {
 		$r = $this->reclaimStep((int) $this->wire('input')->post('offset'), 4);
 		$r['ok']             = true;
 		// While the run is in progress the manifest sum is a fine live indicator;
-		// once complete, report the REAL saving measured from disk (and refresh
-		// the cache so the Status block above is immediately correct too).
+		// once complete, collapse the page-version files too, then report the REAL
+		// saving measured from disk (and refresh the cache so the Status block
+		// above is immediately correct too).
 		if (!empty($r['complete'])) {
+			$v = $this->reclaimVersionFiles();
+			$r['versionResult'] = $v;
+			if (!empty($v['linked'])) {
+				$r['details'][] = [
+					'label'      => $this->_('Page-version files'),
+					'members'    => (int) $v['versionFiles'],
+					'originals'  => 0,
+					'variations' => (int) $v['linked'],
+					'already'    => (int) $v['already'],
+					'bytes'      => (int) $v['bytes'],
+				];
+			}
 			$r['reclaimedBytes'] = $this->diskSavedBytesCached(true);
 		} else {
 			$r['reclaimedBytes'] = $this->totalReclaimedBytes();

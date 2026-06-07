@@ -574,6 +574,9 @@ trait ImageLibraryHashing {
 				while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
 					$pid = (int) $r['page_id']; $fn = (string) $r['field_name']; $bn = (string) $r['basename'];
 					if (isset($live[$pid . "\0" . $fn . "\0" . $bn])) continue;     // live original
+					// Page-version manifest rows ("v<n>/<basename>") aren't in the
+					// live row set by design — never prune them as orphans.
+					if ($keepVariations && preg_match('~^v\d+/~', $bn)) continue;
 					if ($keepVariations) {
 						$keep = false;
 						foreach ($liveStems[$pid . "\0" . $fn] ?? [] as $stem => $_) {
@@ -617,6 +620,10 @@ trait ImageLibraryHashing {
 			$off = 0;
 			do { $r = $this->reclaimAll($off); $off = (int) $r['nextOffset']; }
 			while (empty($r['complete']) && microtime(true) < $stop);
+
+			// Collapse page-version file copies (the v<n>/ subdirs) onto the live
+			// inode — a quick, self-contained filesystem pass.
+			$this->reclaimVersionFiles();
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: maintenance pass failed: ' . $e->getMessage());
 		}
@@ -1092,5 +1099,64 @@ trait ImageLibraryHashing {
 			'nextOffset' => $i,
 			'complete'   => $i >= $total,
 		];
+	}
+
+	/**
+	 * Reclaim page-version files. ProcessWire's Page Versions feature copies a
+	 * page's files into a `v<n>/` subdirectory of the SAME page folder when a
+	 * version is saved (PagesVersionsFiles::copyPageVersionFiles → dirPrefix 'v'),
+	 * original AND every variation. Those copies are usually byte-identical to
+	 * the live file one level up — e.g.
+	 *     1/v2/hirsch_bg_16-9.jpg   ←→   1/hirsch_bg_16-9.jpg
+	 * so each version copy can be collapsed onto the live inode. We work purely
+	 * at the filesystem level (no Page Versions API), which is why this is safe
+	 * and self-contained: the canonical is just the same basename without the
+	 * `v<n>/` segment. Byte-identity is re-verified before linking; differing
+	 * versions are left untouched. Each link is recorded in the manifest with the
+	 * relative `v<n>/<basename>` so revert (expandManifest) restores it.
+	 *
+	 * @return array{linked:int,already:int,skipped:int,bytes:int,versionFiles:int}
+	 */
+	protected function reclaimVersionFiles(): array {
+		$out = ['linked' => 0, 'already' => 0, 'skipped' => 0, 'bytes' => 0, 'versionFiles' => 0];
+		$root = (string) $this->wire('config')->paths->files;
+		if ($root === '' || !is_dir($root)) return $out;
+		$rootLen = strlen($root);
+
+		try {
+			$it = new \RecursiveIteratorIterator(
+				new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+				\RecursiveIteratorIterator::LEAVES_ONLY
+			);
+			foreach ($it as $file) {
+				if (!$file->isFile() || $file->isLink()) continue;
+				$rel = str_replace('\\', '/', substr($file->getPathname(), $rootLen));
+				// Expect "<pageId>/v<n>/<basename>" — exactly one version segment.
+				if (!preg_match('~^(\d+)/(v\d+)/([^/]+)$~', $rel, $m)) continue;
+				$out['versionFiles']++;
+
+				$versionPath = $file->getPathname();
+				$livePath    = $root . $m[1] . '/' . $m[3];   // same basename, no v<n>/
+				if (!is_file($livePath)) { $out['skipped']++; continue; }
+				if ($this->sameInode($livePath, $versionPath)) { $out['already']++; continue; }
+				if (!$this->filesByteIdentical($livePath, $versionPath)) { $out['skipped']++; continue; }
+
+				$bytes = (int) @filesize($versionPath);
+				if ($this->hardlinkReplace($livePath, $versionPath)) {
+					$out['linked']++;
+					$out['bytes'] += $bytes;
+					$this->recordHardlink(
+						['pageId' => (int) $m[1], 'fieldName' => '', 'basename' => $m[2] . '/' . $m[3]],
+						['pageId' => (int) $m[1], 'fieldName' => '', 'basename' => $m[3]],
+						$bytes
+					);
+				} else {
+					$out['skipped']++;
+				}
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: version-file reclaim failed: ' . $e->getMessage());
+		}
+		return $out;
 	}
 }
