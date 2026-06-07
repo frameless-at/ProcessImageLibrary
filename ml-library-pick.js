@@ -11,13 +11,23 @@
 	'use strict';
 
 	// The button lives on the page editor, which doesn't load the module CSS.
-	// Match the icon to PW's own "Choose File" button (fa-fw fa-folder-open-o):
-	// full size + fixed-width box, so the two buttons' icons sit identically.
+	// Two things to inject once:
+	//  - icon sizing to match PW's "Choose File" (fa-fw fa-folder-open-o);
+	//  - an outline (uk-button-default-style) look: the native submit button
+	//    is filled with the theme colour, so override .ml-lib-pick.ui-button
+	//    to a transparent button with a subtle border + inherited text colour
+	//    (theme-agnostic). Higher specificity than the theme rule, no !important.
 	(function injectStyle() {
 		if (document.getElementById('ml-lib-pick-style')) return;
 		var s = document.createElement('style');
 		s.id = 'ml-lib-pick-style';
-		s.textContent = '.ml-lib-pick .fa{font-size:1em;width:1.28571429em;text-align:center}';
+		s.textContent =
+			'.ml-lib-pick .fa{font-size:1em;width:1.28571429em;text-align:center}'
+			+ '.ml-lib-pick.ui-button,.ml-lib-pick.ui-button.ui-state-default,'
+			+ '.ml-lib-pick.ui-button.ui-state-hover{background:transparent;color:inherit;'
+			+ 'border:1px solid rgba(127,127,127,.5)}'
+			+ '.ml-lib-pick.ui-button:hover{background:rgba(127,127,127,.14);color:inherit;'
+			+ 'border-color:rgba(127,127,127,.85)}';
 		document.head.appendChild(s);
 	})();
 
