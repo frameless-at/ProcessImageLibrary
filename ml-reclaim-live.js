@@ -187,8 +187,8 @@
 	}
 
 	// Un-share, chunked to completion (the old single GET was time-budgeted and
-	// stopped half-way on a large manifest). Re-POSTs the revert-step endpoint
-	// until the manifest is empty, then flips the Status block back to "nothing
+	// stopped half-way on a large tree). Re-POSTs the revert-step endpoint until
+	// no shared inode is left, then flips the Status block back to "nothing
 	// collapsed" so it can't show a stale reclaimed figure.
 	function revert(box, trigger) {
 		var panel  = el(box, '.ml-reclaim-panel');
