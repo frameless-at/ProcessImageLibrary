@@ -3291,6 +3291,36 @@ class ProcessImageLibrary extends Process {
 	 * @return array<int,array<string,mixed>>
 	 */
 	public function loadRows(array $filters = []): array {
+		// Display set: the full enumeration MINUS page-version repeater items
+		// (those are kept for the dedup engine via loadImageRowsAll, but must
+		// not clutter the library / inflate duplicate counts).
+		$rows = array_values(array_filter(
+			$this->loadImageRowsAll(),
+			static fn($r) => empty($r['isVersionItem'])
+		));
+
+		// Bulk-hydrate custom-field values onto every row whenever a
+		// filter actually reads them — "missing X" toggles and free-
+		// text search both need customs in scope. Hydration is not
+		// cached so the cache stays generic (one entry per discovery
+		// state) and any custom-field edits show up immediately.
+		$qNeedsCustoms = ($filters['q'] ?? '') !== '';
+		if (($qNeedsCustoms || !empty($filters['no_custom'])) && $this->hasAnyCustomFields()) {
+			$rows = $this->bulkHydrateCustomFields($rows);
+		}
+
+		return $rows;
+	}
+
+	/**
+	 * The full flat image-row enumeration INCLUDING page-version repeater items
+	 * (each marked with isVersionItem). Cached. Used by the dedup engine (scan
+	 * + orphan-prune) so version-copy files also get hardlinked; the display
+	 * loadRows() filters the version items out.
+	 *
+	 * @return array<int,array<string,mixed>>
+	 */
+	protected function loadImageRowsAll(): array {
 		$imageFields = $this->discoverImageFields();
 		if (!$imageFields) return [];
 
@@ -3313,11 +3343,11 @@ class ProcessImageLibrary extends Process {
 			// Repeater / RepeaterMatrix integration: an image inside a
 			// repeater field lives on a hidden repeater_<field> page,
 			// not on the editor's mental "host" page. Resolve those
-			// rows to their owner page BEFORE we cache, so sort by
-			// pageTitle, the template filter, and the table's Page
-			// link all operate on the owner. The original pageId stays
-			// on the row — that's the storage truth the save / rename
-			// endpoints need to write to.
+			// rows to their owner page (and mark version items) BEFORE we
+			// cache, so sort by pageTitle, the template filter, and the
+			// table's Page link all operate on the owner. The original
+			// pageId stays on the row — that's the storage truth the
+			// save / rename endpoints need to write to.
 			$rows = $this->resolveRepeaterRows($rows);
 			// Selector-based invalidation: PW expires this entry whenever a
 			// page matching the eligible templates is saved — including our
@@ -3328,16 +3358,6 @@ class ProcessImageLibrary extends Process {
 				$rows,
 				'template=' . implode('|', $eligibleTemplates)
 			);
-		}
-
-		// Bulk-hydrate custom-field values onto every row whenever a
-		// filter actually reads them — "missing X" toggles and free-
-		// text search both need customs in scope. Hydration is not
-		// cached so the cache stays generic (one entry per discovery
-		// state) and any custom-field edits show up immediately.
-		$qNeedsCustoms = ($filters['q'] ?? '') !== '';
-		if (($qNeedsCustoms || !empty($filters['no_custom'])) && $this->hasAnyCustomFields()) {
-			$rows = $this->bulkHydrateCustomFields($rows);
 		}
 
 		return $rows;
@@ -3417,9 +3437,10 @@ class ProcessImageLibrary extends Process {
 		// Page Versions: a versioned page keeps a SEPARATE set of repeater-item
 		// pages per version, under a version-specific container named
 		// "for-page-<id>-v<n>" (live items live under "for-page-<id>"). findRaw
-		// enumerates those version items too, so the same image shows up once
-		// per version as phantom "extra copies". Drop any repeater item whose
-		// container is a version container.
+		// enumerates those version items too. We MARK them ($row['isVersionItem'])
+		// rather than drop them: the display (loadRows) filters them out so the
+		// library shows only live content, but the dedup engine still sees them
+		// so their byte-identical files get hardlinked (real, invisible saving).
 		$versionItemIds = [];
 		foreach ($repeaterPages as $rp) {
 			$parent = $rp->parent;
@@ -3459,11 +3480,13 @@ class ProcessImageLibrary extends Process {
 		}
 		unset($r);
 
-		// Drop the page-version repeater items detected above.
+		// Mark page-version repeater items (kept for the dedup engine; the
+		// display path filters them out).
 		if ($versionItemIds) {
-			$rows = array_values(array_filter($rows, function ($r) use ($versionItemIds) {
-				return !isset($versionItemIds[(int) $r['pageId']]);
-			}));
+			foreach ($rows as &$r) {
+				if (isset($versionItemIds[(int) $r['pageId']])) $r['isVersionItem'] = true;
+			}
+			unset($r);
 		}
 
 		return $rows;

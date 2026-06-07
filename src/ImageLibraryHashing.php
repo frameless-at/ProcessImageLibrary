@@ -366,7 +366,9 @@ trait ImageLibraryHashing {
 	protected function scanHashes(int $offset = 0): array {
 		$this->ensureHashTable();
 
-		$rows  = $this->loadRows();
+		// Version-inclusive: also fingerprint page-version copies so their
+		// byte-identical files get hardlinked (the display hides them).
+		$rows  = $this->loadImageRowsAll();
 		$total = count($rows);
 		if ($offset < 0) $offset = 0;
 
@@ -551,9 +553,11 @@ trait ImageLibraryHashing {
 		$this->ensureHashTable();
 		$this->ensureHardlinkTable();
 
-		$live      = [];   // "page\0field\0basename" of live originals
+		$live      = [];   // "page\0field\0basename" of live + version-copy originals
 		$liveStems = [];   // "page\0field" => [stem => true]
-		foreach ($this->loadRows() as $r) {
+		// Version-inclusive: version-copy files are legitimately deduped, so
+		// their fingerprint / manifest rows must NOT be pruned as orphans.
+		foreach ($this->loadImageRowsAll() as $r) {
 			$pid = (int) $r['pageId']; $fn = (string) $r['fieldName']; $bn = (string) $r['basename'];
 			$live[$pid . "\0" . $fn . "\0" . $bn] = true;
 			$dot  = strrpos($bn, '.');
