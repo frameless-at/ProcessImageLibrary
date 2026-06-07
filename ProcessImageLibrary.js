@@ -2077,6 +2077,13 @@
 						(labels.deleted || 'Deleted %d').replace('%d', succeeded.length)
 					);
 				}
+				// Deleting a copy can change a duplicate cluster (a 2× pair
+				// becomes unique) — the dup indicator / accordion is computed
+				// server-side from the current set, so re-render to recompute
+				// it. Deferred so the row fade-out plays first.
+				if (succeeded.length) {
+					setTimeout(function () { replaceFromQs(location.search, false); }, 280);
+				}
 			}).catch(function (err) {
 				keys.forEach(function (k) {
 					if (map[k]) map[k].classList.remove('ml-row-uploading');
