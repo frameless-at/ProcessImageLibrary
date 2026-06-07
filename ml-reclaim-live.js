@@ -197,15 +197,6 @@
 						return '<li>' + k + ': <strong>' + fmt(d.versionReasons[k]) + '</strong></li>';
 					}).join('') + '</ul>';
 			}
-			if (d.versionSamples && d.versionSamples.length) {
-				html += '<div class="uk-text-muted uk-margin-small-top">Example standalone version files:</div>' +
-					'<ul class="uk-list ml-mono uk-margin-remove-top">' +
-					d.versionSamples.map(function (p) {
-						return '<li>' + p.replace(/[<>&]/g, function (c) {
-							return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c];
-						}) + '</li>';
-					}).join('') + '</ul>';
-			}
 			out.innerHTML = html;
 		}).catch(function (e) {
 			out.innerHTML = '<span class="uk-text-danger">✗ ' + (e && e.message ? e.message : 'error') + '</span>';

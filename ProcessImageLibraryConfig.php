@@ -322,7 +322,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			. '<button type="button" class="ml-reclaim-start ui-button uk-button uk-button-primary">'
 			. '<i class="fa fa-refresh" aria-hidden="true"></i> ' . $san->entities($this->_('Scan and reclaim (live)')) . '</button> '
 			. '<button type="button" class="ml-audit-start ui-button uk-button uk-button-default">'
-			. '<i class="fa fa-search" aria-hidden="true"></i> ' . $san->entities($this->_('Verify on disk')) . '</button> '
+			. '<i class="fa fa-refresh" aria-hidden="true"></i> ' . $san->entities($this->_('Re-measure')) . '</button> '
 			// JS intercepts this and runs the chunked revert-step endpoint (so it
 			// always finishes); the href + inline confirm remain a no-JS fallback.
 			. '<a class="ml-reclaim-revert ui-button uk-button uk-button-default" href="' . $san->entities($revertUrl) . '"'
