@@ -180,17 +180,22 @@
 				['Files scanned',            fmt(d.files) + (d.truncated ? ' (capped)' : '')],
 				['Logical size (what FTP/backup sees)', d.apparentHuman],
 				['Actual disk usage (du)',   d.actualHuman],
-				['→ Space saved by hardlinks', '<strong>' + d.savedHuman + '</strong>'],
-				['Version files total',      fmt(d.versionFiles)],
-				['  · already shared',       fmt(d.versionShared)],
-				['  · still standalone',     fmt(d.versionStandalone) + ' (' + d.versionStandaloneHuman + ' reclaimable)']
+				['→ Space saved by hardlinks', '<strong>' + d.savedHuman + '</strong>']
 			];
+			// Page Versions is a niche feature — only show its breakdown when the
+			// install actually has version files.
+			var hasVersions = (d.versionFiles | 0) > 0;
+			if (hasVersions) {
+				rows.push(['Version files total',  fmt(d.versionFiles)]);
+				rows.push(['  · already shared',   fmt(d.versionShared)]);
+				rows.push(['  · still standalone', fmt(d.versionStandalone) + ' (' + d.versionStandaloneHuman + ' reclaimable)']);
+			}
 			var html = '<table class="uk-table uk-table-small uk-table-divider uk-margin-remove">' +
 				rows.map(function (r) {
 					return '<tr><td class="uk-text-muted">' + r[0] +
 						'</td><td class="uk-text-right">' + r[1] + '</td></tr>';
 				}).join('') + '</table>';
-			if (d.versionReasons && Object.keys(d.versionReasons).length) {
+			if (hasVersions && d.versionReasons && Object.keys(d.versionReasons).length) {
 				html += '<div class="uk-text-muted uk-margin-small-top">Why standalone version files weren’t linked:</div>' +
 					'<ul class="uk-list uk-margin-remove-top">' +
 					Object.keys(d.versionReasons).map(function (k) {
