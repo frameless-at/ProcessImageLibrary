@@ -647,6 +647,37 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * AJAX endpoint: ground-truth disk audit for the config page. Walks the real
+	 * assets/files tree and reports what `du` would report (apparent size vs.
+	 * actual inode-deduplicated size = space saved by hardlinks), plus a
+	 * page-version breakdown. This is the measurement the user can't run on
+	 * shared hosting (no shell): it proves, in the browser, whether the reclaimed
+	 * number is the true on-disk saving and whether version files are still
+	 * standalone copies. POST + CSRF, returns the audit numbers (raw + human).
+	 */
+	public function ___executeDiskAudit() {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+		@set_time_limit(120);
+		$a = $this->diskAudit();
+		$a['ok'] = true;
+		$a['apparentHuman']        = $this->formatFilesize($a['apparent']);
+		$a['actualHuman']          = $this->formatFilesize($a['actual']);
+		$a['savedHuman']           = $this->formatFilesize($a['saved']);
+		$a['versionStandaloneHuman'] = $this->formatFilesize($a['versionStandaloneBytes']);
+		$a['manifestBytes']        = $this->totalReclaimedBytes();
+		$a['manifestHuman']        = $this->formatFilesize($a['manifestBytes']);
+		return $this->jsonResponse($a);
+	}
+
+	/**
 	 * AJAX endpoint: assign an EXISTING library image to a target page's image
 	 * field — "use this image here" — without the user re-uploading it. Native
 	 * FieldtypeImage can only reference files in its own page's folder, so the

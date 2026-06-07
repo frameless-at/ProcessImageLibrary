@@ -113,11 +113,44 @@
 			.then(function () { btn.disabled = false; });
 	}
 
+	// Ground-truth disk audit: measures real on-disk savings (what `du` reports)
+	// and the page-version breakdown, server-side — so the user can VERIFY the
+	// reclaimed number in the browser without shell access.
+	function audit(box, btn) {
+		var out  = el(box, '.ml-audit-result');
+		var csrf = { name: box.dataset.csrfName, value: box.dataset.csrfValue };
+		btn.disabled = true;
+		out.hidden = false;
+		out.innerHTML = 'Measuring real disk usage… (this can take a moment)';
+		post(box.dataset.auditUrl, {}, csrf).then(function (d) {
+			if (!d || !d.ok) throw new Error((d && d.error) || 'audit failed');
+			var rows = [
+				['Files scanned',            fmt(d.files) + (d.truncated ? ' (capped)' : '')],
+				['Logical size (what FTP/backup sees)', d.apparentHuman],
+				['Actual disk usage (du)',   d.actualHuman],
+				['→ Space saved by hardlinks', '<strong>' + d.savedHuman + '</strong>'],
+				['Manifest says reclaimed',  d.manifestHuman],
+				['Version files total',      fmt(d.versionFiles)],
+				['  · already shared',       fmt(d.versionShared)],
+				['  · still standalone',     fmt(d.versionStandalone) + ' (' + d.versionStandaloneHuman + ' reclaimable)']
+			];
+			out.innerHTML = '<table style="border-collapse:collapse;width:100%">' +
+				rows.map(function (r) {
+					return '<tr><td style="padding:2px 8px 2px 0;color:#555">' + r[0] +
+						'</td><td style="padding:2px 0;text-align:right">' + r[1] + '</td></tr>';
+				}).join('') + '</table>';
+		}).catch(function (e) {
+			out.innerHTML = '<span style="color:#c33">✗ ' + (e && e.message ? e.message : 'error') + '</span>';
+		}).then(function () { btn.disabled = false; });
+	}
+
 	document.addEventListener('click', function (e) {
-		var btn = e.target.closest && e.target.closest('.ml-reclaim-start');
-		if (!btn) return;
+		var t = e.target.closest && e.target.closest('.ml-reclaim-start, .ml-audit-start');
+		if (!t) return;
 		e.preventDefault();
 		var box = document.querySelector('.ml-reclaim-live');
-		if (box) run(box, btn);
+		if (!box) return;
+		if (t.classList.contains('ml-audit-start')) audit(box, t);
+		else run(box, t);
 	});
 })();

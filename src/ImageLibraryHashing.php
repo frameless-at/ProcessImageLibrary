@@ -659,6 +659,75 @@ trait ImageLibraryHashing {
 		}
 	}
 
+	/**
+	 * Ground-truth disk audit: walk the real site/assets/files tree and measure
+	 * what `du` would report — independent of our manifest. For every regular
+	 * file we record its size and (device, inode) pair. The "apparent" total
+	 * sums every file's size; the "actual" total counts each unique inode once,
+	 * so a file shared across N names is billed a single time. apparent − actual
+	 * is the space currently saved by hardlinks, measured straight from the
+	 * filesystem. We also break out page-version files (those inside a `/v<n>/`
+	 * subdir) so we can SEE whether they are already shared (link count ≥ 2) or
+	 * still standalone copies (link count 1, i.e. reclaimable but not yet linked).
+	 *
+	 * @return array{
+	 *   files:int, apparent:int, actual:int, saved:int,
+	 *   versionFiles:int, versionShared:int, versionStandalone:int,
+	 *   versionStandaloneBytes:int, truncated:bool
+	 * }
+	 */
+	protected function diskAudit(): array {
+		$root = (string) $this->wire('config')->paths->files; // site/assets/files/
+		$out = [
+			'files' => 0, 'apparent' => 0, 'actual' => 0, 'saved' => 0,
+			'versionFiles' => 0, 'versionShared' => 0, 'versionStandalone' => 0,
+			'versionStandaloneBytes' => 0, 'truncated' => false,
+		];
+		if ($root === '' || !is_dir($root)) return $out;
+
+		$seenInode = [];          // "dev:inode" => true, to count shared inodes once
+		$max = 400000;            // safety cap so a giant tree can't run away
+		try {
+			$it = new \RecursiveIteratorIterator(
+				new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+				\RecursiveIteratorIterator::LEAVES_ONLY
+			);
+			foreach ($it as $file) {
+				if (!$file->isFile() || $file->isLink()) continue;
+				if ($out['files'] >= $max) { $out['truncated'] = true; break; }
+
+				$size  = (int) $file->getSize();
+				$inode = (int) $file->getInode();
+				$dev   = (int) @stat($file->getPathname())['dev'];
+				$nlink = (int) @stat($file->getPathname())['nlink'];
+				$key   = $dev . ':' . $inode;
+
+				$out['files']++;
+				$out['apparent'] += $size;
+				if ($inode === 0 || !isset($seenInode[$key])) {
+					$seenInode[$key] = true;
+					$out['actual'] += $size;
+				}
+
+				// Page-version file? Path contains a /v<digits>/ segment.
+				if (preg_match('~/v\d+/~', str_replace('\\', '/', $file->getPathname()))) {
+					$out['versionFiles']++;
+					if ($nlink >= 2) {
+						$out['versionShared']++;
+					} else {
+						$out['versionStandalone']++;
+						$out['versionStandaloneBytes'] += $size;
+					}
+				}
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: disk audit failed: ' . $e->getMessage());
+		}
+
+		$out['saved'] = max(0, $out['apparent'] - $out['actual']);
+		return $out;
+	}
+
 	/** Total bytes currently reclaimed (sum of the manifest). */
 	protected function totalReclaimedBytes(): int {
 		$this->ensureHardlinkTable();
