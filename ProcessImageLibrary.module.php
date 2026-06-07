@@ -1241,11 +1241,20 @@ class ProcessImageLibrary extends Process {
 				foreach ($unit as $r) $slice[] = $r;
 			}
 		} else {
-			$total      = count($rows);
+			// Masonry collapses (contextual) duplicates the SAME way the table
+			// does: one tile per image (the cluster head), the "N×" badge marking
+			// the copies — otherwise a duplicated image showed once per copy
+			// (20 unique images rendered as 40 tiles). Paginate by unit so the
+			// count matches the table.
+			$units      = $this->buildDisplayUnits($rows, $keyHash, $ctxCount);
+			$total      = count($units);
 			$totalPages = max(1, (int) ceil($total / $pageSize));
 			$page       = min(max(1, $requestedPage), $totalPages);
 			$offset     = ($page - 1) * $pageSize;
-			$slice      = array_slice($rows, $offset, $pageSize);
+			$slice      = [];
+			foreach (array_slice($units, $offset, $pageSize) as $unit) {
+				$slice[] = $unit[0];   // head row only; badge shows it's duplicated
+			}
 		}
 		$slice = $this->hydrateSlice($slice);
 		// Annotate each visible row with its contextual duplicate count / hash
