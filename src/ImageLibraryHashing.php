@@ -496,6 +496,26 @@ trait ImageLibraryHashing {
 	protected function pruneStaleRowsForPage(int $pageId, array $present): void {
 		$this->ensureHashTable();
 		$this->ensureHardlinkTable();
+
+		// Per-field stems of the present ORIGINALS, so a present image's
+		// VARIATION rows (foo.300x200.jpg belongs to foo.jpg) aren't pruned as
+		// orphans. The hash table only holds originals; the hardlink manifest
+		// holds originals + variations.
+		$stemsByField = [];
+		foreach (array_keys($present) as $key) {
+			[$fn, $bn] = array_pad(explode("\0", $key, 2), 2, '');
+			$dot  = strrpos($bn, '.');
+			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			if ($stem !== '') $stemsByField[$fn][$stem] = true;
+		}
+		$isKept = function (string $fn, string $bn) use ($present, $stemsByField): bool {
+			if (isset($present[$fn . "\0" . $bn])) return true;        // present original
+			foreach ($stemsByField[$fn] ?? [] as $stem => $_) {        // variation of one
+				if (strncmp($bn, $stem . '.', strlen($stem) + 1) === 0) return true;
+			}
+			return false;
+		};
+
 		$db = $this->wire('database');
 		foreach ([self::HASH_TABLE, self::HARDLINK_TABLE] as $table) {
 			try {
@@ -503,7 +523,7 @@ trait ImageLibraryHashing {
 				$sel->execute([$pageId]);
 				$stale = [];
 				while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
-					if (!isset($present[$r['field_name'] . "\0" . $r['basename']])) {
+					if (!$isKept((string) $r['field_name'], (string) $r['basename'])) {
 						$stale[] = [$r['field_name'], $r['basename']];
 					}
 				}
@@ -638,14 +658,25 @@ trait ImageLibraryHashing {
 		return true;
 	}
 
-	/** Resolve a member identity to its on-disk file path, or null. */
+	/**
+	 * Resolve a member identity to its on-disk file path, or null. Handles
+	 * both originals (resolved via the Pageimage API) AND variation basenames
+	 * (e.g. "foo.300x200.jpg", which are not stored Pageimages): those resolve
+	 * to the page's files directory — via filesPath(), so extended / secure
+	 * file paths are honoured rather than hand-built.
+	 */
 	protected function memberFilePath(array $m): ?string {
 		$page = $this->wire('pages')->get((int) $m['pageId']);
 		if (!$page->id) return null;
-		$img = $this->resolvePageimage($page, (string) $m['fieldName'], (string) $m['basename']);
-		if (!$img) return null;
-		$f = (string) $img->filename;
-		return ($f !== '' && is_file($f)) ? $f : null;
+		$bn  = (string) $m['basename'];
+		$img = $this->resolvePageimage($page, (string) $m['fieldName'], $bn);
+		if ($img) {
+			$f = (string) $img->filename;
+			return ($f !== '' && is_file($f)) ? $f : null;
+		}
+		// Variation (no matching Pageimage): build from the page's files dir.
+		$f = $page->filesPath() . $bn;
+		return is_file($f) ? $f : null;
 	}
 
 	protected function recordHardlink(array $member, array $canon, int $bytes): void {
@@ -703,6 +734,80 @@ trait ImageLibraryHashing {
 				$res['linked']++; $res['bytes'] += $size;
 			} else {
 				$res['skipped']++;
+			}
+		}
+
+		// Also collapse the byte-identical VARIATIONS (sm/md/lg thumbnails …)
+		// that pile up identically in each copy's folder. Variations are lazy
+		// (they often don't exist yet at assign time), so the recurring
+		// maintenance pass is what really catches them; here it's cheap once
+		// linked (sameInode fast-skip).
+		$v = $this->reclaimVariations($members);
+		$res['linked'] += $v['linked'];
+		$res['bytes']  += $v['bytes'];
+
+		return $res;
+	}
+
+	/**
+	 * Collapse the byte-identical variation files within one cluster. Identical
+	 * originals rendered with identical parameters produce byte-identical
+	 * variations — but they live as separate files in each copy's folder. Group
+	 * every member's variations by the filename part AFTER the original stem
+	 * (e.g. ".300x200.jpg") — that key is the same across copies even when the
+	 * originals were renamed (foo.jpg vs foo-1.jpg) — then hardlink the
+	 * identical ones onto one inode. Byte-identity is re-verified before every
+	 * link, so a wrong link is impossible (worst case: a variation isn't
+	 * linked). Each link is recorded in the manifest → reversible + counted.
+	 *
+	 * @param array<int,array{pageId:int,fieldName:string,basename:string}> $members
+	 * @return array{linked:int,bytes:int}
+	 */
+	protected function reclaimVariations(array $members): array {
+		$res = ['linked' => 0, 'bytes' => 0];
+
+		// key => list of { pageId, fieldName, basename, path }
+		$groups = [];
+		foreach ($members as $m) {
+			$orig = $this->memberFilePath($m);
+			if ($orig === null) continue;
+			$dir  = dirname($orig) . '/';
+			$obn  = basename($orig);                       // foo.jpg
+			$dot  = strrpos($obn, '.');
+			$stem = $dot === false ? $obn : substr($obn, 0, $dot);   // foo
+			if ($stem === '') continue;
+			// Variation files share the original's stem: "<stem>.*".
+			foreach (glob($dir . $stem . '.*', GLOB_NOSORT) ?: [] as $path) {
+				$bn = basename($path);
+				if ($bn === $obn || !is_file($path)) continue;   // skip the original
+				$key = substr($bn, strlen($stem));               // ".300x200.jpg"
+				$groups[$key][] = [
+					'pageId'    => (int) $m['pageId'],
+					'fieldName' => (string) $m['fieldName'],
+					'basename'  => $bn,
+					'path'      => $path,
+				];
+			}
+		}
+
+		foreach ($groups as $list) {
+			if (count($list) < 2) continue;
+			$canon = null;
+			foreach ($list as $e) { if (is_file($e['path'])) { $canon = $e; break; } }
+			if ($canon === null) continue;
+			foreach ($list as $e) {
+				if ($e['path'] === $canon['path']) continue;
+				if ($this->sameInode($canon['path'], $e['path'])) continue;
+				if (!$this->filesByteIdentical($canon['path'], $e['path'])) continue;  // safety
+				$size = (int) @filesize($e['path']);
+				if ($this->hardlinkReplace($canon['path'], $e['path'])) {
+					$this->recordHardlink(
+						['pageId' => $e['pageId'], 'fieldName' => $e['fieldName'], 'basename' => $e['basename']],
+						['pageId' => $canon['pageId'], 'fieldName' => $canon['fieldName'], 'basename' => $canon['basename']],
+						$size
+					);
+					$res['linked']++; $res['bytes'] += $size;
+				}
 			}
 		}
 		return $res;
