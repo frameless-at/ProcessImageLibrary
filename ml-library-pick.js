@@ -13,21 +13,34 @@
 	// The button lives on the page editor, which doesn't load the module CSS.
 	// Two things to inject once:
 	//  - icon sizing for the fa-image glyph;
-	//  - an outline (uk-button-default-style) look: the native submit button
-	//    is filled with the theme colour, so override .ml-lib-pick.ui-button
-	//    to a transparent button with a subtle border + inherited text colour
-	//    (theme-agnostic). Higher specificity than the theme rule, no !important.
-	//    ui-state-hover is folded into the base rule so jQuery UI's hover state
-	//    keeps the SAME look — no custom :hover rule (that made it twitch).
+	//  - an outline (uk-button-default-style) look: the native submit button is
+	//    filled with the theme colour, so override it to a transparent button
+	//    with a subtle border + inherited text colour (theme-agnostic).
+	//
+	// The "twitch" on hover is the admin theme moving the button (transform /
+	// box-shadow / a different border on :hover/:focus/:active). We pin EVERY
+	// interaction state to the exact same geometry and kill transform, shadow
+	// and transitions, so nothing can shift. (border-box too, in case the theme
+	// changes border width.) High specificity beats the theme rule; no !important.
 	(function injectStyle() {
 		if (document.getElementById('ml-lib-pick-style')) return;
 		var s = document.createElement('style');
 		s.id = 'ml-lib-pick-style';
+		var states = [
+			'.ml-lib-pick.ui-button',
+			'.ml-lib-pick.ui-button.ui-state-default',
+			'.ml-lib-pick.ui-button.ui-state-hover',
+			'.ml-lib-pick.ui-button.ui-state-focus',
+			'.ml-lib-pick.ui-button.ui-state-active',
+			'.ml-lib-pick.ui-button:hover',
+			'.ml-lib-pick.ui-button:focus',
+			'.ml-lib-pick.ui-button:active'
+		].join(',');
 		s.textContent =
 			'.ml-lib-pick .fa{font-size:0.85em;width:1em;vertical-align:1px;text-align:center;margin-right:3px}'
-			+ '.ml-lib-pick.ui-button,.ml-lib-pick.ui-button.ui-state-default,'
-			+ '.ml-lib-pick.ui-button.ui-state-hover{background:transparent;color:inherit;'
-			+ 'border:1px solid rgba(127,127,127,.5)}';
+			+ states + '{background:transparent;color:inherit;'
+			+ 'border:1px solid rgba(127,127,127,.5);box-sizing:border-box;'
+			+ 'box-shadow:none;transform:none;transition:none}';
 		document.head.appendChild(s);
 	})();
 

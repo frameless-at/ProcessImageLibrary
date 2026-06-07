@@ -246,7 +246,7 @@
 	right: 4px;
 	background: var(--pw-main-color, #eb1d61);
 	color: #fff;
-	font-size: 0.85rem;
+	font-size: 1rem;
 	font-weight: 600;
 	line-height: 1;
 	padding: 5px 9px;
@@ -274,9 +274,9 @@
 .ml-dup-toggle::after {
 	content: "\025B8";
 	margin-left: 4px;
-	font-size: 1.6em;
+	font-size: 1.8em;
 	line-height: 0;
-	vertical-align: middle;
+	vertical-align: -2px;
 }
 .ml-dup-toggle.ml-dup-open::after {
 	content: "\025BE";
