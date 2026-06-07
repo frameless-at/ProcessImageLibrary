@@ -47,6 +47,9 @@ class ProcessImageLibrary extends Process {
 	const CACHE_PREFIX = 'image-library-';
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+	// Initial page size when the library opens as a picker (first load only —
+	// the user can still switch via the page-size picker).
+	const PICKER_DEFAULT_PAGE_SIZE = 25;
 	// THUMB_LONGER_SIDE_DEFAULT is the keep-ratio display target —
 	// the longer-axis cap for the proportionally-rendered thumb. At
 	// 100 it sits well below PW's admin-variation size (260 on the
@@ -1076,6 +1079,13 @@ class ProcessImageLibrary extends Process {
 		}
 
 		$pageSize = $this->readPageSize();
+		// Picker: default to a small page on first load (no explicit, valid
+		// ?ps in the request) so the modal opens fast. The page-size picker
+		// still lets the user switch to a larger page.
+		if ($this->pickerMode
+			&& !in_array((int) $this->wire('input')->get('ps'), $this->getPageSizeOptions(), true)) {
+			$pageSize = self::PICKER_DEFAULT_PAGE_SIZE;
+		}
 
 		if ($this->getViewMode() !== self::VIEW_MASONRY) {
 			// Table view ALWAYS collapses (contextual) duplicates: every image
