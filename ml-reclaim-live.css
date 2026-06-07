@@ -1,0 +1,16 @@
+/**
+ * Structural styling for the dedup config UI (scan/reclaim/revert + audit).
+ * Colours and surfaces come from UIkit utility classes (uk-background-muted,
+ * uk-text-muted, …) so the admin theme handles light AND dark mode; this file
+ * only holds layout that has no UIkit utility — i.e. the monospace log/sample
+ * lists and their line spacing.
+ */
+.ml-mono {
+	font-family: Consolas, Menlo, Monaco, "Courier New", monospace;
+	font-size: 0.82rem;
+	line-height: 1.5;
+}
+
+.ml-reclaim-log li {
+	padding: 1px 0;
+}

@@ -20,9 +20,11 @@
 		}).then(function (r) { return r.json(); });
 	}
 
+	// cls is a UIkit utility class (e.g. uk-text-muted / uk-text-danger) so log
+	// lines pick up the admin theme's colours in both light and dark mode.
 	function logLine(ul, text, cls) {
 		var li = document.createElement('li');
-		if (cls) li.style.color = cls;
+		if (cls) li.className = cls;
 		li.textContent = text;
 		ul.appendChild(li);
 		ul.scrollTop = ul.scrollHeight;
@@ -118,7 +120,7 @@
 					var human = c.bytes ? ' (+' + Math.round(c.bytes / 1024) + ' KB)' : '';
 					logLine(log,
 						'• ' + c.label + ' [' + c.members + ' copies]: ' + parts.join(', ') + human,
-						c.variations ? '' : (c.originals ? '' : '#888'));
+						(c.variations || c.originals) ? '' : 'uk-text-muted');
 				});
 				updateTotals();
 				if (!d.complete) return reclaim(d.nextOffset);
@@ -132,7 +134,7 @@
 		scan(0).then(function () { return reclaim(0); })
 			.catch(function (e) {
 				phase.textContent = 'Failed.';
-				logLine(log, '✗ ' + (e && e.message ? e.message : 'error'), '#c33');
+				logLine(log, '✗ ' + (e && e.message ? e.message : 'error'), 'uk-text-danger');
 			})
 			.then(function () { btn.disabled = false; });
 	}
@@ -158,21 +160,21 @@
 				['  · already shared',       fmt(d.versionShared)],
 				['  · still standalone',     fmt(d.versionStandalone) + ' (' + d.versionStandaloneHuman + ' reclaimable)']
 			];
-			var html = '<table style="border-collapse:collapse;width:100%">' +
+			var html = '<table class="uk-table uk-table-small uk-table-divider uk-margin-remove">' +
 				rows.map(function (r) {
-					return '<tr><td style="padding:2px 8px 2px 0;color:#555">' + r[0] +
-						'</td><td style="padding:2px 0;text-align:right">' + r[1] + '</td></tr>';
+					return '<tr><td class="uk-text-muted">' + r[0] +
+						'</td><td class="uk-text-right">' + r[1] + '</td></tr>';
 				}).join('') + '</table>';
 			if (d.versionReasons && Object.keys(d.versionReasons).length) {
-				html += '<div style="margin-top:.5rem;color:#555">Why standalone version files weren’t linked:</div>' +
-					'<ul style="margin:.2rem 0 0;padding-left:1.1rem;font-size:.85em">' +
+				html += '<div class="uk-text-muted uk-margin-small-top">Why standalone version files weren’t linked:</div>' +
+					'<ul class="uk-list uk-margin-remove-top">' +
 					Object.keys(d.versionReasons).map(function (k) {
 						return '<li>' + k + ': <strong>' + fmt(d.versionReasons[k]) + '</strong></li>';
 					}).join('') + '</ul>';
 			}
 			if (d.versionSamples && d.versionSamples.length) {
-				html += '<div style="margin-top:.5rem;color:#555">Example standalone version files:</div>' +
-					'<ul style="margin:.2rem 0 0;padding-left:1.1rem;font-family:monospace;font-size:.85em">' +
+				html += '<div class="uk-text-muted uk-margin-small-top">Example standalone version files:</div>' +
+					'<ul class="uk-list ml-mono uk-margin-remove-top">' +
 					d.versionSamples.map(function (p) {
 						return '<li>' + p.replace(/[<>&]/g, function (c) {
 							return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c];
@@ -181,7 +183,7 @@
 			}
 			out.innerHTML = html;
 		}).catch(function (e) {
-			out.innerHTML = '<span style="color:#c33">✗ ' + (e && e.message ? e.message : 'error') + '</span>';
+			out.innerHTML = '<span class="uk-text-danger">✗ ' + (e && e.message ? e.message : 'error') + '</span>';
 		}).then(function () { btn.disabled = false; });
 	}
 
@@ -221,7 +223,7 @@
 		}
 		step().catch(function (e) {
 			phase.textContent = 'Failed.';
-			logLine(log, '✗ ' + (e && e.message ? e.message : 'error'), '#c33');
+			logLine(log, '✗ ' + (e && e.message ? e.message : 'error'), 'uk-text-danger');
 		}).then(function () { if (trigger) trigger.style.pointerEvents = ''; });
 	}
 

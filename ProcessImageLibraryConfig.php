@@ -270,9 +270,13 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$libPage = $this->wire('pages')->get('template=admin, name=image-library, include=all');
 		$libUrl  = ($libPage && $libPage->id) ? $libPage->url : '';
 		if ($instance instanceof ProcessImageLibrary && $libUrl !== '') {
-			$cfg   = $this->wire('config');
-			$jsVer = @filemtime($cfg->paths($instance) . 'ml-reclaim-live.js') ?: '1';
-			$cfg->scripts->add($cfg->urls($instance) . 'ml-reclaim-live.js?v=' . $jsVer);
+			$cfg     = $this->wire('config');
+			$modPath = $cfg->paths($instance);
+			$modUrl  = $cfg->urls($instance);
+			$jsVer   = @filemtime($modPath . 'ml-reclaim-live.js') ?: '1';
+			$cssVer  = @filemtime($modPath . 'ml-reclaim-live.css') ?: '1';
+			$cfg->scripts->add($modUrl . 'ml-reclaim-live.js?v=' . $jsVer);
+			$cfg->styles->add($modUrl . 'ml-reclaim-live.css?v=' . $cssVer);
 		}
 
 		// Status read-out. The <strong> values carry classes so the live JS
@@ -295,7 +299,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			. '<li class="ml-stat-row-shared"' . $hide . '>' . $san->entities($this->_('Copies sharing a file')) . ': <strong class="ml-stat-shared">' . $linked . '</strong></li>'
 			. '<li class="ml-stat-row-clusters"' . ($clusters ? '' : ' hidden') . '>' . $san->entities($this->_('Exact-duplicate clusters')) . ': <strong class="ml-stat-clusters">' . $clusters . '</strong></li>'
 			. '</ul>'
-			. '<p class="ml-stat-empty"' . ($hasReclaim ? ' hidden' : '') . ' style="margin:0;color:#777">'
+			. '<p class="ml-stat-empty uk-text-muted uk-margin-remove"' . ($hasReclaim ? ' hidden' : '') . '>'
 			. $san->entities($this->_('Nothing is collapsed right now — run “Scan and reclaim” below to free space.'))
 			. '</p>'
 			. '</div>';
@@ -326,16 +330,12 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			. ' onclick="return confirm(' . $san->entities(json_encode($revertConfirm, JSON_HEX_APOS | JSON_HEX_QUOT)) . ')">'
 			. '<i class="fa fa-undo" aria-hidden="true"></i> ' . $san->entities($this->_('Revert (un-share all)')) . '</a>'
 			. '</p>'
-			. '<div class="ml-audit-result" hidden style="margin-top:.6rem;font-size:.9em;'
-			.   'padding:.6rem .8rem;background:var(--pw-input-bg,#f7f7f7);'
-			.   'border:1px solid var(--pw-border-color,#e0e0e0);border-radius:3px"></div>'
-			. '<div class="ml-reclaim-panel" hidden style="margin-top:.6rem">'
-			. '<div class="ml-reclaim-phase" style="font-weight:600"></div>'
-			. '<progress class="ml-reclaim-bar" max="100" value="0" style="width:100%;height:14px"></progress>'
-			. '<div class="ml-reclaim-totals" style="margin:.2rem 0"></div>'
-			. '<ul class="ml-reclaim-log" style="max-height:300px;overflow:auto;font-family:monospace;'
-			.   'font-size:.82em;line-height:1.5;margin:.4rem 0 0;padding:.4rem .6rem;list-style:none;'
-			.   'background:var(--pw-input-bg,#f7f7f7);border:1px solid var(--pw-border-color,#e0e0e0);border-radius:3px"></ul>'
+			. '<div class="ml-audit-result uk-background-muted uk-border-rounded uk-padding-small uk-margin-small-top uk-text-small" hidden></div>'
+			. '<div class="ml-reclaim-panel uk-margin-small-top" hidden>'
+			. '<div class="ml-reclaim-phase uk-text-bold"></div>'
+			. '<progress class="ml-reclaim-bar uk-progress uk-margin-small" max="100" value="0"></progress>'
+			. '<div class="ml-reclaim-totals uk-text-small uk-margin-small-bottom"></div>'
+			. '<ul class="ml-reclaim-log uk-list ml-mono uk-background-muted uk-border-rounded uk-padding-small uk-overflow-auto uk-height-max-medium"></ul>'
 			. '</div></div>';
 		$fs->add($tools);
 
