@@ -17,30 +17,30 @@
 	//    filled with the theme colour, so override it to a transparent button
 	//    with a subtle border + inherited text colour (theme-agnostic).
 	//
-	// The "twitch" on hover is the admin theme moving the button (transform /
-	// box-shadow / a different border on :hover/:focus/:active). We pin EVERY
-	// interaction state to the exact same geometry and kill transform, shadow
-	// and transitions, so nothing can shift. (border-box too, in case the theme
-	// changes border width.) High specificity beats the theme rule; no !important.
+	// The "twitch" on hover: PW REMOVES the 1px border on :hover/:focus/:active,
+	// so the button loses 2px of height and jumps. Rather than fight the theme
+	// over the border, compensate the height — line-height 36px normally, 38px on
+	// hover (= the 2px of border PW takes away). NOTE: no box-sizing:border-box,
+	// or the border wouldn't count toward height and this maths wouldn't hold.
 	(function injectStyle() {
 		if (document.getElementById('ml-lib-pick-style')) return;
 		var s = document.createElement('style');
 		s.id = 'ml-lib-pick-style';
-		var states = [
-			'.ml-lib-pick.ui-button',
-			'.ml-lib-pick.ui-button.ui-state-default',
-			'.ml-lib-pick.ui-button.ui-state-hover',
-			'.ml-lib-pick.ui-button.ui-state-focus',
-			'.ml-lib-pick.ui-button.ui-state-active',
+		var hoverStates = [
 			'.ml-lib-pick.ui-button:hover',
 			'.ml-lib-pick.ui-button:focus',
-			'.ml-lib-pick.ui-button:active'
+			'.ml-lib-pick.ui-button:active',
+			'.ml-lib-pick.ui-button.ui-state-hover',
+			'.ml-lib-pick.ui-button.ui-state-focus',
+			'.ml-lib-pick.ui-button.ui-state-active'
 		].join(',');
 		s.textContent =
 			'.ml-lib-pick .fa{font-size:0.85em;width:1em;vertical-align:1px;text-align:center;margin-right:3px}'
-			+ states + '{background:transparent;color:inherit;'
-			+ 'border:1px solid rgba(127,127,127,.5);box-sizing:border-box;'
-			+ 'box-shadow:none;transform:none;transition:none}';
+			+ '.ml-lib-pick.ui-button,.ml-lib-pick.ui-button.ui-state-default'
+			+ '{background:transparent;color:inherit;border:1px solid rgba(127,127,127,.5);'
+			+ 'line-height:36px;box-shadow:none;transform:none;transition:none}'
+			+ hoverStates + '{background:transparent;color:inherit;'
+			+ 'line-height:38px;box-shadow:none;transform:none}';
 		document.head.appendChild(s);
 	})();
 
