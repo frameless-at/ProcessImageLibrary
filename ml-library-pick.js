@@ -10,13 +10,14 @@
 (function () {
 	'use strict';
 
-	// The button lives on the page editor, which doesn't load the module CSS —
-	// inject the one rule we need (a smaller icon) once.
+	// The button lives on the page editor, which doesn't load the module CSS.
+	// Match the icon to PW's own "Choose File" button (fa-fw fa-folder-open-o):
+	// full size + fixed-width box, so the two buttons' icons sit identically.
 	(function injectStyle() {
 		if (document.getElementById('ml-lib-pick-style')) return;
 		var s = document.createElement('style');
 		s.id = 'ml-lib-pick-style';
-		s.textContent = '.ml-lib-pick .fa{font-size:.78em}';
+		s.textContent = '.ml-lib-pick .fa{font-size:1em;width:1.28571429em;text-align:center}';
 		document.head.appendChild(s);
 	})();
 
