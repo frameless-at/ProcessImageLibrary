@@ -565,14 +565,14 @@ class ProcessImageLibrary extends Process {
 	 * @return array{reclaimedBytes:int,reclaimedHuman:string,linkedCount:int,clusterCount:int}
 	 */
 	public function dedupStats(): array {
-		// Reclaimed space is read from the FILESYSTEM (cached), not the manifest:
-		// the manifest under-counts because pruning its rows never un-shares the
-		// inode, whereas the disk measurement always reflects the real saving.
-		$bytes = $this->diskSavedBytesCached();
+		// Both figures are read from the FILESYSTEM (cached): the OS link-counts
+		// are the single source of truth, so nothing can drift the way a separate
+		// bookkeeping table did.
+		$s = $this->cachedDiskStats();
 		return [
-			'reclaimedBytes' => $bytes,
-			'reclaimedHuman' => $this->formatFilesize($bytes),
-			'linkedCount'    => $this->countHardlinks(),
+			'reclaimedBytes' => $s['saved'],
+			'reclaimedHuman' => $this->formatFilesize($s['saved']),
+			'linkedCount'    => $s['shared'],
 			'clusterCount'   => count($this->loadExactClusters()['clusters']),
 		];
 	}
@@ -587,14 +587,13 @@ class ProcessImageLibrary extends Process {
 		@set_time_limit($seconds + 30);
 		$stop = microtime(true) + max(1, $seconds);
 		$expanded = 0;
-		// Filesystem-level un-share (see expandAllSharedStep): authoritative, so
-		// it also clears hardlinks the manifest drifted away from.
+		// Filesystem-level un-share (see expandAllSharedStep): authoritative — it
+		// un-shares every inode the OS reports as shared, no bookkeeping needed.
 		do {
 			$r = $this->expandAllSharedStep();
 			$expanded += (int) ($r['expanded'] ?? 0);
 		} while (empty($r['complete']) && microtime(true) < $stop);
-		if (!empty($r['complete'])) $this->clearManifest();
-		$this->diskSavedBytesCached(true);   // re-measure so the Status isn't stale
+		$this->cachedDiskStats(true);   // re-measure so the Status isn't stale
 		return $expanded;
 	}
 
@@ -662,12 +661,15 @@ class ProcessImageLibrary extends Process {
 					'bytes'      => (int) $v['bytes'],
 				];
 			}
-			$r['reclaimedBytes'] = $this->diskSavedBytesCached(true);
+			$s = $this->cachedDiskStats(true);   // re-measure once, at the end
 		} else {
-			$r['reclaimedBytes'] = $this->totalReclaimedBytes();
+			// Don't re-walk the tree every chunk; the per-cluster log + bar show
+			// live progress and the final figure is measured on completion.
+			$s = $this->cachedDiskStats(false);
 		}
-		$r['reclaimedHuman'] = $this->formatFilesize($r['reclaimedBytes']);
-		$r['linkedTotal']    = $this->countHardlinks();
+		$r['reclaimedBytes'] = $s['saved'];
+		$r['reclaimedHuman'] = $this->formatFilesize($s['saved']);
+		$r['linkedTotal']    = $s['shared'];
 		return $this->jsonResponse($r);
 	}
 
@@ -693,18 +695,16 @@ class ProcessImageLibrary extends Process {
 		@set_time_limit(60);
 		// Revert works at the FILESYSTEM level, not from the manifest: it un-shares
 		// every file the OS reports as shared (link-count ≥ 2), so it also clears
-		// hardlinks the manifest drifted away from — "un-share all" really means
-		// all. Re-POST until complete; then drop the now-meaningless manifest and
-		// re-measure the saving from disk.
+		// hardlinks any stale bookkeeping would have missed — "un-share all" really
+		// means all. Re-POST until complete; then re-measure the saving from disk.
 		$r = $this->expandAllSharedStep();
 		$r['ok'] = true;
 		if (!empty($r['complete'])) {
-			$this->clearManifest();
-			$r['reclaimedBytes'] = $this->diskSavedBytesCached(true);   // re-measure once, at the end
+			$r['reclaimedBytes'] = $this->cachedDiskStats(true)['saved'];   // re-measure once, at the end
 		} else {
 			// Don't re-walk the tree for a figure mid-run (the step already walked
 			// it); the driver shows live counts and only needs the MB at the end.
-			$r['reclaimedBytes'] = $this->diskSavedBytesCached(false);
+			$r['reclaimedBytes'] = $this->cachedDiskStats(false)['saved'];
 		}
 		$r['reclaimedHuman'] = $this->formatFilesize($r['reclaimedBytes']);
 		return $this->jsonResponse($r);
@@ -732,14 +732,13 @@ class ProcessImageLibrary extends Process {
 		@set_time_limit(120);
 		$a = $this->diskAudit();
 		$a['ok'] = true;
-		// Refresh the cached saved-figure so the Status block matches the audit.
-		$this->wire('cache')->saveFor($this, 'ml_disk_saved', (string) $a['saved'], 3600);
+		// Refresh the cached figures so the Status block matches the audit.
+		$this->wire('cache')->saveFor($this, 'ml_disk_stats',
+			json_encode(['saved' => (int) $a['saved'], 'shared' => (int) $a['sharedFiles']]), 3600);
 		$a['apparentHuman']        = $this->formatFilesize($a['apparent']);
 		$a['actualHuman']          = $this->formatFilesize($a['actual']);
 		$a['savedHuman']           = $this->formatFilesize($a['saved']);
 		$a['versionStandaloneHuman'] = $this->formatFilesize($a['versionStandaloneBytes']);
-		$a['manifestBytes']        = $this->totalReclaimedBytes();
-		$a['manifestHuman']        = $this->formatFilesize($a['manifestBytes']);
 		return $this->jsonResponse($a);
 	}
 

@@ -96,7 +96,8 @@ trait ImageLibraryHashing {
 		try {
 			$this->wire('database')->exec('DROP TABLE IF EXISTS `' . self::HASH_TABLE . '`');
 			$this->wire('database')->exec('DROP TABLE IF EXISTS `' . self::METALOCK_TABLE . '`');
-			$this->wire('database')->exec('DROP TABLE IF EXISTS `' . self::HARDLINK_TABLE . '`');
+			// Legacy hardlink-manifest table from older versions — drop if present.
+			$this->wire('database')->exec('DROP TABLE IF EXISTS `process_imagelibrary_hardlinks`');
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: hash table drop failed: ' . $e->getMessage());
 		}
@@ -488,21 +489,19 @@ trait ImageLibraryHashing {
 	}
 
 	/**
-	 * Remove fingerprint (HASH_TABLE) and hardlink-manifest (HARDLINK_TABLE)
-	 * rows for the given page whose (field, basename) is NOT in $present —
-	 * i.e. images that no longer exist on the page. Called after re-hashing a
-	 * saved page. Per-page, few rows; safe to run on every save.
+	 * Remove fingerprint (HASH_TABLE) rows for the given page whose (field,
+	 * basename) is NOT in $present — i.e. images that no longer exist on the
+	 * page. Called after re-hashing a saved page. Per-page, few rows; safe to
+	 * run on every save.
 	 *
 	 * @param array<string,bool> $present keys "field\0basename" still on the page
 	 */
 	protected function pruneStaleRowsForPage(int $pageId, array $present): void {
 		$this->ensureHashTable();
-		$this->ensureHardlinkTable();
 
-		// Per-field stems of the present ORIGINALS, so a present image's
-		// VARIATION rows (foo.300x200.jpg belongs to foo.jpg) aren't pruned as
-		// orphans. The hash table only holds originals; the hardlink manifest
-		// holds originals + variations.
+		// The hash table only holds originals, but be defensive: keep a present
+		// image's VARIATION rows (foo.300x200.jpg belongs to foo.jpg) rather than
+		// prune them as orphans.
 		$stemsByField = [];
 		foreach (array_keys($present) as $key) {
 			[$fn, $bn] = array_pad(explode("\0", $key, 2), 2, '');
@@ -519,83 +518,62 @@ trait ImageLibraryHashing {
 		};
 
 		$db = $this->wire('database');
-		foreach ([self::HASH_TABLE, self::HARDLINK_TABLE] as $table) {
-			try {
-				$sel = $db->prepare('SELECT field_name, basename FROM `' . $table . '` WHERE page_id = ?');
-				$sel->execute([$pageId]);
-				$stale = [];
-				while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
-					if (!$isKept((string) $r['field_name'], (string) $r['basename'])) {
-						$stale[] = [$r['field_name'], $r['basename']];
-					}
+		try {
+			$sel = $db->prepare('SELECT field_name, basename FROM `' . self::HASH_TABLE . '` WHERE page_id = ?');
+			$sel->execute([$pageId]);
+			$stale = [];
+			while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
+				if (!$isKept((string) $r['field_name'], (string) $r['basename'])) {
+					$stale[] = [$r['field_name'], $r['basename']];
 				}
-				if (!$stale) continue;
-				$del = $db->prepare(
-					'DELETE FROM `' . $table . '` WHERE page_id = ? AND field_name = ? AND basename = ?'
-				);
-				foreach ($stale as [$fn, $bn]) {
-					$del->execute([$pageId, $fn, $bn]);
-				}
-			} catch (\Throwable $e) {
-				$this->wire('log')->error('ImageLibrary: prune stale rows failed: ' . $e->getMessage());
 			}
+			if (!$stale) return;
+			$del = $db->prepare(
+				'DELETE FROM `' . self::HASH_TABLE . '` WHERE page_id = ? AND field_name = ? AND basename = ?'
+			);
+			foreach ($stale as [$fn, $bn]) {
+				$del->execute([$pageId, $fn, $bn]);
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: prune stale rows failed: ' . $e->getMessage());
 		}
 	}
 
 	/**
-	 * Global cleanup: drop fingerprint + hardlink-manifest rows that no longer
-	 * correspond to a LIVE image (per loadRows) — e.g. page-version repeater
-	 * items, or images deleted out-of-band. Keeps a live original's variation
-	 * manifest rows (matched by stem). Run at the start of a maintenance /
-	 * live-scan pass so the counts reflect reality.
+	 * Global cleanup: drop fingerprint rows that no longer correspond to a LIVE
+	 * image (per loadImageRowsAll) — e.g. page-version repeater items, or images
+	 * deleted out-of-band. Run at the start of a maintenance / live-scan pass so
+	 * the cluster counts reflect reality.
 	 */
 	protected function pruneOrphanedRows(): void {
 		$this->ensureHashTable();
-		$this->ensureHardlinkTable();
 
-		$live      = [];   // "page\0field\0basename" of live + version-copy originals
-		$liveStems = [];   // "page\0field" => [stem => true]
+		$live = [];   // "page\0field\0basename" of live + version-copy originals
 		// Version-inclusive: version-copy files are legitimately deduped, so
-		// their fingerprint / manifest rows must NOT be pruned as orphans.
+		// their fingerprint rows must NOT be pruned as orphans.
 		foreach ($this->loadImageRowsAll() as $r) {
-			$pid = (int) $r['pageId']; $fn = (string) $r['fieldName']; $bn = (string) $r['basename'];
-			$live[$pid . "\0" . $fn . "\0" . $bn] = true;
-			$dot  = strrpos($bn, '.');
-			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
-			if ($stem !== '') $liveStems[$pid . "\0" . $fn][$stem] = true;
+			$live[(int) $r['pageId'] . "\0" . (string) $r['fieldName'] . "\0" . (string) $r['basename']] = true;
 		}
 
 		$db = $this->wire('database');
-		foreach ([self::HASH_TABLE, self::HARDLINK_TABLE] as $table) {
-			$keepVariations = ($table === self::HARDLINK_TABLE);   // manifest holds variations
-			try {
-				$sel   = $db->query('SELECT page_id, field_name, basename FROM `' . $table . '`');
-				$stale = [];
-				while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
-					$pid = (int) $r['page_id']; $fn = (string) $r['field_name']; $bn = (string) $r['basename'];
-					if (isset($live[$pid . "\0" . $fn . "\0" . $bn])) continue;     // live original
-					// Page-version manifest rows ("v<n>/<basename>") aren't in the
-					// live row set by design — never prune them as orphans.
-					if ($keepVariations && preg_match('~^v\d+/~', $bn)) continue;
-					if ($keepVariations) {
-						$keep = false;
-						foreach ($liveStems[$pid . "\0" . $fn] ?? [] as $stem => $_) {
-							if (strncmp($bn, $stem . '.', strlen($stem) + 1) === 0) { $keep = true; break; }
-						}
-						if ($keep) continue;                                        // variation of a live original
-					}
-					$stale[] = [$pid, $fn, $bn];
-				}
-				if (!$stale) continue;
+		try {
+			$sel   = $db->query('SELECT page_id, field_name, basename FROM `' . self::HASH_TABLE . '`');
+			$stale = [];
+			while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
+				$pid = (int) $r['page_id']; $fn = (string) $r['field_name']; $bn = (string) $r['basename'];
+				if (isset($live[$pid . "\0" . $fn . "\0" . $bn])) continue;     // live original
+				$stale[] = [$pid, $fn, $bn];
+			}
+			if ($stale) {
 				$del = $db->prepare(
-					'DELETE FROM `' . $table . '` WHERE page_id = ? AND field_name = ? AND basename = ?'
+					'DELETE FROM `' . self::HASH_TABLE . '` WHERE page_id = ? AND field_name = ? AND basename = ?'
 				);
 				foreach ($stale as [$pid, $fn, $bn]) {
 					$del->execute([$pid, $fn, $bn]);
 				}
-			} catch (\Throwable $e) {
-				$this->wire('log')->error('ImageLibrary: prune orphaned rows failed: ' . $e->getMessage());
 			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: prune orphaned rows failed: ' . $e->getMessage());
 		}
 	}
 
@@ -636,35 +614,12 @@ trait ImageLibraryHashing {
 	// copy's file is replaced by a hardlink to that inode, so N copies cost
 	// 1× the bytes. Safe against PW ops (read / variation / rename / deleting
 	// one copy all keep the shared inode; only a byte-replace diverges, and
-	// gracefully). A manifest table records each link so the savings can be
-	// reported and the whole thing un-shared (expandManifest) — reversible.
+	// gracefully). There is deliberately NO separate manifest table: the
+	// FILESYSTEM is the single source of truth — link counts report what's
+	// shared (diskAudit), and revert un-shares anything with link-count ≥ 2
+	// (expandAllSharedStep). A second bookkeeping table only drifts.
 	// Caveat: backup/deploy tooling that doesn't preserve hardlinks will
 	// re-expand them over time (loses the saving, never corrupts).
-
-	/** Manifest of collapsed copies: which file links to which canonical. */
-	const HARDLINK_TABLE = 'process_imagelibrary_hardlinks';
-
-	protected function ensureHardlinkTable(): void {
-		static $ensured = false;
-		if ($ensured) return;
-		$ensured = true;
-		$sql = 'CREATE TABLE IF NOT EXISTS `' . self::HARDLINK_TABLE . '` (
-			page_id INT UNSIGNED NOT NULL,
-			field_name VARCHAR(128) NOT NULL,
-			basename VARCHAR(191) NOT NULL,
-			canon_page_id INT UNSIGNED NOT NULL,
-			canon_field VARCHAR(128) NOT NULL,
-			canon_basename VARCHAR(191) NOT NULL,
-			bytes BIGINT UNSIGNED NOT NULL DEFAULT 0,
-			linked_at DATETIME NOT NULL,
-			PRIMARY KEY (page_id, field_name, basename)
-		) ENGINE=InnoDB DEFAULT CHARSET=ascii';
-		try {
-			$this->wire('database')->exec($sql);
-		} catch (\Throwable $e) {
-			$this->wire('log')->error('ImageLibrary: hardlink table create failed: ' . $e->getMessage());
-		}
-	}
 
 	/**
 	 * Ground-truth disk audit: walk the real site/assets/files tree and measure
@@ -686,7 +641,7 @@ trait ImageLibraryHashing {
 	protected function diskAudit(): array {
 		$root = (string) $this->wire('config')->paths->files; // site/assets/files/
 		$out = [
-			'files' => 0, 'apparent' => 0, 'actual' => 0, 'saved' => 0,
+			'files' => 0, 'apparent' => 0, 'actual' => 0, 'saved' => 0, 'sharedFiles' => 0,
 			'versionFiles' => 0, 'versionShared' => 0, 'versionStandalone' => 0,
 			'versionStandaloneBytes' => 0, 'truncated' => false,
 			'versionSamples' => [],   // a few standalone-version paths, to see the on-disk layout
@@ -714,6 +669,7 @@ trait ImageLibraryHashing {
 
 				$out['files']++;
 				$out['apparent'] += $size;
+				if ($nlink >= 2) $out['sharedFiles']++;   // file collapsed onto a shared inode
 				if ($inode === 0 || !isset($seenInode[$key])) {
 					$seenInode[$key] = true;
 					$out['actual'] += $size;
@@ -766,48 +722,30 @@ trait ImageLibraryHashing {
 	}
 
 	/**
-	 * Real space currently saved by hardlinks, measured from the filesystem and
-	 * CACHED (the audit is a full tree walk, too heavy for every page load).
+	 * Dedup figures measured from the FILESYSTEM and CACHED (the audit is a full
+	 * tree walk, too heavy for every page load): bytes currently saved by
+	 * hardlinks, and how many files are collapsed onto a shared inode. This is
+	 * the single source of truth — it can't drift the way a bookkeeping table
+	 * does. Pass $refresh=true after a reclaim/revert run to re-walk.
 	 *
-	 * This is the truth the displayed "reclaimed" figure should use — unlike the
-	 * manifest sum, it can't drift: pruning a manifest row never un-shares the
-	 * inode, so the manifest under-counts, but the disk measurement always
-	 * reflects reality. Pass $refresh=true after a reclaim/revert run to re-walk.
+	 * @return array{saved:int,shared:int}
 	 */
-	protected function diskSavedBytesCached(bool $refresh = false): int {
+	protected function cachedDiskStats(bool $refresh = false): array {
 		$cache = $this->wire('cache');
-		$key   = 'ml_disk_saved';
+		$key   = 'ml_disk_stats';
 		if (!$refresh) {
 			$v = $cache->getFor($this, $key);
-			if ($v !== null && $v !== '') return (int) $v;
+			if (is_string($v) && $v !== '') {
+				$d = json_decode($v, true);
+				if (is_array($d) && isset($d['saved'], $d['shared'])) {
+					return ['saved' => (int) $d['saved'], 'shared' => (int) $d['shared']];
+				}
+			}
 		}
-		$saved = $this->diskAudit()['saved'];
-		$cache->saveFor($this, $key, (string) $saved, 3600); // 1h TTL; refreshed on runs
-		return $saved;
-	}
-
-	/** Total bytes currently reclaimed (sum of the manifest). */
-	protected function totalReclaimedBytes(): int {
-		$this->ensureHardlinkTable();
-		try {
-			return (int) $this->wire('database')->query(
-				'SELECT COALESCE(SUM(bytes), 0) FROM `' . self::HARDLINK_TABLE . '`'
-			)->fetchColumn();
-		} catch (\Throwable $e) {
-			return 0;
-		}
-	}
-
-	/** Number of copies currently collapsed onto a shared inode (manifest rows). */
-	protected function countHardlinks(): int {
-		$this->ensureHardlinkTable();
-		try {
-			return (int) $this->wire('database')->query(
-				'SELECT COUNT(*) FROM `' . self::HARDLINK_TABLE . '`'
-			)->fetchColumn();
-		} catch (\Throwable $e) {
-			return 0;
-		}
+		$a   = $this->diskAudit();
+		$out = ['saved' => (int) $a['saved'], 'shared' => (int) $a['sharedFiles']];
+		$cache->saveFor($this, $key, json_encode($out), 3600); // 1h TTL; refreshed on runs
+		return $out;
 	}
 
 	/** True if both paths already point at the same inode (already linked). */
@@ -837,7 +775,7 @@ trait ImageLibraryHashing {
 	}
 
 	/** Replace a (possibly hardlinked) file with an independent copy of its
-	 *  own bytes — the un-share half. Used by expandManifest. */
+	 *  own bytes — the un-share half. Used by expandAllSharedStep. */
 	protected function expandFile(string $path): bool {
 		$tmp = $path . '.' . uniqid('mlxp', true) . '.tmp';
 		if (!@copy($path, $tmp)) return false;                 // new inode
@@ -864,24 +802,6 @@ trait ImageLibraryHashing {
 		// Variation (no matching Pageimage): build from the page's files dir.
 		$f = $page->filesPath() . $bn;
 		return is_file($f) ? $f : null;
-	}
-
-	protected function recordHardlink(array $member, array $canon, int $bytes): void {
-		try {
-			$stmt = $this->wire('database')->prepare(
-				'INSERT INTO `' . self::HARDLINK_TABLE . '`
-				 (page_id, field_name, basename, canon_page_id, canon_field, canon_basename, bytes, linked_at)
-				 VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
-				 ON DUPLICATE KEY UPDATE canon_page_id=VALUES(canon_page_id), canon_field=VALUES(canon_field),
-				   canon_basename=VALUES(canon_basename), bytes=VALUES(bytes), linked_at=NOW()'
-			);
-			$stmt->execute([
-				(int) $member['pageId'], (string) $member['fieldName'], (string) $member['basename'],
-				(int) $canon['pageId'], (string) $canon['fieldName'], (string) $canon['basename'], $bytes,
-			]);
-		} catch (\Throwable $e) {
-			$this->wire('log')->error('ImageLibrary: hardlink record failed: ' . $e->getMessage());
-		}
 	}
 
 	/**
@@ -917,7 +837,6 @@ trait ImageLibraryHashing {
 			if (!$this->filesByteIdentical($canonPath, $mp)) { $res['skipped']++; continue; }
 			$size = (int) @filesize($mp);
 			if ($this->hardlinkReplace($canonPath, $mp)) {
-				$this->recordHardlink($m, $canon, $size);
 				$res['linked']++; $res['bytes'] += $size;
 			} else {
 				$res['skipped']++;
@@ -944,7 +863,6 @@ trait ImageLibraryHashing {
 	 * @return array{totalClusters:int,nextOffset:int,complete:bool,details:array<int,array<string,mixed>>}
 	 */
 	protected function reclaimStep(int $offset, int $limit = 4): array {
-		$this->ensureHardlinkTable();
 		$clusters = $this->loadExactClusters()['clusters'];
 		$total = count($clusters);
 		if ($offset < 0) $offset = 0;
@@ -983,7 +901,7 @@ trait ImageLibraryHashing {
 	 * originals were renamed (foo.jpg vs foo-1.jpg) — then hardlink the
 	 * identical ones onto one inode. Byte-identity is re-verified before every
 	 * link, so a wrong link is impossible (worst case: a variation isn't
-	 * linked). Each link is recorded in the manifest → reversible + counted.
+	 * linked). Reversible via the filesystem-level revert (expandAllSharedStep).
 	 *
 	 * @param array<int,array{pageId:int,fieldName:string,basename:string}> $members
 	 * @return array{linked:int,bytes:int}
@@ -1026,11 +944,6 @@ trait ImageLibraryHashing {
 				if (!$this->filesByteIdentical($canon['path'], $e['path'])) continue;  // safety
 				$size = (int) @filesize($e['path']);
 				if ($this->hardlinkReplace($canon['path'], $e['path'])) {
-					$this->recordHardlink(
-						['pageId' => $e['pageId'], 'fieldName' => $e['fieldName'], 'basename' => $e['basename']],
-						['pageId' => $canon['pageId'], 'fieldName' => $canon['fieldName'], 'basename' => $canon['basename']],
-						$size
-					);
 					$res['linked']++; $res['bytes'] += $size;
 				}
 			}
@@ -1045,7 +958,6 @@ trait ImageLibraryHashing {
 	 * @return array{totalClusters:int,processed:int,linked:int,already:int,skipped:int,bytes:int,nextOffset:int,complete:bool}
 	 */
 	protected function reclaimAll(int $offset = 0): array {
-		$this->ensureHardlinkTable();
 		$clusters = $this->loadExactClusters()['clusters'];
 		$total = count($clusters);
 		if ($offset < 0) $offset = 0;
@@ -1074,65 +986,11 @@ trait ImageLibraryHashing {
 	}
 
 	/**
-	 * Un-share: walk the manifest and give every collapsed copy its own
-	 * independent file again, then forget it. Time-budgeted, offset-driven.
-	 *
-	 * @return array{total:int,processed:int,expanded:int,nextOffset:int,complete:bool}
-	 */
-	protected function expandManifest(int $offset = 0): array {
-		$this->ensureHardlinkTable();
-		$rows = [];
-		try {
-			$stmt = $this->wire('database')->query(
-				'SELECT page_id, field_name, basename FROM `' . self::HARDLINK_TABLE . '`
-				 ORDER BY page_id, field_name, basename'
-			);
-			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) $rows[] = $r;
-		} catch (\Throwable $e) {
-			return ['total' => 0, 'processed' => 0, 'expanded' => 0, 'nextOffset' => 0, 'complete' => true];
-		}
-		$total = count($rows);
-		if ($offset < 0) $offset = 0;
-
-		$deadline = microtime(true) + (self::HASH_SCAN_BUDGET_MS / 1000);
-		$expanded = 0; $processed = 0;
-
-		$i = $offset;
-		for (; $i < $total; $i++) {
-			if (microtime(true) > $deadline) break;
-			$r = $rows[$i];
-			$processed++;
-			$path = $this->memberFilePath([
-				'pageId' => (int) $r['page_id'], 'fieldName' => $r['field_name'], 'basename' => $r['basename'],
-			]);
-			if ($path !== null) {
-				if ($this->expandFile($path)) $expanded++;
-			}
-			// Either way drop the manifest row (file gone, or now independent).
-			try {
-				$del = $this->wire('database')->prepare(
-					'DELETE FROM `' . self::HARDLINK_TABLE . '` WHERE page_id=? AND field_name=? AND basename=?'
-				);
-				$del->execute([(int) $r['page_id'], $r['field_name'], $r['basename']]);
-			} catch (\Throwable $e) {
-			}
-		}
-		return [
-			'total'      => $total,
-			'processed'  => $processed,
-			'expanded'   => $expanded,
-			'nextOffset' => $i,
-			'complete'   => $i >= $total,
-		];
-	}
-
-	/**
 	 * Un-share EVERY shared file on disk — the authoritative "revert all".
 	 *
-	 * The manifest (expandManifest) can only undo links it still has a row for,
-	 * but pruning drifts the manifest below reality, so manifest-based revert
-	 * leaves orphaned hardlinks collapsed (and "un-share all" lies). This walks
-	 * the real assets/files tree instead and gives an independent copy back to
+	 * Works straight off the filesystem (no bookkeeping that could drift below
+	 * reality and leave orphaned hardlinks collapsed). It walks the real
+	 * assets/files tree and gives an independent copy back to
 	 * every file whose inode link-count is ≥ 2 — exactly what the filesystem
 	 * reports as shared, regardless of bookkeeping. Time-budgeted; re-call until
 	 * complete. When a cluster's first member is expanded the others' link-count
@@ -1166,17 +1024,6 @@ trait ImageLibraryHashing {
 		return $out;
 	}
 
-	/** Forget the whole hardlink manifest (after a filesystem-level revert the
-	 *  rows are meaningless — every file is independent again). */
-	protected function clearManifest(): void {
-		$this->ensureHardlinkTable();
-		try {
-			$this->wire('database')->exec('DELETE FROM `' . self::HARDLINK_TABLE . '`');
-		} catch (\Throwable $e) {
-			$this->wire('log')->error('ImageLibrary: clear manifest failed: ' . $e->getMessage());
-		}
-	}
-
 	/**
 	 * Reclaim page-version files. ProcessWire's Page Versions feature copies a
 	 * page's files into a `v<n>/` subdirectory of the SAME page folder when a
@@ -1188,8 +1035,8 @@ trait ImageLibraryHashing {
 	 * at the filesystem level (no Page Versions API), which is why this is safe
 	 * and self-contained: the canonical is just the same basename without the
 	 * `v<n>/` segment. Byte-identity is re-verified before linking; differing
-	 * versions are left untouched. Each link is recorded in the manifest with the
-	 * relative `v<n>/<basename>` so revert (expandManifest) restores it.
+	 * versions are left untouched. Reversible via the filesystem-level revert
+	 * (expandAllSharedStep), which un-shares any inode with link-count >= 2.
 	 *
 	 * @return array{linked:int,already:int,skipped:int,bytes:int,versionFiles:int}
 	 */
@@ -1221,11 +1068,6 @@ trait ImageLibraryHashing {
 				if ($this->hardlinkReplace($livePath, $versionPath)) {
 					$out['linked']++;
 					$out['bytes'] += $bytes;
-					$this->recordHardlink(
-						['pageId' => (int) $m[1], 'fieldName' => '', 'basename' => $m[2] . '/' . $m[3]],
-						['pageId' => (int) $m[1], 'fieldName' => '', 'basename' => $m[3]],
-						$bytes
-					);
 				} else {
 					$out['skipped']++;
 				}
