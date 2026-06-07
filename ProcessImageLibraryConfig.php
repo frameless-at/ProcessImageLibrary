@@ -275,39 +275,36 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			$cfg->scripts->add($cfg->urls($instance) . 'ml-reclaim-live.js?v=' . $jsVer);
 		}
 
-		// Status read-out (plain markup, no special chars). The long caveat
-		// rides as a field note so PW handles the text encoding.
-		$f = $modules->get('InputfieldMarkup');
-		$f->label = $this->_('Status');
-		$f->value =
+		// Status read-out. The <strong> values carry classes so the live JS
+		// updates them in place after a run (otherwise the figures go stale).
+		$status = $modules->get('InputfieldMarkup');
+		$status->label = $this->_('Status');
+		$status->value =
 			'<ul class="uk-list uk-list-divider" style="margin:0">'
-			. '<li>' . $san->entities($this->_('Disk space reclaimed')) . ': <strong>' . $san->entities((string) $stats['reclaimedHuman']) . '</strong></li>'
-			. '<li>' . $san->entities($this->_('Copies sharing a file')) . ': <strong>' . (int) $stats['linkedCount'] . '</strong></li>'
-			. '<li>' . $san->entities($this->_('Exact-duplicate clusters')) . ': <strong>' . (int) $stats['clusterCount'] . '</strong></li>'
+			. '<li>' . $san->entities($this->_('Disk space reclaimed')) . ': <strong class="ml-stat-reclaimed">' . $san->entities((string) $stats['reclaimedHuman']) . '</strong></li>'
+			. '<li>' . $san->entities($this->_('Copies sharing a file')) . ': <strong class="ml-stat-shared">' . (int) $stats['linkedCount'] . '</strong></li>'
+			. '<li>' . $san->entities($this->_('Exact-duplicate clusters')) . ': <strong class="ml-stat-clusters">' . (int) $stats['clusterCount'] . '</strong></li>'
 			. '</ul>';
-		$f->notes = $this->_('A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.');
-		$fs->add($f);
+		$status->notes = $this->_('A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.');
+		$fs->add($status);
 
-		// Live "scan & reclaim" — the button is a real InputfieldButton (no
-		// href: the JS driver runs the chunked endpoints and shows live
-		// progress in the panel below). type=button so it never submits the
-		// config form.
-		$start = $modules->get('InputfieldButton');
-		$start->value = $this->_('Scan & reclaim (live)');
-		$start->attr('type', 'button');
-		$start->icon = 'refresh';
-		$start->addClass('ml-reclaim-start');
-		$start->columnWidth = 50;
-		$fs->add($start);
-
-		// Progress panel: phase line, bar, running totals, per-cluster log.
-		$panel = $modules->get('InputfieldMarkup');
-		$panel->value =
+		// Tools at the BOTTOM: one plain-markup block (no InputfieldButton, so
+		// the config form can't duplicate it on save). The JS driver runs the
+		// chunked endpoints and shows live progress; Revert is a guarded link.
+		$tools = $modules->get('InputfieldMarkup');
+		$tools->value =
 			'<div class="ml-reclaim-live"'
 			. ' data-scan-url="'    . $san->entities($libUrl . 'scan-step/') . '"'
 			. ' data-reclaim-url="' . $san->entities($libUrl . 'reclaim-step/') . '"'
 			. ' data-csrf-name="'   . $san->entities($tokenName) . '"'
 			. ' data-csrf-value="'  . $san->entities($tokenValue) . '">'
+			. '<p style="margin:0">'
+			. '<button type="button" class="ml-reclaim-start ui-button uk-button uk-button-primary">'
+			. '<i class="fa fa-refresh" aria-hidden="true"></i> ' . $san->entities($this->_('Scan and reclaim (live)')) . '</button> '
+			. '<a class="ml-reclaim-revert ui-button uk-button uk-button-default" href="' . $san->entities($revertUrl) . '"'
+			. ' onclick="return confirm(' . $san->entities(json_encode($revertConfirm, JSON_HEX_APOS | JSON_HEX_QUOT)) . ')">'
+			. '<i class="fa fa-undo" aria-hidden="true"></i> ' . $san->entities($this->_('Revert (un-share all)')) . '</a>'
+			. '</p>'
 			. '<div class="ml-reclaim-panel" hidden style="margin-top:.6rem">'
 			. '<div class="ml-reclaim-phase" style="font-weight:600"></div>'
 			. '<progress class="ml-reclaim-bar" max="100" value="0" style="width:100%;height:14px"></progress>'
@@ -316,16 +313,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			.   'font-size:.82em;line-height:1.5;margin:.4rem 0 0;padding:.4rem .6rem;list-style:none;'
 			.   'background:var(--pw-input-bg,#f7f7f7);border:1px solid var(--pw-border-color,#e0e0e0);border-radius:3px"></ul>'
 			. '</div></div>';
-		$fs->add($panel);
-
-		$revert = $modules->get('InputfieldButton');
-		$revert->value = $this->_('Revert');
-		$revert->attr('href', $revertUrl);
-		$revert->icon = 'undo';
-		$revert->setSecondary(true);
-		$revert->attr('onclick', 'return confirm(' . json_encode($revertConfirm, JSON_HEX_APOS | JSON_HEX_QUOT) . ')');
-		$revert->columnWidth = 50;
-		$fs->add($revert);
+		$fs->add($tools);
 
 		$inputfields->add($fs);
 

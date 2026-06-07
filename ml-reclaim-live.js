@@ -46,11 +46,19 @@
 
 		var linkedFiles = 0, freedHuman = '0', clustersDone = 0, clustersTotal = 0;
 
+		function setStat(sel, text) {
+			var n = document.querySelector(sel);
+			if (n) n.textContent = text;
+		}
 		function updateTotals() {
 			totals.innerHTML =
 				'Reclaimed: <strong>' + freedHuman + '</strong> · '
 				+ 'Files sharing an inode: <strong>' + fmt(linkedFiles) + '</strong> · '
 				+ 'Clusters: <strong>' + fmt(clustersDone) + ' / ' + fmt(clustersTotal) + '</strong>';
+			// Keep the top Status block in sync so it isn't stale after a run.
+			setStat('.ml-stat-reclaimed', freedHuman);
+			setStat('.ml-stat-shared', fmt(linkedFiles));
+			if (clustersTotal) setStat('.ml-stat-clusters', fmt(clustersTotal));
 		}
 
 		// Phase 1: fingerprint scan to completion.
