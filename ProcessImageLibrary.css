@@ -1236,8 +1236,8 @@ textarea.ml-langtabs-pane {
    body holds the (editable) cluster table and scrolls. Sized to content,
    capped to the viewport. */
 .ml-cluster-modal {
-	width: auto;
-	max-width: 95vw;
+	width: 95vw;
+	max-width: 1000px;
 	max-height: 90vh;
 	padding: 0;
 	border: 1px solid var(--pw-border-color, #ccc);
@@ -1247,14 +1247,18 @@ textarea.ml-langtabs-pane {
 	flex-direction: column;
 	background: var(--pw-blocks-background, #fff);
 }
+/* Vertical scroll for tall clusters; horizontal scrolling is left to the
+   table's own .ml-table-scroll wrapper (same as the main view) so the wide
+   table scrolls INSIDE the modal on narrow screens instead of the modal or
+   page overflowing. */
 .ml-cluster-modal-body {
 	flex: 1 1 auto;
-	overflow: auto;
+	overflow-x: hidden;
+	overflow-y: auto;
 	padding: 0.5rem 1rem 1rem;
 }
-/* The table inside never needs its own horizontal scroller here. */
 .ml-cluster-modal-body .ml-table-scroll {
-	overflow: visible;
+	max-width: 100%;
 }
 
 /* Masonry: the duplicate tile reads as a "stack" you open, not an editor. */
