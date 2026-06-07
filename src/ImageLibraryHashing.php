@@ -704,7 +704,7 @@ trait ImageLibraryHashing {
 	 * @return array{linked:int,already:int,skipped:int,bytes:int}
 	 */
 	protected function reclaimMembers(array $members): array {
-		$res = ['linked' => 0, 'already' => 0, 'skipped' => 0, 'bytes' => 0];
+		$res = ['linked' => 0, 'already' => 0, 'skipped' => 0, 'bytes' => 0, 'varLinked' => 0, 'varBytes' => 0];
 		if (count($members) < 2) return $res;
 
 		// Deterministic canonical so re-runs always link to the same file.
@@ -743,10 +743,48 @@ trait ImageLibraryHashing {
 		// maintenance pass is what really catches them; here it's cheap once
 		// linked (sameInode fast-skip).
 		$v = $this->reclaimVariations($members);
-		$res['linked'] += $v['linked'];
-		$res['bytes']  += $v['bytes'];
+		$res['varLinked'] = $v['linked'];
+		$res['varBytes']  = $v['bytes'];
 
 		return $res;
+	}
+
+	/**
+	 * Reclaim a CHUNK of clusters ($offset … $offset+$limit) and return a
+	 * per-cluster breakdown, for the live progress UI. Drives the same engine
+	 * as reclaimAll but small + descriptive instead of time-budgeted.
+	 *
+	 * @return array{totalClusters:int,nextOffset:int,complete:bool,details:array<int,array<string,mixed>>}
+	 */
+	protected function reclaimStep(int $offset, int $limit = 4): array {
+		$this->ensureHardlinkTable();
+		$clusters = $this->loadExactClusters()['clusters'];
+		$total = count($clusters);
+		if ($offset < 0) $offset = 0;
+
+		$details = [];
+		$i   = $offset;
+		$end = min($total, $offset + max(1, $limit));
+		for (; $i < $end; $i++) {
+			$members = $clusters[$i]['members'];
+			$r = $this->reclaimMembers($members);
+			$first = $members[0] ?? null;
+			$details[] = [
+				'label'      => $first ? (string) $first['basename'] : ('#' . $i),
+				'members'    => count($members),
+				'originals'  => (int) $r['linked'],
+				'variations' => (int) $r['varLinked'],
+				'already'    => (int) $r['already'],
+				'skipped'    => (int) $r['skipped'],
+				'bytes'      => (int) $r['bytes'] + (int) $r['varBytes'],
+			];
+		}
+		return [
+			'totalClusters' => $total,
+			'nextOffset'    => $i,
+			'complete'      => $i >= $total,
+			'details'       => $details,
+		];
 	}
 
 	/**
@@ -832,8 +870,8 @@ trait ImageLibraryHashing {
 		for (; $i < $total; $i++) {
 			if (microtime(true) > $deadline) break;
 			$r = $this->reclaimMembers($clusters[$i]['members']);
-			$linked += $r['linked']; $already += $r['already'];
-			$skipped += $r['skipped']; $bytes += $r['bytes'];
+			$linked += $r['linked'] + $r['varLinked']; $already += $r['already'];
+			$skipped += $r['skipped']; $bytes += $r['bytes'] + $r['varBytes'];
 			$processed++;
 		}
 		return [

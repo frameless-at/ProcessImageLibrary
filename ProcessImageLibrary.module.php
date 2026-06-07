@@ -575,17 +575,6 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Manual "scan now" trigger: run one bounded fingerprint + reclaim pass
-	 * immediately (the same work LazyCron does hourly). Returns the resulting
-	 * stats so the caller can report what changed.
-	 */
-	public function runMaintenanceNow(int $seconds = 20): array {
-		@set_time_limit($seconds + 30);
-		$this->runMaintenancePass($seconds);
-		return $this->dedupStats();
-	}
-
-	/**
 	 * Manual "revert" trigger: un-share every collapsed copy (give each its own
 	 * independent file again) and clear the manifest — the reverse of reclaim.
 	 * Time-budgeted; loops the chunked un-share until done or the budget runs
@@ -602,6 +591,51 @@ class ProcessImageLibrary extends Process {
 			$off = (int) $r['nextOffset'];
 		} while (empty($r['complete']) && microtime(true) < $stop);
 		return $expanded;
+	}
+
+	/**
+	 * AJAX endpoint: ONE budgeted fingerprint chunk, for the config page's live
+	 * progress UI. POST + CSRF. Re-POST with the returned nextOffset until
+	 * complete.
+	 */
+	public function ___executeScanStep() {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+		@set_time_limit(60);
+		$r = $this->scanHashes((int) $this->wire('input')->post('offset'));
+		$r['ok'] = true;
+		return $this->jsonResponse($r);
+	}
+
+	/**
+	 * AJAX endpoint: reclaim a small CHUNK of clusters with a per-cluster
+	 * breakdown, for the config page's live progress UI. POST + CSRF. Re-POST
+	 * with the returned nextOffset until complete.
+	 */
+	public function ___executeReclaimStep() {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+		@set_time_limit(60);
+		$r = $this->reclaimStep((int) $this->wire('input')->post('offset'), 4);
+		$r['ok']             = true;
+		$r['reclaimedBytes'] = $this->totalReclaimedBytes();
+		$r['reclaimedHuman'] = $this->formatFilesize($r['reclaimedBytes']);
+		$r['linkedTotal']    = $this->countHardlinks();
+		return $this->jsonResponse($r);
 	}
 
 	/**

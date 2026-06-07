@@ -23,20 +23,12 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$tokenName  = $session->CSRF->getTokenName();
 		$tokenValue = $session->CSRF->getTokenValue();
 		$action     = (string) $this->wire('input')->get('ml_dedup');
-		if ($action !== '' && $instance instanceof ProcessImageLibrary
+		if ($action === 'revert' && $instance instanceof ProcessImageLibrary
 			&& (string) $this->wire('input')->get($tokenName) === $tokenValue) {
-			if ($action === 'scan') {
-				$s = $instance->runMaintenanceNow(20);
-				$this->message(sprintf(
-					$this->_('Scan complete — %1$s reclaimed across %2$d shared file(s).'),
-					$s['reclaimedHuman'], (int) $s['linkedCount']
-				));
-			} elseif ($action === 'revert') {
-				$n = $instance->revertAllNow(20);
-				$this->message(sprintf(
-					$this->_('Revert complete — %d file(s) un-shared.'), (int) $n
-				));
-			}
+			$n = $instance->revertAllNow(20);
+			$this->message(sprintf(
+				$this->_('Revert complete — %d file(s) un-shared.'), (int) $n
+			));
 			$session->redirect($this->wire('config')->urls->admin . 'module/edit?name=ProcessImageLibrary');
 		}
 
@@ -270,9 +262,18 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		// Pass raw URLs (literal &) — InputfieldButton entity-encodes the href
 		// attribute itself; pre-encoding would double it.
 		$base      = $this->wire('config')->urls->admin . 'module/edit?name=ProcessImageLibrary';
-		$scanUrl   = $base . '&ml_dedup=scan&'   . $tokenName . '=' . urlencode($tokenValue);
 		$revertUrl = $base . '&ml_dedup=revert&' . $tokenName . '=' . urlencode($tokenValue);
 		$revertConfirm = $this->_('Give every collapsed copy its own independent file again? This undoes the space saving (the next pass will re-collapse them).');
+
+		// Live scan + reclaim runs against the module's own AJAX endpoints
+		// (chunked, with per-cluster progress). Enqueue the small driver JS.
+		$libPage = $this->wire('pages')->get('template=admin, name=image-library, include=all');
+		$libUrl  = ($libPage && $libPage->id) ? $libPage->url : '';
+		if ($instance instanceof ProcessImageLibrary && $libUrl !== '') {
+			$cfg   = $this->wire('config');
+			$jsVer = @filemtime($cfg->paths($instance) . 'ml-reclaim-live.js') ?: '1';
+			$cfg->scripts->add($cfg->urls($instance) . 'ml-reclaim-live.js?v=' . $jsVer);
+		}
 
 		// Status read-out (plain markup, no special chars). The long caveat
 		// rides as a field note so PW handles the text encoding.
@@ -287,15 +288,35 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$f->notes = $this->_('A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.');
 		$fs->add($f);
 
-		// Action buttons built with ProcessWire's own InputfieldButton — it
-		// entity-encodes the label exactly once, so the ampersand renders
-		// correctly (the previous hand-built markup double-encoded it).
-		$scan = $modules->get('InputfieldButton');
-		$scan->value = $this->_('Scan & reclaim');
-		$scan->attr('href', $scanUrl);
-		$scan->icon = 'refresh';
-		$scan->columnWidth = 50;
-		$fs->add($scan);
+		// Live "scan & reclaim" — the button is a real InputfieldButton (no
+		// href: the JS driver runs the chunked endpoints and shows live
+		// progress in the panel below). type=button so it never submits the
+		// config form.
+		$start = $modules->get('InputfieldButton');
+		$start->value = $this->_('Scan & reclaim (live)');
+		$start->attr('type', 'button');
+		$start->icon = 'refresh';
+		$start->addClass('ml-reclaim-start');
+		$start->columnWidth = 50;
+		$fs->add($start);
+
+		// Progress panel: phase line, bar, running totals, per-cluster log.
+		$panel = $modules->get('InputfieldMarkup');
+		$panel->value =
+			'<div class="ml-reclaim-live"'
+			. ' data-scan-url="'    . $san->entities($libUrl . 'scan-step/') . '"'
+			. ' data-reclaim-url="' . $san->entities($libUrl . 'reclaim-step/') . '"'
+			. ' data-csrf-name="'   . $san->entities($tokenName) . '"'
+			. ' data-csrf-value="'  . $san->entities($tokenValue) . '">'
+			. '<div class="ml-reclaim-panel" hidden style="margin-top:.6rem">'
+			. '<div class="ml-reclaim-phase" style="font-weight:600"></div>'
+			. '<progress class="ml-reclaim-bar" max="100" value="0" style="width:100%;height:14px"></progress>'
+			. '<div class="ml-reclaim-totals" style="margin:.2rem 0"></div>'
+			. '<ul class="ml-reclaim-log" style="max-height:300px;overflow:auto;font-family:monospace;'
+			.   'font-size:.82em;line-height:1.5;margin:.4rem 0 0;padding:.4rem .6rem;list-style:none;'
+			.   'background:var(--pw-input-bg,#f7f7f7);border:1px solid var(--pw-border-color,#e0e0e0);border-radius:3px"></ul>'
+			. '</div></div>';
+		$fs->add($panel);
 
 		$revert = $modules->get('InputfieldButton');
 		$revert->value = $this->_('Revert');
