@@ -34,7 +34,6 @@
 	function openPicker(btn) {
 		var url = btn.getAttribute('data-picker-url');
 		if (!url) return;
-		var field = btn.getAttribute('data-field') || '';
 
 		var dlg = document.createElement('dialog');
 		dlg.className = 'ml-pick-dialog';
@@ -71,7 +70,7 @@
 			if (e.source !== iframe.contentWindow) return;
 			if (!e.data || e.data.mlPicked !== true) return;
 			teardown();
-			reloadField(field);
+			reloadField(btn);
 		}
 		close.addEventListener('click', teardown);
 		dlg.addEventListener('close', teardown);
@@ -86,8 +85,15 @@
 	// correctly. Other fields' unsaved edits are untouched. A naive DOM swap
 	// would leave empty placeholders because the field's init scripts wouldn't
 	// run — this avoids that entirely.
-	function reloadField(field) {
-		var wrap = document.getElementById('wrap_Inputfield_' + field);
+	//
+	// Resolve the field wrapper RELATIVE to the clicked button (which lives
+	// inside the field's own .InputfieldContent). This works for top-level
+	// fields AND repeater / repeater-matrix items: their wrapper id carries a
+	// _repeater<n> suffix that a fixed "wrap_Inputfield_<field>" lookup would
+	// miss — PW's reload handler reads that id (and the repeater item page) to
+	// reload the right item.
+	function reloadField(btn) {
+		var wrap = btn && btn.closest ? btn.closest('.Inputfield') : null;
 		if (wrap && window.jQuery) {
 			window.jQuery(wrap).trigger('reload');
 			return;
