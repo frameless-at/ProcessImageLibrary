@@ -30,6 +30,25 @@
 
 	function fmt(n) { return (n | 0).toLocaleString(); }
 
+	// Keep the Status block honest: the "reclaimed" / "sharing" rows only make
+	// sense when something is actually collapsed. After a reclaim they appear;
+	// after a revert they disappear and the neutral note returns — no reload,
+	// no misleading "0 MB" line. Mirrors the server-side initial render.
+	function syncStatus(opts) {
+		var status = document.querySelector('.ml-dedup-status');
+		if (!status) return;
+		var hasReclaim = (opts.linked | 0) > 0;
+		var rowR = status.querySelector('.ml-stat-row-reclaimed');
+		var rowS = status.querySelector('.ml-stat-row-shared');
+		var empty = status.querySelector('.ml-stat-empty');
+		var list = status.querySelector('.ml-stat-list');
+		var clustersShown = list && list.querySelector('.ml-stat-row-clusters:not([hidden])');
+		if (rowR) { rowR.hidden = !hasReclaim; if (opts.reclaimedHuman != null) { var s = rowR.querySelector('.ml-stat-reclaimed'); if (s) s.textContent = opts.reclaimedHuman; } }
+		if (rowS) { rowS.hidden = !hasReclaim; var ss = rowS.querySelector('.ml-stat-shared'); if (ss) ss.textContent = fmt(opts.linked); }
+		if (empty) empty.hidden = hasReclaim;
+		if (list) list.style.display = (hasReclaim || clustersShown) ? '' : 'none';
+	}
+
 	function run(box, btn) {
 		var panel  = el(box, '.ml-reclaim-panel');
 		var phase  = el(box, '.ml-reclaim-phase');
@@ -56,9 +75,14 @@
 				+ 'Files sharing an inode: <strong>' + fmt(linkedFiles) + '</strong> · '
 				+ 'Clusters: <strong>' + fmt(clustersDone) + ' / ' + fmt(clustersTotal) + '</strong>';
 			// Keep the top Status block in sync so it isn't stale after a run.
-			setStat('.ml-stat-reclaimed', freedHuman);
-			setStat('.ml-stat-shared', fmt(linkedFiles));
-			if (clustersTotal) setStat('.ml-stat-clusters', fmt(clustersTotal));
+			syncStatus({ linked: linkedFiles, reclaimedHuman: freedHuman });
+			if (clustersTotal) {
+				setStat('.ml-stat-clusters', fmt(clustersTotal));
+				var cr = document.querySelector('.ml-stat-row-clusters');
+				if (cr) cr.hidden = false;
+				var list = document.querySelector('.ml-stat-list');
+				if (list) list.style.display = '';
+			}
 		}
 
 		// Phase 1: fingerprint scan to completion.
@@ -160,6 +184,60 @@
 			out.innerHTML = '<span style="color:#c33">✗ ' + (e && e.message ? e.message : 'error') + '</span>';
 		}).then(function () { btn.disabled = false; });
 	}
+
+	// Un-share, chunked to completion (the old single GET was time-budgeted and
+	// stopped half-way on a large manifest). Re-POSTs the revert-step endpoint
+	// until the manifest is empty, then flips the Status block back to "nothing
+	// collapsed" so it can't show a stale reclaimed figure.
+	function revert(box, trigger) {
+		var panel  = el(box, '.ml-reclaim-panel');
+		var phase  = el(box, '.ml-reclaim-phase');
+		var bar    = el(box, '.ml-reclaim-bar');
+		var totals = el(box, '.ml-reclaim-totals');
+		var log    = el(box, '.ml-reclaim-log');
+		var csrf   = { name: box.dataset.csrfName, value: box.dataset.csrfValue };
+		var url    = box.dataset.revertUrl;
+
+		panel.hidden = false; log.innerHTML = ''; bar.value = 0;
+		if (trigger) trigger.style.pointerEvents = 'none';
+		var startTotal = 0, undone = 0, freedHuman = '0';
+
+		function step() {
+			phase.textContent = 'Reverting…';
+			return post(url, { offset: 0 }, csrf).then(function (d) {
+				if (!d || !d.ok) throw new Error((d && d.error) || 'revert failed');
+				var remaining = d.linkedTotal | 0;
+				if (!startTotal) startTotal = remaining + (d.expanded | 0);
+				undone += d.expanded | 0;
+				freedHuman = d.reclaimedHuman || freedHuman;
+				bar.max = startTotal || 1; bar.value = Math.max(0, startTotal - remaining);
+				phase.textContent = 'Reverting… ' + fmt(undone) + ' un-shared, ' + fmt(remaining) + ' left';
+				totals.innerHTML = 'Un-shared: <strong>' + fmt(undone) + '</strong> · Still sharing: <strong>' + fmt(remaining) + '</strong>';
+				if (!d.complete) return step();
+				phase.textContent = 'Done.';
+				logLine(log, '✓ Revert complete — ' + fmt(undone) + ' file(s) given their own copy again.');
+				syncStatus({ linked: remaining, reclaimedHuman: freedHuman });
+			});
+		}
+		step().catch(function (e) {
+			phase.textContent = 'Failed.';
+			logLine(log, '✗ ' + (e && e.message ? e.message : 'error'), '#c33');
+		}).then(function () { if (trigger) trigger.style.pointerEvents = ''; });
+	}
+
+	// Capture phase so we run BEFORE the link's inline-onclick confirm and its
+	// navigation, taking full control (with our own confirm). The href + inline
+	// confirm stay as a no-JS fallback.
+	document.addEventListener('click', function (e) {
+		var a = e.target.closest && e.target.closest('.ml-reclaim-revert');
+		if (!a) return;
+		e.preventDefault();
+		e.stopPropagation();
+		var box = document.querySelector('.ml-reclaim-live');
+		if (!box) { window.location.href = a.href; return; }
+		if (!window.confirm(a.dataset.confirm || 'Revert?')) return;
+		revert(box, a);
+	}, true);
 
 	document.addEventListener('click', function (e) {
 		var t = e.target.closest && e.target.closest('.ml-reclaim-start, .ml-audit-start');

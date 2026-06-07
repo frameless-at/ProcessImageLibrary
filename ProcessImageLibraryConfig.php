@@ -277,14 +277,28 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 
 		// Status read-out. The <strong> values carry classes so the live JS
 		// updates them in place after a run (otherwise the figures go stale).
+		// The reclaimed / sharing lines only appear when something is actually
+		// collapsed: after a Revert (or before the first scan) there is no
+		// saving, so showing "Disk space reclaimed: 0" would be misleading — the
+		// rows are hidden and a neutral note is shown instead. The JS toggles the
+		// same rows live so the block stays honest after a run without a reload.
+		$linked     = (int) $stats['linkedCount'];
+		$hasReclaim = $linked > 0;
+		$clusters   = (int) $stats['clusterCount'];
+		$hide       = $hasReclaim ? '' : ' hidden';
 		$status = $modules->get('InputfieldMarkup');
 		$status->label = $this->_('Status');
 		$status->value =
-			'<ul class="uk-list uk-list-divider" style="margin:0">'
-			. '<li>' . $san->entities($this->_('Disk space reclaimed')) . ': <strong class="ml-stat-reclaimed">' . $san->entities((string) $stats['reclaimedHuman']) . '</strong></li>'
-			. '<li>' . $san->entities($this->_('Copies sharing a file')) . ': <strong class="ml-stat-shared">' . (int) $stats['linkedCount'] . '</strong></li>'
-			. '<li>' . $san->entities($this->_('Exact-duplicate clusters')) . ': <strong class="ml-stat-clusters">' . (int) $stats['clusterCount'] . '</strong></li>'
-			. '</ul>';
+			'<div class="ml-dedup-status">'
+			. '<ul class="uk-list uk-list-divider ml-stat-list" style="margin:0' . ($hasReclaim || $clusters ? '' : ';display:none') . '">'
+			. '<li class="ml-stat-row-reclaimed"' . $hide . '>' . $san->entities($this->_('Disk space reclaimed')) . ': <strong class="ml-stat-reclaimed">' . $san->entities((string) $stats['reclaimedHuman']) . '</strong></li>'
+			. '<li class="ml-stat-row-shared"' . $hide . '>' . $san->entities($this->_('Copies sharing a file')) . ': <strong class="ml-stat-shared">' . $linked . '</strong></li>'
+			. '<li class="ml-stat-row-clusters"' . ($clusters ? '' : ' hidden') . '>' . $san->entities($this->_('Exact-duplicate clusters')) . ': <strong class="ml-stat-clusters">' . $clusters . '</strong></li>'
+			. '</ul>'
+			. '<p class="ml-stat-empty"' . ($hasReclaim ? ' hidden' : '') . ' style="margin:0;color:#777">'
+			. $san->entities($this->_('Nothing is collapsed right now — run “Scan and reclaim” below to free space.'))
+			. '</p>'
+			. '</div>';
 		$status->notes = $this->_('A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.');
 		$fs->add($status);
 
@@ -296,6 +310,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			'<div class="ml-reclaim-live"'
 			. ' data-scan-url="'    . $san->entities($libUrl . 'scan-step/') . '"'
 			. ' data-reclaim-url="' . $san->entities($libUrl . 'reclaim-step/') . '"'
+			. ' data-revert-url="'  . $san->entities($libUrl . 'revert-step/') . '"'
 			. ' data-audit-url="'   . $san->entities($libUrl . 'disk-audit/') . '"'
 			. ' data-csrf-name="'   . $san->entities($tokenName) . '"'
 			. ' data-csrf-value="'  . $san->entities($tokenValue) . '">'
@@ -304,7 +319,10 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			. '<i class="fa fa-refresh" aria-hidden="true"></i> ' . $san->entities($this->_('Scan and reclaim (live)')) . '</button> '
 			. '<button type="button" class="ml-audit-start ui-button uk-button uk-button-default">'
 			. '<i class="fa fa-search" aria-hidden="true"></i> ' . $san->entities($this->_('Verify on disk')) . '</button> '
+			// JS intercepts this and runs the chunked revert-step endpoint (so it
+			// always finishes); the href + inline confirm remain a no-JS fallback.
 			. '<a class="ml-reclaim-revert ui-button uk-button uk-button-default" href="' . $san->entities($revertUrl) . '"'
+			. ' data-confirm="' . $san->entities($revertConfirm) . '"'
 			. ' onclick="return confirm(' . $san->entities(json_encode($revertConfirm, JSON_HEX_APOS | JSON_HEX_QUOT)) . ')">'
 			. '<i class="fa fa-undo" aria-hidden="true"></i> ' . $san->entities($this->_('Revert (un-share all)')) . '</a>'
 			. '</p>'

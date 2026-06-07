@@ -587,12 +587,13 @@ class ProcessImageLibrary extends Process {
 		@set_time_limit($seconds + 30);
 		$stop = microtime(true) + max(1, $seconds);
 		$expanded = 0;
-		$off = 0;
+		// Always offset 0: expandManifest deletes processed rows, so the
+		// remaining set re-heads at 0 each pass (a running offset would skip).
 		do {
-			$r = $this->expandManifest($off);
+			$r = $this->expandManifest(0);
 			$expanded += (int) ($r['expanded'] ?? 0);
-			$off = (int) $r['nextOffset'];
 		} while (empty($r['complete']) && microtime(true) < $stop);
+		$this->diskSavedBytesCached(true);   // re-measure so the Status isn't stale
 		return $expanded;
 	}
 
@@ -666,6 +667,41 @@ class ProcessImageLibrary extends Process {
 		}
 		$r['reclaimedHuman'] = $this->formatFilesize($r['reclaimedBytes']);
 		$r['linkedTotal']    = $this->countHardlinks();
+		return $this->jsonResponse($r);
+	}
+
+	/**
+	 * AJAX endpoint: un-share a CHUNK of the manifest (the reverse of reclaim),
+	 * for the config page's live UI. The old single-request revert was time-
+	 * budgeted and silently stopped half-way on a large manifest, leaving the
+	 * status wrong; driving it in chunks from the browser guarantees it runs to
+	 * completion regardless of the host's max_execution_time. POST + CSRF;
+	 * re-POST with the returned nextOffset until complete. On completion the
+	 * cached disk-saved figure is refreshed so the Status block is correct.
+	 */
+	public function ___executeRevertStep() {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+		@set_time_limit(60);
+		// expandManifest DELETES processed rows and re-reads the list each call,
+		// so the remaining work always starts at offset 0 — passing a running
+		// offset would skip rows. The driver just re-POSTs until complete.
+		$r = $this->expandManifest(0);
+		$r['ok'] = true;
+		$r['linkedTotal'] = $this->countHardlinks();   // manifest rows still left
+		if (!empty($r['complete'])) {
+			$r['reclaimedBytes'] = $this->diskSavedBytesCached(true);   // re-measure from disk
+		} else {
+			$r['reclaimedBytes'] = $this->totalReclaimedBytes();
+		}
+		$r['reclaimedHuman'] = $this->formatFilesize($r['reclaimedBytes']);
 		return $this->jsonResponse($r);
 	}
 
