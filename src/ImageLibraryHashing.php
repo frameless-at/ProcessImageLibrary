@@ -541,6 +541,58 @@ trait ImageLibraryHashing {
 	}
 
 	/**
+	 * Global cleanup: drop fingerprint + hardlink-manifest rows that no longer
+	 * correspond to a LIVE image (per loadRows) — e.g. page-version repeater
+	 * items, or images deleted out-of-band. Keeps a live original's variation
+	 * manifest rows (matched by stem). Run at the start of a maintenance /
+	 * live-scan pass so the counts reflect reality.
+	 */
+	protected function pruneOrphanedRows(): void {
+		$this->ensureHashTable();
+		$this->ensureHardlinkTable();
+
+		$live      = [];   // "page\0field\0basename" of live originals
+		$liveStems = [];   // "page\0field" => [stem => true]
+		foreach ($this->loadRows() as $r) {
+			$pid = (int) $r['pageId']; $fn = (string) $r['fieldName']; $bn = (string) $r['basename'];
+			$live[$pid . "\0" . $fn . "\0" . $bn] = true;
+			$dot  = strrpos($bn, '.');
+			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			if ($stem !== '') $liveStems[$pid . "\0" . $fn][$stem] = true;
+		}
+
+		$db = $this->wire('database');
+		foreach ([self::HASH_TABLE, self::HARDLINK_TABLE] as $table) {
+			$keepVariations = ($table === self::HARDLINK_TABLE);   // manifest holds variations
+			try {
+				$sel   = $db->query('SELECT page_id, field_name, basename FROM `' . $table . '`');
+				$stale = [];
+				while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
+					$pid = (int) $r['page_id']; $fn = (string) $r['field_name']; $bn = (string) $r['basename'];
+					if (isset($live[$pid . "\0" . $fn . "\0" . $bn])) continue;     // live original
+					if ($keepVariations) {
+						$keep = false;
+						foreach ($liveStems[$pid . "\0" . $fn] ?? [] as $stem => $_) {
+							if (strncmp($bn, $stem . '.', strlen($stem) + 1) === 0) { $keep = true; break; }
+						}
+						if ($keep) continue;                                        // variation of a live original
+					}
+					$stale[] = [$pid, $fn, $bn];
+				}
+				if (!$stale) continue;
+				$del = $db->prepare(
+					'DELETE FROM `' . $table . '` WHERE page_id = ? AND field_name = ? AND basename = ?'
+				);
+				foreach ($stale as [$pid, $fn, $bn]) {
+					$del->execute([$pid, $fn, $bn]);
+				}
+			} catch (\Throwable $e) {
+				$this->wire('log')->error('ImageLibrary: prune orphaned rows failed: ' . $e->getMessage());
+			}
+		}
+	}
+
+	/**
 	 * One automatic maintenance pass: fingerprint changed / new images, then
 	 * collapse byte-identical groups onto a shared inode. Both halves are
 	 * internally time-budgeted (HASH_SCAN_BUDGET_MS per call); this loops them
@@ -550,6 +602,10 @@ trait ImageLibraryHashing {
 	protected function runMaintenancePass(int $maxSeconds = 8): void {
 		$stop = microtime(true) + max(1, $maxSeconds);
 		try {
+			// Fresh row list (no stale version items) before pruning leftovers.
+			$this->wire('cache')->deleteFor($this);
+			$this->pruneOrphanedRows();   // drop version-item / deleted-image leftovers first
+
 			$off = 0;
 			do { $r = $this->scanHashes($off); $off = (int) $r['nextOffset']; }
 			while (empty($r['complete']) && microtime(true) < $stop);

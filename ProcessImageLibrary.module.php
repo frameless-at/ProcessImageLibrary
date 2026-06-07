@@ -609,7 +609,15 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Invalid CSRF token', 403);
 		}
 		@set_time_limit(60);
-		$r = $this->scanHashes((int) $this->wire('input')->post('offset'));
+		$offset = (int) $this->wire('input')->post('offset');
+		if ($offset === 0) {
+			// Fresh start: drop the cached row list so loadRows re-enumerates
+			// without page-version items, then clean orphaned fingerprint /
+			// manifest rows so the counts reflect the live set.
+			$this->wire('cache')->deleteFor($this);
+			$this->pruneOrphanedRows();
+		}
+		$r = $this->scanHashes($offset);
 		$r['ok'] = true;
 		return $this->jsonResponse($r);
 	}
@@ -3405,6 +3413,21 @@ class ProcessImageLibrary extends Process {
 
 		$ownerByRepeaterId = [];
 		$repeaterPages = $this->wire('pages')->getById(array_keys($repeaterPageIds));
+
+		// Page Versions: a versioned page keeps a SEPARATE set of repeater-item
+		// pages per version, under a version-specific container named
+		// "for-page-<id>-v<n>" (live items live under "for-page-<id>"). findRaw
+		// enumerates those version items too, so the same image shows up once
+		// per version as phantom "extra copies". Drop any repeater item whose
+		// container is a version container.
+		$versionItemIds = [];
+		foreach ($repeaterPages as $rp) {
+			$parent = $rp->parent;
+			if ($parent && $parent->id && preg_match('/-v\d+$/', (string) $parent->name)) {
+				$versionItemIds[(int) $rp->id] = true;
+			}
+		}
+
 		// Title cached in the default language so the row cache stays
 		// language-neutral (one cache entry for all editors). The
 		// editor's own-language title is set in hydrateSlice() per
@@ -3435,6 +3458,14 @@ class ProcessImageLibrary extends Process {
 			$r['templateId']    = $info['ownerTemplate'];
 		}
 		unset($r);
+
+		// Drop the page-version repeater items detected above.
+		if ($versionItemIds) {
+			$rows = array_values(array_filter($rows, function ($r) use ($versionItemIds) {
+				return !isset($versionItemIds[(int) $r['pageId']]);
+			}));
+		}
+
 		return $rows;
 	}
 
