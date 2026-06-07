@@ -47,6 +47,9 @@ class ProcessImageLibrary extends Process {
 	const CACHE_PREFIX = 'image-library-';
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
+	// Capped page size in picker mode — fewer thumbnails generated/loaded
+	// per view keeps the modal snappy.
+	const PICKER_PAGE_SIZE = 24;
 	// THUMB_LONGER_SIDE_DEFAULT is the keep-ratio display target —
 	// the longer-axis cap for the proportionally-rendered thumb. At
 	// 100 it sits well below PW's admin-variation size (260 on the
@@ -898,15 +901,15 @@ class ProcessImageLibrary extends Process {
 				. $sanitizer->entities($cfgLabel)
 				. '</a>';
 		}
-		// Load PW's native tab module — same one Page Edit etc. use,
-		// so the WireTabs uk-tab markup picks up the admin's tab
-		// styling without us shipping new CSS.
-		$this->wire('modules')->get('JqueryWireTabs');
-		// jQuery UI (incl. the slider widget + its theme CSS) so the
-		// thumbnail-size slider renders as a native PW jQuery-UI slider
-		// — visually identical to InputfieldImage's own size slider —
-		// instead of a browser-styled <input type=range>.
-		$this->wire('modules')->get('JqueryUI');
+		// These two are only needed for the full view (bookmark tabs +
+		// thumb-size slider). The picker has neither — skip them so the
+		// modal iframe loads fewer assets.
+		if (!$this->pickerMode) {
+			// PW's native tab module (WireTabs uk-tab styling for bookmarks).
+			$this->wire('modules')->get('JqueryWireTabs');
+			// jQuery UI for the thumbnail-size slider widget.
+			$this->wire('modules')->get('JqueryUI');
+		}
 		if (!$this->pickerMode) {
 			$prefs = $this->getUserPrefs();
 			$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
@@ -1076,6 +1079,10 @@ class ProcessImageLibrary extends Process {
 		}
 
 		$pageSize = $this->readPageSize();
+		// Picker: cap the page so the modal generates / loads fewer thumbnails
+		// per view (the dominant first-paint cost). The user paginates to see
+		// more; full view keeps the user's chosen size.
+		if ($this->pickerMode) $pageSize = min($pageSize, self::PICKER_PAGE_SIZE);
 
 		if ($this->getViewMode() !== self::VIEW_MASONRY) {
 			// Table view ALWAYS collapses (contextual) duplicates: every image
