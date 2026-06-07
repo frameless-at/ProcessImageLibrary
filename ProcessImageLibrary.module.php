@@ -999,11 +999,13 @@ class ProcessImageLibrary extends Process {
 			);
 		}
 		$rootAttrs = sprintf(
-			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-assign-url="%s" data-csrf-name="%s" data-csrf-value="%s"%s style="%s"',
+			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-assign-url="%s"'
+			. ' data-cluster-url="%s" data-csrf-name="%s" data-csrf-value="%s"%s style="%s"',
 			$sanitizer->entities($this->wire('page')->url . 'save/'),
 			$sanitizer->entities($this->wire('page')->url . 'data/'),
 			$sanitizer->entities($this->wire('page')->url . 'bulk/'),
 			$sanitizer->entities($this->wire('page')->url . 'assign/'),
+			$sanitizer->entities($this->wire('page')->url . 'cluster-table/'),
 			$sanitizer->entities($session->CSRF->getTokenName()),
 			$sanitizer->entities($session->CSRF->getTokenValue()),
 			$pickerAttrs,
@@ -1439,7 +1441,23 @@ class ProcessImageLibrary extends Process {
 					. $san->entities($selKey) . '"></label>';
 			}
 
-			if ($editable) {
+			// A duplicated image is a single representative tile: NO inline editor
+			// / replace / delete on it. Clicking opens a modal with the table view
+			// of this image's copies (where each copy is edited individually).
+			$isDup    = ((int) ($row['dupCount'] ?? 0)) >= 2;
+			$thumbCls = 'ml-cell-thumb';
+			if ($isDup) {
+				$thumbCls .= ' ml-dup-cluster';
+				$clusterAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+					$this->_('Show the %d copies of %s'), (int) $row['dupCount'], (string) $row['basename']
+				)));
+				$thumbAttrs = sprintf(
+					' data-cluster-pid="%d" data-cluster-field="%s" data-cluster-base="%s" role="button" tabindex="0"',
+					(int) $row['pageId'],
+					$san->entities((string) $row['fieldName']),
+					$san->entities((string) $row['basename'])
+				) . $clusterAria;
+			} elseif ($editable) {
 				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
 					$this->_('Open editor for %s'), (string) $row['basename']
 				)));
@@ -1447,7 +1465,7 @@ class ProcessImageLibrary extends Process {
 			} else {
 				$thumbAttrs = '';
 			}
-			$out .= '<div class="ml-cell-thumb"' . $thumbAttrs . '>';
+			$out .= '<div class="' . $thumbCls . '"' . $thumbAttrs . '>';
 			if (!empty($row['thumbUrl'])) {
 				// Natural-ratio width/height attrs reserve the right box
 				// before the bytes land (CSS sizes the tile to the grid
@@ -1461,7 +1479,9 @@ class ProcessImageLibrary extends Process {
 					. ' width="' . $attrW . '"'
 					. ' height="' . $attrH . '">';
 			}
-			if ($editable) {
+			// Replace / delete only on non-duplicate tiles; a duplicated image is
+			// managed copy-by-copy inside its cluster modal.
+			if ($editable && !$isDup) {
 				$replaceLabel = $san->entities(sprintf($this->_('Replace %s'), (string) $row['basename']));
 				$deleteLabel  = $san->entities(sprintf($this->_('Delete %s'),  (string) $row['basename']));
 				$out .= '<button type="button" class="ml-replace-btn"'
@@ -1781,6 +1801,60 @@ class ProcessImageLibrary extends Process {
 			$requestedPg,
 			$customCols
 		);
+	}
+
+	/**
+	 * AJAX endpoint: the table for ONE duplicate cluster, for the masonry modal.
+	 *
+	 * In the masonry view a duplicated image is a single tile (no inline editing
+	 * there); clicking it opens a modal whose body is THIS endpoint's output —
+	 * the normal editable table, but limited to that one image's copies, all
+	 * shown as plain rows (no accordion). Identified by the clicked tile's
+	 * (pageId, field, basename); we resolve its content hash and gather every
+	 * copy in the current filter context. Returns text/html for innerHTML.
+	 */
+	public function ___executeClusterTable() {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: text/html; charset=utf-8');
+		$san = $this->wire('sanitizer');
+
+		$imageFields = $this->discoverImageFields();
+		$eligibleTemplates = $this->discoverEligibleTemplates($imageFields);
+		if (!$imageFields || !$eligibleTemplates) return '';
+
+		$customCols = $this->collectCustomNames();
+		$filters    = $this->readFilterInput($imageFields, $eligibleTemplates, $customCols);
+		$sortState  = $this->readSortInput($customCols);
+
+		$input = $this->wire('input');
+		$cpid  = (int) $input->get('cpid');
+		$cfield = $san->fieldName((string) $input->get('cfield'));
+		$cbase  = basename((string) $input->get('cbase'));
+		if (!$cpid || $cfield === '' || $cbase === '') return '';
+
+		// Same row pipeline as the results view, up to the per-row content hash.
+		$rows = $this->loadRows($filters);
+		$rows = $this->applyRowFilters($rows, $filters);
+		$rows = $this->applyTagFilter($rows, $filters['tags'] ?? []);
+		$this->applySort($rows, $sortState['sort'], $sortState['dir']);
+
+		$keyHash    = $this->loadDuplicateKeyHashes();
+		$targetHash = $keyHash[$cpid . "\0" . $cfield . "\0" . $cbase] ?? null;
+		if ($targetHash === null) {
+			return '<p class="ml-empty">' . $san->entities($this->_('No duplicates for this image.')) . '</p>';
+		}
+
+		$cluster = array_values(array_filter($rows, static function ($r) use ($keyHash, $targetHash) {
+			return ($keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null) === $targetHash;
+		}));
+		$cluster = $this->hydrateSlice($cluster);
+		// Show every copy as a plain, visible, editable row — clear the dup
+		// annotation so renderTable doesn't collapse them into an accordion.
+		foreach ($cluster as &$r) { $r['dupCount'] = 0; $r['dupHash'] = ''; }
+		unset($r);
+
+		return $this->renderTable($cluster, $customCols, $filters, '', '', $this->getTagsConfig())
+			. $this->renderTagDatalists($this->collectUsedTagsByField($cluster));
 	}
 
 	/**

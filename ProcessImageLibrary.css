@@ -317,7 +317,8 @@
 .ml-bulk-result-dialog::backdrop,
 .ml-delete-confirm::backdrop,
 .ml-bookmark-dialog::backdrop,
-.ml-image-modal::backdrop {
+.ml-image-modal::backdrop,
+.ml-cluster-modal::backdrop {
 	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
 }
 .ml-popup-editor > header,
@@ -1229,6 +1230,36 @@ textarea.ml-langtabs-pane {
 	width: 100%;
 	border: 0;
 	background: var(--pw-blocks-background, #fff);
+}
+
+/* Masonry duplicate-cluster modal: same chrome as the image modal, but the
+   body holds the (editable) cluster table and scrolls. Sized to content,
+   capped to the viewport. */
+.ml-cluster-modal {
+	width: auto;
+	max-width: 95vw;
+	max-height: 90vh;
+	padding: 0;
+	border: 1px solid var(--pw-border-color, #ccc);
+	border-radius: 4px;
+	overflow: hidden;
+	display: flex;
+	flex-direction: column;
+	background: var(--pw-blocks-background, #fff);
+}
+.ml-cluster-modal-body {
+	flex: 1 1 auto;
+	overflow: auto;
+	padding: 0.5rem 1rem 1rem;
+}
+/* The table inside never needs its own horizontal scroller here. */
+.ml-cluster-modal-body .ml-table-scroll {
+	overflow: visible;
+}
+
+/* Masonry: the duplicate tile reads as a "stack" you open, not an editor. */
+.ml-card .ml-cell-thumb.ml-dup-cluster {
+	cursor: zoom-in;
 }
 .ml-popup-editor .ml-batch-mode {
 	margin: 0.75rem 0 0;

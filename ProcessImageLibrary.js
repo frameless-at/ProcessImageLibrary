@@ -30,6 +30,7 @@
 		config.renderUrl = config.renderUrl || root.dataset.renderUrl || '';
 		config.bulkUrl   = config.bulkUrl   || root.dataset.bulkUrl   || '';
 		config.adminUrl  = config.adminUrl  || root.dataset.adminUrl  || '';
+		config.clusterUrl = config.clusterUrl || root.dataset.clusterUrl || '';
 		config.csrf = config.csrf || {
 			name:  root.dataset.csrfName  || '',
 			value: root.dataset.csrfValue || ''
@@ -1546,6 +1547,62 @@
 			dialog.showModal();
 		}
 
+		// Masonry: a duplicated image is one tile with no inline editing. Clicking
+		// it opens a modal whose body is the cluster-table endpoint's output — the
+		// normal editable table, limited to this image's copies. The dialog is
+		// appended INSIDE .ml-results so the existing delegated edit / thumb-open
+		// handlers fire for the rows inside it without any re-binding.
+		function openClusterModal(td) {
+			if (!config.clusterUrl) return;
+			var pid = td.dataset.clusterPid, field = td.dataset.clusterField, base = td.dataset.clusterBase || '';
+			if (!pid || !field || !base) return;
+
+			var sep = location.search ? '&' : '?';
+			var url = config.clusterUrl + location.search + sep
+				+ 'cpid='   + encodeURIComponent(pid)
+				+ '&cfield=' + encodeURIComponent(field)
+				+ '&cbase='  + encodeURIComponent(base);
+
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-cluster-modal';
+
+			var bar = document.createElement('header');
+			bar.className = 'ml-image-modal-bar';
+			var title = document.createElement('span');
+			title.className = 'ml-image-modal-title';
+			title.textContent = base;
+			var closeBtn = document.createElement('button');
+			closeBtn.type = 'button';
+			closeBtn.className = 'ml-image-modal-close uk-button uk-button-secondary';
+			closeBtn.textContent = labels.close || 'Close';
+			bar.appendChild(title);
+			bar.appendChild(closeBtn);
+
+			var body = document.createElement('div');
+			body.className = 'ml-cluster-modal-body';
+			body.textContent = labels.loading || 'Loading…';
+
+			dialog.appendChild(bar);
+			dialog.appendChild(body);
+			(results || document.body).appendChild(dialog);
+
+			closeBtn.addEventListener('click', function () { if (dialog.open) dialog.close(); });
+			// Click on the backdrop (outside the dialog box) closes it.
+			dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
+			dialog.addEventListener('close', function () {
+				dialog.remove();
+				// A copy may have been edited / deleted inside — refresh the view.
+				replaceFromQs(location.search, false);
+			});
+
+			dialog.showModal();
+
+			fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+				.then(function (r) { return r.text(); })
+				.then(function (html) { body.innerHTML = html; })
+				.catch(function () { body.textContent = labels.error || 'Error'; });
+		}
+
 		// -- Replace image (click icon + drag-and-drop) ----------------
 		// Two entry paths share the same /replace/ endpoint:
 		//   1) The per-row Replace icon opens a hidden file picker.
@@ -2376,6 +2433,15 @@
 						toggleDupCluster(dupToggle);
 						return;
 					}
+					// Masonry duplicate tile → cluster modal (table of its copies).
+					// Handled before the editor branch; this thumb has no
+					// data-file-hash, so it never opens the per-image editor.
+					var clusterTd = e.target.closest('.ml-cell-thumb.ml-dup-cluster');
+					if (clusterTd) {
+						e.preventDefault();
+						openClusterModal(clusterTd);
+						return;
+					}
 					// Thumbnail → PW image editor modal. The td only carries
 					// the page-edit data attrs when the host page is
 					// editable, so unauthorised users just see the thumb
@@ -2405,6 +2471,12 @@
 				if (dupToggle && e.target === dupToggle) {
 					e.preventDefault();
 					toggleDupCluster(dupToggle);
+					return;
+				}
+				var clusterTd = e.target.closest && e.target.closest('.ml-cell-thumb.ml-dup-cluster');
+				if (clusterTd && e.target === clusterTd) {
+					e.preventDefault();
+					openClusterModal(clusterTd);
 					return;
 				}
 				var nativeTd = e.target.closest && e.target.closest('.ml-cell-thumb[data-file-hash], .ml-cell-native[data-file-hash]');
