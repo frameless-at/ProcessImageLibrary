@@ -502,7 +502,7 @@ class ProcessImageLibrary extends Process {
 		$btn = $this->wire('modules')->get('InputfieldButton');
 		$btn->attr('value', $label);
 		$btn->attr('type', 'button');
-		$btn->icon = 'clone';
+		$btn->icon = 'image';
 		$btn->addClass('ml-lib-pick');
 		$btn->attr('data-picker-url', $pickerUrl);
 		$btn->attr('data-field', $fname);

@@ -12,22 +12,22 @@
 
 	// The button lives on the page editor, which doesn't load the module CSS.
 	// Two things to inject once:
-	//  - icon sizing to match PW's "Choose File" (fa-fw fa-folder-open-o);
+	//  - icon sizing for the fa-image glyph;
 	//  - an outline (uk-button-default-style) look: the native submit button
 	//    is filled with the theme colour, so override .ml-lib-pick.ui-button
 	//    to a transparent button with a subtle border + inherited text colour
 	//    (theme-agnostic). Higher specificity than the theme rule, no !important.
+	//    ui-state-hover is folded into the base rule so jQuery UI's hover state
+	//    keeps the SAME look — no custom :hover rule (that made it twitch).
 	(function injectStyle() {
 		if (document.getElementById('ml-lib-pick-style')) return;
 		var s = document.createElement('style');
 		s.id = 'ml-lib-pick-style';
 		s.textContent =
-			'.ml-lib-pick .fa{font-size:1em;width:1.28571429em;text-align:center}'
+			'.ml-lib-pick .fa{font-size:0.85em;width:1em;vertical-align:1px;text-align:center;margin-right:3px}'
 			+ '.ml-lib-pick.ui-button,.ml-lib-pick.ui-button.ui-state-default,'
 			+ '.ml-lib-pick.ui-button.ui-state-hover{background:transparent;color:inherit;'
-			+ 'border:1px solid rgba(127,127,127,.5)}'
-			+ '.ml-lib-pick.ui-button:hover{background:rgba(127,127,127,.14);color:inherit;'
-			+ 'border-color:rgba(127,127,127,.85)}';
+			+ 'border:1px solid rgba(127,127,127,.5)}';
 		document.head.appendChild(s);
 	})();
 
