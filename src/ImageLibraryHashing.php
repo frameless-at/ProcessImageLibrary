@@ -448,6 +448,7 @@ trait ImageLibraryHashing {
 
 		$existing = $this->loadHashRowsForPage($pageId);
 		$hashes   = [];
+		$present  = [];   // field\0basename of images currently on the page
 		foreach ($fields as $fn) {
 			if (!$page->template->hasField($fn)) continue;
 			$val = $page->get($fn);
@@ -456,6 +457,7 @@ trait ImageLibraryHashing {
 			foreach ($items as $img) {
 				if (!$img instanceof Pageimage) continue;
 				$bn   = (string) $img->basename;
+				$present[$fn . "\0" . $bn] = true;
 				$path = (string) $img->filename;
 				$size = @filesize($path);
 				$mt   = @filemtime($path);
@@ -474,7 +476,48 @@ trait ImageLibraryHashing {
 				$hashes[$content] = true;
 			}
 		}
+
+		// Drop fingerprint + hardlink-manifest rows for images that are no
+		// longer on this page (deleted / renamed), so duplicate counts and the
+		// reclaimed-bytes figure stay accurate without waiting for a re-scan.
+		$this->pruneStaleRowsForPage($pageId, $present);
+
 		return array_keys($hashes);
+	}
+
+	/**
+	 * Remove fingerprint (HASH_TABLE) and hardlink-manifest (HARDLINK_TABLE)
+	 * rows for the given page whose (field, basename) is NOT in $present —
+	 * i.e. images that no longer exist on the page. Called after re-hashing a
+	 * saved page. Per-page, few rows; safe to run on every save.
+	 *
+	 * @param array<string,bool> $present keys "field\0basename" still on the page
+	 */
+	protected function pruneStaleRowsForPage(int $pageId, array $present): void {
+		$this->ensureHashTable();
+		$this->ensureHardlinkTable();
+		$db = $this->wire('database');
+		foreach ([self::HASH_TABLE, self::HARDLINK_TABLE] as $table) {
+			try {
+				$sel = $db->prepare('SELECT field_name, basename FROM `' . $table . '` WHERE page_id = ?');
+				$sel->execute([$pageId]);
+				$stale = [];
+				while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
+					if (!isset($present[$r['field_name'] . "\0" . $r['basename']])) {
+						$stale[] = [$r['field_name'], $r['basename']];
+					}
+				}
+				if (!$stale) continue;
+				$del = $db->prepare(
+					'DELETE FROM `' . $table . '` WHERE page_id = ? AND field_name = ? AND basename = ?'
+				);
+				foreach ($stale as [$fn, $bn]) {
+					$del->execute([$pageId, $fn, $bn]);
+				}
+			} catch (\Throwable $e) {
+				$this->wire('log')->error('ImageLibrary: prune stale rows failed: ' . $e->getMessage());
+			}
+		}
 	}
 
 	/**
