@@ -32,6 +32,17 @@
 
 	function fmt(n) { return (n | 0).toLocaleString(); }
 
+	// Byte → human string, matching the PHP formatFilesize so the live-counted
+	// figure reads the same as the server's. Avoids `| 0` (32-bit) since byte
+	// totals can exceed 2 GB.
+	function humanBytes(bytes) {
+		bytes = Math.max(0, Math.floor(bytes || 0));
+		if (bytes === 0) return '0 B';
+		var units = ['B', 'KB', 'MB', 'GB'], i = 0, size = bytes;
+		while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
+		return (i === 0 ? String(bytes) : (size >= 10 ? size.toFixed(0) : size.toFixed(1))) + ' ' + units[i];
+	}
+
 	// Keep the Status block honest: the "reclaimed" / "sharing" rows only make
 	// sense when something is actually collapsed. After a reclaim they appear;
 	// after a revert they disappear and the neutral note returns — no reload,
@@ -66,6 +77,11 @@
 		bar.value = 0;
 
 		var linkedFiles = 0, freedHuman = '0', clustersDone = 0, clustersTotal = 0;
+		// Live tallies: the disk isn't re-walked every chunk, so we count the
+		// freed bytes / collapsed files from each chunk's per-cluster breakdown
+		// on top of the pre-run baseline. On completion the server's measured
+		// figures replace the estimate.
+		var baseBytes = -1, baseShared = 0, freedBytes = 0, linkedNew = 0;
 
 		function setStat(sel, text) {
 			var n = document.querySelector(sel);
@@ -107,11 +123,12 @@
 				if (!d || !d.ok) throw new Error((d && d.error) || 'reclaim failed');
 				clustersTotal = d.totalClusters | 0;
 				clustersDone  = Math.min(d.nextOffset | 0, clustersTotal);
-				linkedFiles   = d.linkedTotal | 0;
-				freedHuman    = d.reclaimedHuman || freedHuman;
+				if (baseBytes < 0) { baseBytes = d.reclaimedBytes || 0; baseShared = d.linkedTotal | 0; }
 				bar.max = clustersTotal || 1; bar.value = clustersDone;
 				phase.textContent = 'Reclaiming clusters… ' + fmt(clustersDone) + ' / ' + fmt(clustersTotal);
 				(d.details || []).forEach(function (c) {
+					freedBytes += (c.bytes || 0);
+					linkedNew  += (c.originals || 0) + (c.variations || 0);
 					var parts = [];
 					if (c.originals)  parts.push(c.originals + '× original');
 					if (c.variations) parts.push(c.variations + '× variation');
@@ -122,6 +139,15 @@
 						'• ' + c.label + ' [' + c.members + ' copies]: ' + parts.join(', ') + human,
 						(c.variations || c.originals) ? '' : 'uk-text-muted');
 				});
+				if (d.complete) {
+					// Server re-measured the disk on the final step — use the truth.
+					freedHuman  = d.reclaimedHuman || humanBytes(baseBytes + freedBytes);
+					linkedFiles = d.linkedTotal | 0;
+				} else {
+					// Live estimate: baseline + what this run has freed so far.
+					freedHuman  = humanBytes(baseBytes + freedBytes);
+					linkedFiles = baseShared + linkedNew;
+				}
 				updateTotals();
 				if (!d.complete) return reclaim(d.nextOffset);
 				phase.textContent = 'Done.';
