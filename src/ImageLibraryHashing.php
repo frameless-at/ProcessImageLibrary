@@ -690,6 +690,7 @@ trait ImageLibraryHashing {
 			'versionFiles' => 0, 'versionShared' => 0, 'versionStandalone' => 0,
 			'versionStandaloneBytes' => 0, 'truncated' => false,
 			'versionSamples' => [],   // a few standalone-version paths, to see the on-disk layout
+			'versionReasons' => [],   // why each standalone version file wasn't linked (reason => count)
 		];
 		if ($root === '' || !is_dir($root)) return $out;
 		$rootLen = strlen($root);
@@ -726,8 +727,32 @@ trait ImageLibraryHashing {
 					} else {
 						$out['versionStandalone']++;
 						$out['versionStandaloneBytes'] += $size;
-						if (count($out['versionSamples']) < 8) {
-							$out['versionSamples'][] = substr($file->getPathname(), $rootLen);
+						// Diagnose exactly WHY this one wasn't linked to its live twin.
+						$rel    = str_replace('\\', '/', substr($file->getPathname(), $rootLen));
+						$reason = 'nestedPath';
+						$detail = '';
+						if (preg_match('~^(\d+)/(v\d+)/(.+)$~', $rel, $m)) {
+							$livePath = $root . $m[1] . '/' . $m[3];
+							if (!is_file($livePath)) {
+								$reason = 'noLiveTwin';
+								$detail = $m[1] . '/' . $m[3] . ' missing';
+							} elseif ($this->sameInode($livePath, $file->getPathname())) {
+								$reason = 'alreadySameInode';   // (shouldn't be standalone — sanity)
+							} else {
+								$liveSize = (int) @filesize($livePath);
+								if ($liveSize !== $size) {
+									$reason = 'sizeDiffersFromLive';
+									$detail = 'live=' . $liveSize . ' vs version=' . $size;
+								} elseif (@hash_file($this->hashAlgo(), $livePath) !== @hash_file($this->hashAlgo(), $file->getPathname())) {
+									$reason = 'bytesDifferFromLive';   // same size, different content
+								} else {
+									$reason = 'identicalButUnlinked';   // link attempt must have failed
+								}
+							}
+						}
+						$out['versionReasons'][$reason] = ($out['versionReasons'][$reason] ?? 0) + 1;
+						if (count($out['versionSamples']) < 10) {
+							$out['versionSamples'][] = $rel . '  [' . $reason . ($detail ? ': ' . $detail : '') . ']';
 						}
 					}
 				}

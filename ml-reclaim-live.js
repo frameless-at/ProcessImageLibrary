@@ -139,6 +139,13 @@
 					return '<tr><td style="padding:2px 8px 2px 0;color:#555">' + r[0] +
 						'</td><td style="padding:2px 0;text-align:right">' + r[1] + '</td></tr>';
 				}).join('') + '</table>';
+			if (d.versionReasons && Object.keys(d.versionReasons).length) {
+				html += '<div style="margin-top:.5rem;color:#555">Why standalone version files weren’t linked:</div>' +
+					'<ul style="margin:.2rem 0 0;padding-left:1.1rem;font-size:.85em">' +
+					Object.keys(d.versionReasons).map(function (k) {
+						return '<li>' + k + ': <strong>' + fmt(d.versionReasons[k]) + '</strong></li>';
+					}).join('') + '</ul>';
+			}
 			if (d.versionSamples && d.versionSamples.length) {
 				html += '<div style="margin-top:.5rem;color:#555">Example standalone version files:</div>' +
 					'<ul style="margin:.2rem 0 0;padding-left:1.1rem;font-family:monospace;font-size:.85em">' +
