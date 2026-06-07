@@ -587,12 +587,13 @@ class ProcessImageLibrary extends Process {
 		@set_time_limit($seconds + 30);
 		$stop = microtime(true) + max(1, $seconds);
 		$expanded = 0;
-		// Always offset 0: expandManifest deletes processed rows, so the
-		// remaining set re-heads at 0 each pass (a running offset would skip).
+		// Filesystem-level un-share (see expandAllSharedStep): authoritative, so
+		// it also clears hardlinks the manifest drifted away from.
 		do {
-			$r = $this->expandManifest(0);
+			$r = $this->expandAllSharedStep();
 			$expanded += (int) ($r['expanded'] ?? 0);
 		} while (empty($r['complete']) && microtime(true) < $stop);
+		if (!empty($r['complete'])) $this->clearManifest();
 		$this->diskSavedBytesCached(true);   // re-measure so the Status isn't stale
 		return $expanded;
 	}
@@ -690,16 +691,20 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Invalid CSRF token', 403);
 		}
 		@set_time_limit(60);
-		// expandManifest DELETES processed rows and re-reads the list each call,
-		// so the remaining work always starts at offset 0 — passing a running
-		// offset would skip rows. The driver just re-POSTs until complete.
-		$r = $this->expandManifest(0);
+		// Revert works at the FILESYSTEM level, not from the manifest: it un-shares
+		// every file the OS reports as shared (link-count ≥ 2), so it also clears
+		// hardlinks the manifest drifted away from — "un-share all" really means
+		// all. Re-POST until complete; then drop the now-meaningless manifest and
+		// re-measure the saving from disk.
+		$r = $this->expandAllSharedStep();
 		$r['ok'] = true;
-		$r['linkedTotal'] = $this->countHardlinks();   // manifest rows still left
 		if (!empty($r['complete'])) {
-			$r['reclaimedBytes'] = $this->diskSavedBytesCached(true);   // re-measure from disk
+			$this->clearManifest();
+			$r['reclaimedBytes'] = $this->diskSavedBytesCached(true);   // re-measure once, at the end
 		} else {
-			$r['reclaimedBytes'] = $this->totalReclaimedBytes();
+			// Don't re-walk the tree for a figure mid-run (the step already walked
+			// it); the driver shows live counts and only needs the MB at the end.
+			$r['reclaimedBytes'] = $this->diskSavedBytesCached(false);
 		}
 		$r['reclaimedHuman'] = $this->formatFilesize($r['reclaimedBytes']);
 		return $this->jsonResponse($r);

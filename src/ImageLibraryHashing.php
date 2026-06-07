@@ -1127,6 +1127,57 @@ trait ImageLibraryHashing {
 	}
 
 	/**
+	 * Un-share EVERY shared file on disk — the authoritative "revert all".
+	 *
+	 * The manifest (expandManifest) can only undo links it still has a row for,
+	 * but pruning drifts the manifest below reality, so manifest-based revert
+	 * leaves orphaned hardlinks collapsed (and "un-share all" lies). This walks
+	 * the real assets/files tree instead and gives an independent copy back to
+	 * every file whose inode link-count is ≥ 2 — exactly what the filesystem
+	 * reports as shared, regardless of bookkeeping. Time-budgeted; re-call until
+	 * complete. When a cluster's first member is expanded the others' link-count
+	 * drops, so later members are naturally seen as standalone and skipped.
+	 *
+	 * @return array{expanded:int,remaining:int,scanned:int,complete:bool}
+	 */
+	protected function expandAllSharedStep(): array {
+		$out = ['expanded' => 0, 'remaining' => 0, 'scanned' => 0, 'complete' => true];
+		$root = (string) $this->wire('config')->paths->files;
+		if ($root === '' || !is_dir($root)) return $out;
+		$deadline = microtime(true) + (self::HASH_SCAN_BUDGET_MS / 1000);
+		try {
+			$it = new \RecursiveIteratorIterator(
+				new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
+				\RecursiveIteratorIterator::LEAVES_ONLY
+			);
+			foreach ($it as $file) {
+				if (!$file->isFile() || $file->isLink()) continue;
+				$out['scanned']++;
+				$st = @stat($file->getPathname());
+				if (!$st || (int) ($st['nlink'] ?? 1) < 2) continue;   // not shared
+				if (microtime(true) > $deadline) { $out['remaining']++; continue; }
+				if ($this->expandFile($file->getPathname())) $out['expanded']++;
+				else $out['remaining']++;
+			}
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: expand-all-shared failed: ' . $e->getMessage());
+		}
+		$out['complete'] = ($out['remaining'] === 0);
+		return $out;
+	}
+
+	/** Forget the whole hardlink manifest (after a filesystem-level revert the
+	 *  rows are meaningless — every file is independent again). */
+	protected function clearManifest(): void {
+		$this->ensureHardlinkTable();
+		try {
+			$this->wire('database')->exec('DELETE FROM `' . self::HARDLINK_TABLE . '`');
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: clear manifest failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
 	 * Reclaim page-version files. ProcessWire's Page Versions feature copies a
 	 * page's files into a `v<n>/` subdirectory of the SAME page folder when a
 	 * version is saved (PagesVersionsFiles::copyPageVersionFiles → dirPrefix 'v'),

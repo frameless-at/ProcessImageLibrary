@@ -155,7 +155,6 @@
 				['Logical size (what FTP/backup sees)', d.apparentHuman],
 				['Actual disk usage (du)',   d.actualHuman],
 				['→ Space saved by hardlinks', '<strong>' + d.savedHuman + '</strong>'],
-				['Manifest says reclaimed',  d.manifestHuman],
 				['Version files total',      fmt(d.versionFiles)],
 				['  · already shared',       fmt(d.versionShared)],
 				['  · still standalone',     fmt(d.versionStandalone) + ' (' + d.versionStandaloneHuman + ' reclaimable)']
@@ -208,17 +207,16 @@
 			phase.textContent = 'Reverting…';
 			return post(url, { offset: 0 }, csrf).then(function (d) {
 				if (!d || !d.ok) throw new Error((d && d.error) || 'revert failed');
-				var remaining = d.linkedTotal | 0;
+				var remaining = d.remaining | 0;          // files still sharing an inode
 				if (!startTotal) startTotal = remaining + (d.expanded | 0);
 				undone += d.expanded | 0;
-				freedHuman = d.reclaimedHuman || freedHuman;
 				bar.max = startTotal || 1; bar.value = Math.max(0, startTotal - remaining);
 				phase.textContent = 'Reverting… ' + fmt(undone) + ' un-shared, ' + fmt(remaining) + ' left';
 				totals.innerHTML = 'Un-shared: <strong>' + fmt(undone) + '</strong> · Still sharing: <strong>' + fmt(remaining) + '</strong>';
 				if (!d.complete) return step();
 				phase.textContent = 'Done.';
 				logLine(log, '✓ Revert complete — ' + fmt(undone) + ' file(s) given their own copy again.');
-				syncStatus({ linked: remaining, reclaimedHuman: freedHuman });
+				syncStatus({ linked: 0, reclaimedHuman: d.reclaimedHuman });
 			});
 		}
 		step().catch(function (e) {
