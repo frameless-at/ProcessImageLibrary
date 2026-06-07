@@ -134,11 +134,21 @@
 				['  · already shared',       fmt(d.versionShared)],
 				['  · still standalone',     fmt(d.versionStandalone) + ' (' + d.versionStandaloneHuman + ' reclaimable)']
 			];
-			out.innerHTML = '<table style="border-collapse:collapse;width:100%">' +
+			var html = '<table style="border-collapse:collapse;width:100%">' +
 				rows.map(function (r) {
 					return '<tr><td style="padding:2px 8px 2px 0;color:#555">' + r[0] +
 						'</td><td style="padding:2px 0;text-align:right">' + r[1] + '</td></tr>';
 				}).join('') + '</table>';
+			if (d.versionSamples && d.versionSamples.length) {
+				html += '<div style="margin-top:.5rem;color:#555">Example standalone version files:</div>' +
+					'<ul style="margin:.2rem 0 0;padding-left:1.1rem;font-family:monospace;font-size:.85em">' +
+					d.versionSamples.map(function (p) {
+						return '<li>' + p.replace(/[<>&]/g, function (c) {
+							return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c];
+						}) + '</li>';
+					}).join('') + '</ul>';
+			}
+			out.innerHTML = html;
 		}).catch(function (e) {
 			out.innerHTML = '<span style="color:#c33">✗ ' + (e && e.message ? e.message : 'error') + '</span>';
 		}).then(function () { btn.disabled = false; });

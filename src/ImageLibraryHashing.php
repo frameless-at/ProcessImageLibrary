@@ -682,8 +682,10 @@ trait ImageLibraryHashing {
 			'files' => 0, 'apparent' => 0, 'actual' => 0, 'saved' => 0,
 			'versionFiles' => 0, 'versionShared' => 0, 'versionStandalone' => 0,
 			'versionStandaloneBytes' => 0, 'truncated' => false,
+			'versionSamples' => [],   // a few standalone-version paths, to see the on-disk layout
 		];
 		if ($root === '' || !is_dir($root)) return $out;
+		$rootLen = strlen($root);
 
 		$seenInode = [];          // "dev:inode" => true, to count shared inodes once
 		$max = 400000;            // safety cap so a giant tree can't run away
@@ -717,6 +719,9 @@ trait ImageLibraryHashing {
 					} else {
 						$out['versionStandalone']++;
 						$out['versionStandaloneBytes'] += $size;
+						if (count($out['versionSamples']) < 8) {
+							$out['versionSamples'][] = substr($file->getPathname(), $rootLen);
+						}
 					}
 				}
 			}
