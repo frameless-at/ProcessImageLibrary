@@ -1599,7 +1599,14 @@
 
 			fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
 				.then(function (r) { return r.text(); })
-				.then(function (html) { body.innerHTML = html; })
+				.then(function (html) {
+					body.innerHTML = html;
+					// The fresh table must honour the user's column prefs the same
+					// way replaceFromQs does (both appliers query the whole document,
+					// so they reach the modal table too).
+					if (root._mlApplyColumnVisibility) root._mlApplyColumnVisibility();
+					if (root._mlApplyColumnOrder) root._mlApplyColumnOrder();
+				})
 				.catch(function () { body.textContent = labels.error || 'Error'; });
 		}
 
