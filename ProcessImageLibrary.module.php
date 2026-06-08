@@ -5138,40 +5138,45 @@ class ProcessImageLibrary extends Process {
 			$outer->add($tagsFs);
 		}
 
-		// Missing-X checkboxes inline, each 25% wide — fixed
-		// description / tags first, then one per custom field. All
-		// rendered; JS hides / unchecks the ones that don't apply to
-		// the selected field, same as template→field.
-		$missingDef = [
-			'no_desc' => $this->_('Missing description'),
-			'no_tags' => $this->_('Missing tags'),
-		];
-		foreach ($customCols as $name) {
-			$missingDef['no_custom_' . $name] = sprintf($this->_('Missing %s'), $name);
-		}
-		foreach ($missingDef as $name => $label) {
-			$cb = $modules->get('InputfieldCheckbox');
-			$cb->name        = $name;
-			$cb->label       = $label;
-			$cb->columnWidth = 25;
-			if ($name === 'no_desc' && !empty($filters['no_desc'])) $cb->attr('checked', 'checked');
-			if ($name === 'no_tags' && !empty($filters['no_tags'])) $cb->attr('checked', 'checked');
-			if (strpos($name, 'no_custom_') === 0) {
-				$key = substr($name, strlen('no_custom_'));
-				if (!empty($filters['no_custom'][$key])) $cb->attr('checked', 'checked');
+		// Missing-X + Duplicates are AUDIT filters (find images that need
+		// metadata, or byte-identical copies). When you're picking an image to
+		// insert into a field they're just noise — skip them in the picker.
+		if (!$this->pickerMode) {
+			// Missing-X checkboxes inline, each 25% wide — fixed
+			// description / tags first, then one per custom field. All
+			// rendered; JS hides / unchecks the ones that don't apply to
+			// the selected field, same as template→field.
+			$missingDef = [
+				'no_desc' => $this->_('Missing description'),
+				'no_tags' => $this->_('Missing tags'),
+			];
+			foreach ($customCols as $name) {
+				$missingDef['no_custom_' . $name] = sprintf($this->_('Missing %s'), $name);
 			}
-			$outer->add($cb);
-		}
+			foreach ($missingDef as $name => $label) {
+				$cb = $modules->get('InputfieldCheckbox');
+				$cb->name        = $name;
+				$cb->label       = $label;
+				$cb->columnWidth = 25;
+				if ($name === 'no_desc' && !empty($filters['no_desc'])) $cb->attr('checked', 'checked');
+				if ($name === 'no_tags' && !empty($filters['no_tags'])) $cb->attr('checked', 'checked');
+				if (strpos($name, 'no_custom_') === 0) {
+					$key = substr($name, strlen('no_custom_'));
+					if (!empty($filters['no_custom'][$key])) $cb->attr('checked', 'checked');
+				}
+				$outer->add($cb);
+			}
 
-		// "Duplicates only" — narrow the current view (table / gallery) to
-		// images that are byte-identical copies of another. Needs a scan
-		// (run once from the Duplicates tab); empty before that.
-		$dupCb = $modules->get('InputfieldCheckbox');
-		$dupCb->name        = 'dupes';
-		$dupCb->label       = $this->_('Duplicates');
-		$dupCb->columnWidth = 25;
-		if (!empty($filters['dupes'])) $dupCb->attr('checked', 'checked');
-		$outer->add($dupCb);
+			// "Duplicates only" — narrow the current view (table / gallery) to
+			// images that are byte-identical copies of another. Needs a scan
+			// (run once from the Duplicates tab); empty before that.
+			$dupCb = $modules->get('InputfieldCheckbox');
+			$dupCb->name        = 'dupes';
+			$dupCb->label       = $this->_('Duplicates');
+			$dupCb->columnWidth = 25;
+			if (!empty($filters['dupes'])) $dupCb->attr('checked', 'checked');
+			$outer->add($dupCb);
+		}
 
 		// Apply + Reset as raw UIkit buttons inside an InputfieldMarkup.
 		// PW's InputfieldSubmit / InputfieldButton render their <button>
