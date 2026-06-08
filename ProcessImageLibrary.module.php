@@ -483,23 +483,28 @@ class ProcessImageLibrary extends Process {
 		// adds the plugin + toolbar button per editor before init. This hook
 		// just enqueues that script and exposes the URLs/labels.
 		$this->addHookAfter('InputfieldTinyMCE::render', $this, 'addLibraryTinyMceButton');
+
+		// Front-end editing renders the TinyMCE editor client-side (PageFrontEdit
+		// → InputfieldTinyMCE.init on click), bypassing the render hook above. So
+		// inject the same glue into the front-end page output when it carries an
+		// editable rich-text region.
+		$this->addHookAfter('Page::render', $this, 'injectTinyMceGlueForFrontEdit');
 	}
 
 	/**
-	 * Append the "Insert from library" glue INLINE to every rich-text field's
-	 * markup. We don't use $config->scripts/$config->js because those are only
-	 * reliably output in the admin — the front-end editor (and AJAX/modal loads)
-	 * may not echo them. Inlining the script means it travels WITH the editor
-	 * HTML, so it runs wherever the editor renders: admin, front-end, modal
-	 * iframe, AJAX-injected form. It registers PW's InputfieldTinyMCE.onConfig()
-	 * callback (polling until that API exists, before editors init), which adds
-	 * our external plugin + toolbar button + Insert-menu item. The plugin file
-	 * itself is fetched by TinyMCE via external_plugins, so it needs no enqueue.
+	 * The "Insert from library" glue: an inline <script> that registers PW's
+	 * InputfieldTinyMCE.onConfig() callback (polling until that API exists,
+	 * before editors init) to add our external plugin + toolbar button + Insert-
+	 * menu item. The plugin file itself is fetched by TinyMCE via
+	 * external_plugins, so it needs no enqueue. Returned as a string so both the
+	 * admin path (per-field render) and the front-end path (Page::render) can
+	 * emit the SAME script — we deliberately avoid $config->scripts/$config->js
+	 * because the front-end editor doesn't reliably echo them.
 	 */
-	public function addLibraryTinyMceButton(HookEvent $event): void {
+	protected function tinyMceGlueScript(): string {
 		$config = $this->wire('config');
 		$libUrl = $this->libraryPageUrl();
-		if ($libUrl === '') return;
+		if ($libUrl === '') return '';
 
 		$pluginVer = @filemtime($config->paths($this) . 'mllibrary.js') ?: '1';
 		$cfg = json_encode([
@@ -508,7 +513,7 @@ class ProcessImageLibrary extends Process {
 			'label'     => $this->_('Insert from library'),
 		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 
-		$event->return .= "\n<script>(function(){var C=$cfg;"
+		return "\n<script>(function(){var C=$cfg;"
 			. "function reg(){var I=window.InputfieldTinyMCE;if(!I||typeof I.onConfig!=='function')return false;"
 			. "window.ProcessWire=window.ProcessWire||{};ProcessWire.config=ProcessWire.config||{};"
 			. "ProcessWire.config.ImageLibraryInsert=C;"
@@ -518,6 +523,29 @@ class ProcessImageLibrary extends Process {
 			. "if(s.menu&&s.menu.insert&&typeof s.menu.insert.items==='string'&&s.menu.insert.items.indexOf('mllibrary')===-1)"
 			. "s.menu.insert.items=s.menu.insert.items+' mllibrary';});return true;}"
 			. "if(!reg()){var n=0,iv=setInterval(function(){if(reg()||++n>200)clearInterval(iv);},25);}})();</script>";
+	}
+
+	/** Admin path: append the glue to each rich-text field's render output. */
+	public function addLibraryTinyMceButton(HookEvent $event): void {
+		$event->return .= $this->tinyMceGlueScript();
+	}
+
+	/**
+	 * Front-end path: PW's PageFrontEdit creates the inline TinyMCE editor
+	 * CLIENT-SIDE on click (InputfieldTinyMCE.init), so our per-field render hook
+	 * never runs there. Instead, when a front-end page carries a TinyMCE editable
+	 * region (.pw-edit-InputfieldTinyMCE), inject the same glue before </body> —
+	 * it registers onConfig before any editor inits.
+	 */
+	public function injectTinyMceGlueForFrontEdit(HookEvent $event): void {
+		$out = $event->return;
+		if (!is_string($out) || $out === '') return;
+		if (strpos($out, 'pw-edit-InputfieldTinyMCE') === false) return;   // no front-edit RTE region
+		$pos = stripos($out, '</body>');
+		if ($pos === false) return;                                        // full-page output only
+		$script = $this->tinyMceGlueScript();
+		if ($script === '') return;
+		$event->return = substr($out, 0, $pos) . $script . substr($out, $pos);
 	}
 
 	/**
