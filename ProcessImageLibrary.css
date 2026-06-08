@@ -19,12 +19,6 @@
 .ml-filter-bar {
 	margin: 0 !important;
 }
-/* The filter box's bottom border belongs on the form's own list (form > ul),
-   not the collapsed fieldset header. !important + .Inputfields specificity so
-   the admin theme's grid styling on the <ul> can't strip it. */
-.ml-filter-bar > ul.Inputfields {
-	border-bottom: 1px solid var(--pw-border-color, #e5e5e5) !important;
-}
 
 /* Cap the tag-filter checkbox grid so a large tag pool stays
    usable instead of pushing the rest of the filter UI off-screen.
