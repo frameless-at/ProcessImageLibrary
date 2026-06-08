@@ -14,6 +14,16 @@
 (function () {
 	if (typeof tinymce === 'undefined') return;
 
+	// True when the editor runs on a front-end page (not under the admin URL) —
+	// i.e. PageFrontEdit inline editing, where the picker modal needs full width
+	// and a high z-index to sit above the inline editor.
+	function isFrontEnd() {
+		try {
+			var a = ProcessWire.config.urls.admin;
+			return !!a && location.pathname.indexOf(a) !== 0;
+		} catch (e) { return false; }
+	}
+
 	tinymce.PluginManager.add('mllibrary', function (editor) {
 
 		function cfg() {
@@ -30,11 +40,14 @@
 				{ title: "<i class='fa fa-fw fa-image'></i> " + label },
 				'large'
 			);
-			// Fill the dialog width, and lift the whole modal above the front-end
-			// inline editor (which otherwise overlaps it).
-			$iframe.css('width', '100%');
-			$iframe.closest('.ui-dialog').css('z-index', 9999);
-			if (window.jQuery) window.jQuery('.ui-widget-overlay').css('z-index', 9998);
+			// Front-end ONLY: fill the dialog width and lift the modal above the
+			// inline editor. In the admin the default sizing/stacking is correct,
+			// so leave it untouched there.
+			if (isFrontEnd()) {
+				$iframe.css('width', '100%');
+				$iframe.closest('.ui-dialog').css('z-index', 9999);
+				if (window.jQuery) window.jQuery('.ui-widget-overlay').css('z-index', 9998);
+			}
 
 			function onMessage(e) {
 				if (e.origin !== location.origin) return;            // same-origin only

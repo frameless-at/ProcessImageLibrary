@@ -17,17 +17,26 @@
 		return (window.ProcessWire && ProcessWire.config && ProcessWire.config.ImageLibraryInsert) || {};
 	}
 	function label() { return cfg().label || 'Insert from library'; }
+	// True on a front-end page (not under the admin URL) — PageFrontEdit inline.
+	function isFrontEnd() {
+		try {
+			var a = ProcessWire.config.urls.admin;
+			return !!a && location.pathname.indexOf(a) !== 0;
+		} catch (e) { return false; }
+	}
 
 	function openPicker(editor) {
 		var c = cfg();
 		if (!c.pickerUrl || typeof pwModalWindow === 'undefined') return;
 
 		var $iframe = pwModalWindow(c.pickerUrl, { title: label() }, 'large');
-		// Fill the dialog width, and lift the whole modal above the front-end
-		// inline editor (which otherwise overlaps it).
-		$iframe.css('width', '100%');
-		$iframe.closest('.ui-dialog').css('z-index', 9999);
-		if (window.jQuery) window.jQuery('.ui-widget-overlay').css('z-index', 9998);
+		// Front-end ONLY: fill the dialog width and lift the modal above the
+		// inline editor. In the admin the default sizing/stacking is correct.
+		if (isFrontEnd()) {
+			$iframe.css('width', '100%');
+			$iframe.closest('.ui-dialog').css('z-index', 9999);
+			if (window.jQuery) window.jQuery('.ui-widget-overlay').css('z-index', 9998);
+		}
 
 		function onMessage(e) {
 			if (e.origin !== location.origin) return;
