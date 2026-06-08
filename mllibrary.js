@@ -34,15 +34,32 @@
 			function onMessage(e) {
 				if (e.origin !== location.origin) return;            // same-origin only
 				if (!e.data || !e.data.mlInsert) return;
-				var items = e.data.items || [];
-				var html = items.map(function (it) {
-					if (!it || !it.url) return '';
-					var alt = String(it.alt || '').replace(/"/g, '&quot;');
-					return '<img src="' + it.url + '" alt="' + alt + '">';
-				}).join('');
-				if (html) editor.insertContent(html);
+				var items = (e.data.items || []).filter(function (it) { return it && it.url; });
 				cleanup();
 				try { $iframe.dialog('close'); } catch (err) { /* already closed */ }
+				if (!items.length) return;
+
+				function alt(it) { return String(it.alt || '').replace(/"/g, '&quot;'); }
+
+				// Single pick → drop it in and hand straight off to PW's own image
+				// dialog (crop / resize / caption / align), exactly as if the user
+				// had selected the image and clicked the native image button. PW's
+				// pwimage reads the page id out of the src, so a cross-page library
+				// image edits fine. Multiple picks (or no pwimage) → plain insert.
+				if (items.length === 1 && typeof window.pwTinyMCE_image === 'function') {
+					editor.insertContent('<img src="' + items[0].url + '" alt="' + alt(items[0]) + '" data-mlnew="1">');
+					var img = editor.getBody().querySelector('img[data-mlnew="1"]');
+					if (img) {
+						img.removeAttribute('data-mlnew');
+						editor.selection.select(img);
+						window.pwTinyMCE_image(editor);
+						return;
+					}
+				}
+				var html = items.map(function (it) {
+					return '<img src="' + it.url + '" alt="' + alt(it) + '">';
+				}).join('');
+				if (html) editor.insertContent(html);
 			}
 			function cleanup() { window.removeEventListener('message', onMessage); }
 
