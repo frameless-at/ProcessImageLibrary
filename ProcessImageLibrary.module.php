@@ -486,26 +486,38 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Enqueue the TinyMCE glue (onConfig registration) + the picker config on
-	 * any page that renders a rich-text field. Idempotent — $config->scripts
-	 * dedupes by URL and $config->js merges, so firing per field is harmless.
+	 * Append the "Insert from library" glue INLINE to every rich-text field's
+	 * markup. We don't use $config->scripts/$config->js because those are only
+	 * reliably output in the admin — the front-end editor (and AJAX/modal loads)
+	 * may not echo them. Inlining the script means it travels WITH the editor
+	 * HTML, so it runs wherever the editor renders: admin, front-end, modal
+	 * iframe, AJAX-injected form. It registers PW's InputfieldTinyMCE.onConfig()
+	 * callback (polling until that API exists, before editors init), which adds
+	 * our external plugin + toolbar button + Insert-menu item. The plugin file
+	 * itself is fetched by TinyMCE via external_plugins, so it needs no enqueue.
 	 */
 	public function addLibraryTinyMceButton(HookEvent $event): void {
 		$config = $this->wire('config');
 		$libUrl = $this->libraryPageUrl();
 		if ($libUrl === '') return;
 
-		$base = $config->paths($this);
-		$url  = $config->urls($this);
-		$cfgVer = @filemtime($base . 'ml-tinymce-config.js') ?: '1';
-		$config->scripts->add($url . 'ml-tinymce-config.js?v=' . $cfgVer);
-
-		$pluginVer = @filemtime($base . 'mllibrary.js') ?: '1';
-		$config->js('ImageLibraryInsert', [
+		$pluginVer = @filemtime($config->paths($this) . 'mllibrary.js') ?: '1';
+		$cfg = json_encode([
 			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
-			'pluginUrl' => $url . 'mllibrary.js?v=' . $pluginVer,
+			'pluginUrl' => $config->urls($this) . 'mllibrary.js?v=' . $pluginVer,
 			'label'     => $this->_('Insert from library'),
-		]);
+		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+
+		$event->return .= "\n<script>(function(){var C=$cfg;"
+			. "function reg(){var I=window.InputfieldTinyMCE;if(!I||typeof I.onConfig!=='function')return false;"
+			. "window.ProcessWire=window.ProcessWire||{};ProcessWire.config=ProcessWire.config||{};"
+			. "ProcessWire.config.ImageLibraryInsert=C;"
+			. "if(I._mlLibReg)return true;I._mlLibReg=true;"
+			. "I.onConfig(function(s){s.external_plugins=s.external_plugins||{};s.external_plugins.mllibrary=C.pluginUrl;"
+			. "if(typeof s.toolbar==='string'&&s.toolbar.indexOf('mllibrary')===-1)s.toolbar=s.toolbar+' mllibrary';"
+			. "if(s.menu&&s.menu.insert&&typeof s.menu.insert.items==='string'&&s.menu.insert.items.indexOf('mllibrary')===-1)"
+			. "s.menu.insert.items=s.menu.insert.items+' mllibrary';});return true;}"
+			. "if(!reg()){var n=0,iv=setInterval(function(){if(reg()||++n>200)clearInterval(iv);},25);}})();</script>";
 	}
 
 	/**
