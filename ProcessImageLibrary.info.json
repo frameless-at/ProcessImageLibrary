@@ -20,7 +20,7 @@
     "title": "Image Library"
   },
   "useNavJSON": false,
-  "autoload": "template=admin",
+  "autoload": true,
   "singular": true,
   "configurable": "ProcessImageLibraryConfig.php"
 }
