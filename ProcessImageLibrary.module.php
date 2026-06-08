@@ -5068,38 +5068,43 @@ class ProcessImageLibrary extends Process {
 			: $this->_('Filters');
 		$outer->collapsed = Inputfield::collapsedYes;
 
-		// Row 1: Search + Template + Image field, 33/33/34.
+		// Row 1: Search + Template + Image field, 33/33/34 — except in the picker,
+		// where Template / Image field are developer concepts a normal author
+		// can't use, so only Search remains (full width). Authors narrow via the
+		// search box, Tags, and admin-curated Bookmarks instead.
 		$q = $modules->get('InputfieldText');
 		$q->name        = 'q';
 		$q->label       = $this->_('Search');
 		$q->placeholder = $this->_('Page title, description, tags, filename, customs');
 		$q->value       = $filters['q'];
-		$q->columnWidth = 33;
+		$q->columnWidth = $this->pickerMode ? 100 : 33;
 		$outer->add($q);
 
-		// Template dropdown lists only user-facing templates — the
-		// auto-generated repeater_<field> templates are excluded
-		// because rows from repeater fields have their templateId
-		// rewritten to the owner page's template at flatten time.
-		// Picking the owner template here naturally captures those
-		// rows too.
-		$tpl = $modules->get('InputfieldSelect');
-		$tpl->name        = 'template';
-		$tpl->label       = $this->_('Template');
-		$tpl->addOption('', $this->_('All templates'));
-		foreach ($this->userFacingTemplates($eligibleTemplates) as $t) $tpl->addOption($t, $t);
-		$tpl->value       = $filters['template'];
-		$tpl->columnWidth = 33;
-		$outer->add($tpl);
+		if (!$this->pickerMode) {
+			// Template dropdown lists only user-facing templates — the
+			// auto-generated repeater_<field> templates are excluded
+			// because rows from repeater fields have their templateId
+			// rewritten to the owner page's template at flatten time.
+			// Picking the owner template here naturally captures those
+			// rows too.
+			$tpl = $modules->get('InputfieldSelect');
+			$tpl->name        = 'template';
+			$tpl->label       = $this->_('Template');
+			$tpl->addOption('', $this->_('All templates'));
+			foreach ($this->userFacingTemplates($eligibleTemplates) as $t) $tpl->addOption($t, $t);
+			$tpl->value       = $filters['template'];
+			$tpl->columnWidth = 33;
+			$outer->add($tpl);
 
-		$fld = $modules->get('InputfieldSelect');
-		$fld->name        = 'field';
-		$fld->label       = $this->_('Image field');
-		$fld->addOption('', $this->_('All image fields'));
-		foreach ($imageFields as $f) $fld->addOption($f, $f);
-		$fld->value       = $filters['field'];
-		$fld->columnWidth = 34;
-		$outer->add($fld);
+			$fld = $modules->get('InputfieldSelect');
+			$fld->name        = 'field';
+			$fld->label       = $this->_('Image field');
+			$fld->addOption('', $this->_('All image fields'));
+			foreach ($imageFields as $f) $fld->addOption($f, $f);
+			$fld->value       = $filters['field'];
+			$fld->columnWidth = 34;
+			$outer->add($fld);
+		}
 
 		// Tags fieldset (full width, always open when present). Rendered
 		// unconditionally so the JS field-capability filter has DOM to
