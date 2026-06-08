@@ -41,6 +41,10 @@ class ProcessImageLibrary extends Process {
 	protected bool $pickerMode = false;
 	protected int $pickerTargetPage = 0;
 	protected string $pickerTargetField = '';
+	// Insert mode: the picker is opened from a rich-text (TinyMCE) editor to
+	// embed a library image. No target field — it returns the image URL to the
+	// opener instead of assigning to an InputfieldImage.
+	protected bool $pickerInsertMode = false;
 
 	const ADMIN_PAGE_NAME = 'image-library';
 	const PERMISSION_NAME = 'image-library-access';
@@ -471,6 +475,50 @@ class ProcessImageLibrary extends Process {
 		// editor — opens the library as a picker to assign an existing image
 		// without re-uploading.
 		$this->addHookAfter('InputfieldImage::render', $this, 'addLibraryPickButton');
+
+		// "Insert from library" button in every TinyMCE rich-text field — opens
+		// the picker in insert mode and drops an <img> referencing the chosen
+		// library image (no copy: one shared file, embedded everywhere).
+		$this->addHookBefore('InputfieldTinyMCE::renderReady', $this, 'addLibraryTinyMceButton');
+	}
+
+	/**
+	 * Register our TinyMCE plugin + toolbar button on every InputfieldTinyMCE.
+	 *
+	 * external_plugins keys come from each URL's basename, so the file basename
+	 * ("mllibrary") IS the TinyMCE plugin name and the toolbar token. The URL is
+	 * passed root-relative because InputfieldTinyMCESettings re-prefixes the site
+	 * root. The picker-insert URL is exposed via $config->js for the plugin.
+	 */
+	public function addLibraryTinyMceButton(HookEvent $event): void {
+		$inputfield = $event->object;
+		$config = $this->wire('config');
+
+		$libUrl = $this->libraryPageUrl();
+		if ($libUrl === '') return;
+
+		// Plugin URL relative to the site root (settings adds the root back).
+		$abs  = $config->urls($this) . 'mllibrary.js?v=' . (@filemtime($config->paths($this) . 'mllibrary.js') ?: '1');
+		$root = $config->urls->root;
+		$rel  = (strpos($abs, $root) === 0) ? substr($abs, strlen($root)) : ltrim($abs, '/');
+
+		$ext = $inputfield->get('extPlugins');
+		if (!is_array($ext)) $ext = [];
+		$already = false;
+		foreach ($ext as $u) { if (strpos((string) $u, 'mllibrary.js') !== false) { $already = true; break; } }
+		if (!$already) { $ext[] = $rel; $inputfield->set('extPlugins', $ext); }
+
+		// Append our button to the toolbar (once).
+		$toolbar = (string) $inputfield->get('toolbar');
+		if (strpos($toolbar, 'mllibrary') === false) {
+			$inputfield->set('toolbar', trim($toolbar . ' mllibrary'));
+		}
+
+		// The plugin reads this to open the picker in insert mode.
+		$config->js('ImageLibraryInsert', [
+			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
+			'label'     => $this->_('Insert from library'),
+		]);
 	}
 
 	/**
@@ -916,6 +964,13 @@ class ProcessImageLibrary extends Process {
 	protected function detectPickerMode(): void {
 		$in = $this->wire('input');
 		if (!$in->get('picker')) return;
+		// Insert mode (rich-text embed): no target field to validate — the picker
+		// just hands the chosen image's URL back to the editor.
+		if ((string) $in->get('pick_mode') === 'insert') {
+			$this->pickerMode       = true;
+			$this->pickerInsertMode = true;
+			return;
+		}
 		$tp = (int) $in->get('target_page');
 		$tf = $this->wire('sanitizer')->fieldName((string) $in->get('target_field'));
 		$tpPage = $tp ? $this->wire('pages')->get($tp) : null;
@@ -1000,6 +1055,7 @@ class ProcessImageLibrary extends Process {
 				' data-picker="1" data-target-page="%d" data-target-field="%s"',
 				$this->pickerTargetPage, $sanitizer->entities($this->pickerTargetField)
 			);
+			if ($this->pickerInsertMode) $pickerAttrs .= ' data-pick-mode="insert"';
 		}
 		$rootAttrs = sprintf(
 			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-assign-url="%s"'
@@ -1429,6 +1485,22 @@ class ProcessImageLibrary extends Process {
 					$san->entities((string) ($row['pageTitle'] ?? '')),
 					$san->entities((string) ($row['pageName']  ?? ''))
 				);
+			}
+			// Insert mode (rich-text embed): carry the original image URL + its
+			// description (used as alt) so the picker JS can hand them back to the
+			// editor. Resolved via the Pageimage so extended/secure file paths
+			// are honoured rather than hand-built.
+			if ($this->pickerInsertMode) {
+				$pi = $this->resolvePageimage(
+					$this->wire('pages')->get((int) $row['pageId']),
+					(string) $row['fieldName'],
+					(string) $row['basename']
+				);
+				$insertUrl = $pi ? (string) $pi->url : '';
+				if ($insertUrl !== '') {
+					$rowAttrs .= ' data-insert-url="' . $san->entities($insertUrl) . '"'
+						. ' data-insert-alt="' . $san->entities((string) ($row['description'] ?? '')) . '"';
+				}
 			}
 			$out .= '<div class="ml-row ml-card"' . $rowAttrs . '>';
 

@@ -90,6 +90,9 @@
 		if (root.dataset.picker === '1') {
 			root.classList.add('ml-picker');
 			var assignUrl = root.dataset.assignUrl || '';
+			// Insert mode (rich-text embed): "Use selected" returns the chosen
+			// image URLs to the opener instead of assigning to a field.
+			var insertMode = root.dataset.pickMode === 'insert';
 
 			function pickKeys() {
 				return Array.prototype.map.call(
@@ -154,8 +157,27 @@
 
 			root.addEventListener('click', function (e) {
 				var btn = e.target.closest && e.target.closest('.ml-pick-confirm');
-				if (!btn || !assignUrl) return;
+				if (!btn) return;
 				e.preventDefault();
+
+				// Insert mode: gather the selected tiles' image URLs (+ alt) and
+				// hand them to the rich-text editor that opened the picker.
+				if (insertMode) {
+					var items = [];
+					(results || document).querySelectorAll('.ml-select-row:checked').forEach(function (cb) {
+						var card = cb.closest && cb.closest('.ml-card');
+						if (card && card.dataset.insertUrl) {
+							items.push({ url: card.dataset.insertUrl, alt: card.dataset.insertAlt || '' });
+						}
+					});
+					if (!items.length) return;
+					if (window.parent && window.parent !== window) {
+						window.parent.postMessage({ mlInsert: true, items: items }, location.origin);
+					}
+					return;
+				}
+
+				if (!assignUrl) return;
 				var keys = pickKeys();
 				if (!keys.length) return;
 				root.querySelectorAll('.ml-pick-confirm').forEach(function (b) { b.disabled = true; });
@@ -2212,6 +2234,7 @@
 				pp.set('picker', '1');
 				pp.set('target_page',  root.dataset.targetPage || '');
 				pp.set('target_field', root.dataset.targetField || '');
+				if (root.dataset.pickMode) pp.set('pick_mode', root.dataset.pickMode);
 				qs = '?' + pp.toString();
 			}
 			if (!config.renderUrl || !results) {
