@@ -24,18 +24,26 @@
 			return !!a && location.pathname.indexOf(a) !== 0;
 		} catch (e) { return false; }
 	}
+	// Front-end only: lift EVERY jQuery-UI dialog above the inline editor — our
+	// picker AND PW's image dialog (pwimage), which opens after a pick. Once.
+	function liftDialogsFrontEnd() {
+		if (!isFrontEnd() || document.getElementById('ml-fe-dialog-z')) return;
+		var s = document.createElement('style');
+		s.id = 'ml-fe-dialog-z';
+		s.textContent = '.ui-dialog{z-index:9999 !important}.ui-widget-overlay{z-index:9998 !important}';
+		(document.head || document.documentElement).appendChild(s);
+	}
 
 	function openPicker(editor) {
 		var c = cfg();
 		if (!c.pickerUrl || typeof pwModalWindow === 'undefined') return;
 
 		var $iframe = pwModalWindow(c.pickerUrl, { title: label() }, 'large');
-		// Front-end ONLY: fill the dialog width and lift the modal above the
-		// inline editor. In the admin the default sizing/stacking is correct.
+		// Front-end ONLY: fill the dialog width and lift every dialog (this picker
+		// + PW's image dialog after a pick) above the inline editor.
 		if (isFrontEnd()) {
+			liftDialogsFrontEnd();
 			$iframe.css('width', '100%');
-			$iframe.closest('.ui-dialog').css('z-index', 9999);
-			if (window.jQuery) window.jQuery('.ui-widget-overlay').css('z-index', 9998);
 		}
 
 		function onMessage(e) {
