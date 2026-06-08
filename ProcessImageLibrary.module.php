@@ -5239,25 +5239,25 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Filter rows down to those whose tag set includes ALL of the requested
-	 * tag tokens (AND semantics). Called separately from applyRowFilters so
-	 * the filter UI can build its tag pool from "rows after non-tag filters"
-	 * — selecting a tag then doesn't shrink the picker's options.
+	 * Filter rows down to those whose tag set includes ANY of the requested
+	 * tag tokens (OR semantics) — each extra tag WIDENS the result ("show me
+	 * everything tagged with any of these"), which is the natural gesture when
+	 * browsing for an image. Called separately from applyRowFilters so the
+	 * filter UI can build its tag pool from "rows after non-tag filters" —
+	 * selecting a tag then doesn't shrink the available options.
 	 *
 	 * @param array<int,array<string,mixed>> $rows
-	 * @param array<int,string> $tags required tags (case-sensitive match)
+	 * @param array<int,string> $tags wanted tags (case-sensitive match)
 	 */
 	protected function applyTagFilter(array $rows, array $tags): array {
 		if (!$tags) return $rows;
-		$needed = array_fill_keys($tags, true);
-		return array_values(array_filter($rows, function ($row) use ($needed) {
+		$wanted = array_fill_keys($tags, true);
+		return array_values(array_filter($rows, function ($row) use ($wanted) {
 			$rowTags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
-			if (count($rowTags) < count($needed)) return false;
-			$rowSet = array_fill_keys($rowTags, true);
-			foreach ($needed as $t => $_) {
-				if (!isset($rowSet[$t])) return false;
+			foreach ($rowTags as $t) {
+				if (isset($wanted[$t])) return true;   // any match → keep
 			}
-			return true;
+			return false;
 		}));
 	}
 
