@@ -481,14 +481,16 @@ class ProcessImageLibrary extends Process {
 		// hookable and its settings are cached), so we use PW's documented
 		// client-side InputfieldTinyMCE.onConfig() callback: our admin script
 		// adds the plugin + toolbar button per editor before init. This hook
-		// just enqueues that script and exposes the URLs/labels.
+		// just enqueues that script and exposes the URLs/labels. Both editors:
+		// TinyMCE (current default) and CKEditor 4 (legacy, still on older sites).
 		$this->addHookAfter('InputfieldTinyMCE::render', $this, 'addLibraryTinyMceButton');
+		$this->addHookAfter('InputfieldCKEditor::render', $this, 'addLibraryCkEditorButton');
 
-		// Front-end editing renders the TinyMCE editor client-side (PageFrontEdit
-		// → InputfieldTinyMCE.init on click), bypassing the render hook above. So
-		// inject the same glue into the front-end page output when it carries an
-		// editable rich-text region.
-		$this->addHookAfter('Page::render', $this, 'injectTinyMceGlueForFrontEdit');
+		// Front-end editing renders the editor client-side (PageFrontEdit →
+		// InputfieldTinyMCE.init / CKEDITOR.inline on click), bypassing the render
+		// hooks above. So inject the matching glue into the front-end page output
+		// when it carries an editable rich-text region.
+		$this->addHookAfter('Page::render', $this, 'injectRichTextGlueForFrontEdit');
 	}
 
 	/**
@@ -525,27 +527,68 @@ class ProcessImageLibrary extends Process {
 			. "if(!reg()){var n=0,iv=setInterval(function(){if(reg()||++n>200)clearInterval(iv);},25);}})();</script>";
 	}
 
+	/**
+	 * The same idea as tinyMceGlueScript(), for CKEditor 4 (legacy editor still
+	 * used by older sites). CKEditor has no PW onConfig hook, so we use its own
+	 * client API: register the external plugin, then on each editor's
+	 * `configLoaded` (fires before plugins/UI load) add our plugin to
+	 * extraPlugins and the "PWImageLibrary" button to the toolbar (next to the
+	 * native PWImage button). The plugin file behaves like the TinyMCE one:
+	 * opens the picker, inserts the image, hands off to PW's image dialog.
+	 */
+	protected function ckEditorGlueScript(): string {
+		$config = $this->wire('config');
+		$libUrl = $this->libraryPageUrl();
+		if ($libUrl === '') return '';
+
+		$pluginVer = @filemtime($config->paths($this) . 'mllibrary-cke.js') ?: '1';
+		$cfg = json_encode([
+			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
+			'pluginUrl' => $config->urls($this) . 'mllibrary-cke.js?v=' . $pluginVer,
+			'label'     => $this->_('Insert from library'),
+		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+
+		return "\n<script>(function(){var C=$cfg;"
+			. "function reg(){if(typeof CKEDITOR==='undefined')return false;"
+			. "window.ProcessWire=window.ProcessWire||{};ProcessWire.config=ProcessWire.config||{};"
+			. "if(!ProcessWire.config.ImageLibraryInsert)ProcessWire.config.ImageLibraryInsert={pickerUrl:C.pickerUrl,label:C.label};"
+			. "if(CKEDITOR._mlLibReg)return true;CKEDITOR._mlLibReg=true;"
+			. "CKEDITOR.plugins.addExternal('mllibrary',C.pluginUrl,'');"
+			. "CKEDITOR.on('instanceCreated',function(ev){ev.editor.on('configLoaded',function(){var c=ev.editor.config;"
+			. "var ep=c.extraPlugins||'';if((','+ep+',').indexOf(',mllibrary,')===-1)c.extraPlugins=ep?ep+',mllibrary':'mllibrary';"
+			. "if(Object.prototype.toString.call(c.toolbar)==='[object Array]'){var done=false;for(var i=0;i<c.toolbar.length;i++){var g=c.toolbar[i];"
+			. "if(g&&g.push){if(g.indexOf('PWImageLibrary')!==-1){done=true;break;}if(g.indexOf('PWImage')!==-1){g.push('PWImageLibrary');done=true;break;}}}"
+			. "if(!done)c.toolbar.push(['PWImageLibrary']);}});});return true;}"
+			. "if(!reg()){var n=0,iv=setInterval(function(){if(reg()||++n>200)clearInterval(iv);},25);}})();</script>";
+	}
+
 	/** Admin path: append the glue to each rich-text field's render output. */
 	public function addLibraryTinyMceButton(HookEvent $event): void {
 		$event->return .= $this->tinyMceGlueScript();
 	}
 
+	/** Admin path (CKEditor). */
+	public function addLibraryCkEditorButton(HookEvent $event): void {
+		$event->return .= $this->ckEditorGlueScript();
+	}
+
 	/**
-	 * Front-end path: PW's PageFrontEdit creates the inline TinyMCE editor
-	 * CLIENT-SIDE on click (InputfieldTinyMCE.init), so our per-field render hook
-	 * never runs there. Instead, when a front-end page carries a TinyMCE editable
-	 * region (.pw-edit-InputfieldTinyMCE), inject the same glue before </body> —
-	 * it registers onConfig before any editor inits.
+	 * Front-end path: PW's PageFrontEdit creates the inline editor CLIENT-SIDE on
+	 * click (InputfieldTinyMCE.init / CKEDITOR.inline), so our per-field render
+	 * hooks never run there. Instead, when a front-end page carries an editable
+	 * rich-text region, inject the matching glue before </body> — it registers
+	 * the button before any editor inits. Handles both editors.
 	 */
-	public function injectTinyMceGlueForFrontEdit(HookEvent $event): void {
+	public function injectRichTextGlueForFrontEdit(HookEvent $event): void {
 		$out = $event->return;
 		if (!is_string($out) || $out === '') return;
-		if (strpos($out, 'pw-edit-InputfieldTinyMCE') === false) return;   // no front-edit RTE region
 		$pos = stripos($out, '</body>');
 		if ($pos === false) return;                                        // full-page output only
-		$script = $this->tinyMceGlueScript();
-		if ($script === '') return;
-		$event->return = substr($out, 0, $pos) . $script . substr($out, $pos);
+		$inject = '';
+		if (strpos($out, 'pw-edit-InputfieldTinyMCE') !== false) $inject .= $this->tinyMceGlueScript();
+		if (strpos($out, 'pw-edit-InputfieldCKEditor') !== false) $inject .= $this->ckEditorGlueScript();
+		if ($inject === '') return;
+		$event->return = substr($out, 0, $pos) . $inject . substr($out, $pos);
 	}
 
 	/**
