@@ -1022,12 +1022,9 @@ class ProcessImageLibrary extends Process {
 		$out .= '<div class="ml-live-region" role="status" aria-live="polite" aria-atomic="true"></div>';
 
 		if ($this->pickerMode) {
-			// Picker chrome: a focused header + the filter bar + results.
-			// No config link / bookmarks / export-import — this view exists
-			// only to pick an image to drop into the target field.
-			$out .= '<p class="ml-picker-hint">'
-				. $sanitizer->entities($this->_('Pick an image to add it to the field — it is copied in for you (and de-duplicated automatically).'))
-				. '</p>';
+			// Picker chrome: just the filter bar + results. No config link /
+			// export-import — this view exists only to pick an image to drop
+			// into the target field.
 		} else {
 			// Module-settings link. Position-absolute via CSS so it sits
 			// in the heading row instead of taking a row of its own.
