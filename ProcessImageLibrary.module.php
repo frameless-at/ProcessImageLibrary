@@ -471,26 +471,32 @@ class ProcessImageLibrary extends Process {
 		$this->addHookAfter('Pages::saved', $this, 'autoHashOnPageSave');
 		$this->addHook('LazyCron::everyHour', $this, 'autoMaintenance');
 
-		// "Choose from library" button on every image field in the page
-		// editor — opens the library as a picker to assign an existing image
-		// without re-uploading.
-		$this->addHookAfter('InputfieldImage::render', $this, 'addLibraryPickButton');
+		// Picker add-ons — OFF by default, toggled per-feature in the module
+		// config (see ProcessImageLibraryConfig). When off we simply don't attach
+		// the hooks, so the core library has zero add-on overhead (including the
+		// only per-front-end-request hook).
+		if ($this->get('addonPicker')) {
+			// "Choose from library" button on every image field in the page editor
+			// — opens the library as a picker to assign an existing image without
+			// re-uploading.
+			$this->addHookAfter('InputfieldImage::render', $this, 'addLibraryPickButton');
+		}
 
-		// "Insert from library" in every TinyMCE rich-text field. We can't add
-		// the toolbar/plugin server-side reliably (TinyMCE's renderReady isn't
-		// hookable and its settings are cached), so we use PW's documented
-		// client-side InputfieldTinyMCE.onConfig() callback: our admin script
-		// adds the plugin + toolbar button per editor before init. This hook
-		// just enqueues that script and exposes the URLs/labels. Both editors:
-		// TinyMCE (current default) and CKEditor 4 (legacy, still on older sites).
-		$this->addHookAfter('InputfieldTinyMCE::render', $this, 'addLibraryTinyMceButton');
-		$this->addHookAfter('InputfieldCKEditor::render', $this, 'addLibraryCkEditorButton');
+		if ($this->get('addonRichtext')) {
+			// "Insert from library" in rich-text fields. We can't add the
+			// toolbar/plugin server-side reliably (TinyMCE's renderReady isn't
+			// hookable and its settings are cached), so the render hook injects an
+			// inline script that wires it up client-side. Both editors: TinyMCE
+			// (current default) and CKEditor 4 (legacy, still on older sites).
+			$this->addHookAfter('InputfieldTinyMCE::render', $this, 'addLibraryTinyMceButton');
+			$this->addHookAfter('InputfieldCKEditor::render', $this, 'addLibraryCkEditorButton');
 
-		// Front-end editing renders the editor client-side (PageFrontEdit →
-		// InputfieldTinyMCE.init / CKEDITOR.inline on click), bypassing the render
-		// hooks above. So inject the matching glue into the front-end page output
-		// when it carries an editable rich-text region.
-		$this->addHookAfter('Page::render', $this, 'injectRichTextGlueForFrontEdit');
+			// Front-end editing renders the editor client-side (PageFrontEdit →
+			// InputfieldTinyMCE.init / CKEDITOR.inline on click), bypassing the
+			// render hooks above. So inject the matching glue into the front-end
+			// page output when it carries an editable rich-text region.
+			$this->addHookAfter('Page::render', $this, 'injectRichTextGlueForFrontEdit');
+		}
 	}
 
 	/**

@@ -32,6 +32,34 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			$session->redirect($this->wire('config')->urls->admin . 'module/edit?name=ProcessImageLibrary');
 		}
 
+		// --- Picker add-ons (collapsed, OFF by default) ---
+		// Optional integrations that surface the library elsewhere in the admin.
+		// The core library (browse / edit / dedup / export-import) works
+		// regardless; these just add entry points and the only per-front-end-
+		// request hook, so they stay off until explicitly enabled.
+		$addons = $modules->get('InputfieldFieldset');
+		$addons->label = $this->_('Picker add-ons');
+		$addons->description = $this->_('Let editors pull images from the library elsewhere in the admin. Off by default; the library itself works either way.');
+		$addons->collapsed = Inputfield::collapsedYes;
+
+		$cbPicker = $modules->get('InputfieldCheckbox');
+		$cbPicker->name   = 'addonPicker';
+		$cbPicker->label  = $this->_('Image-field picker');
+		$cbPicker->label2 = $this->_('Add a “Choose from library” button to every image field');
+		$cbPicker->description = $this->_('Assign an existing library image to a page’s image field without re-uploading.');
+		if ($this->get('addonPicker')) $cbPicker->attr('checked', 'checked');
+		$addons->add($cbPicker);
+
+		$cbRichtext = $modules->get('InputfieldCheckbox');
+		$cbRichtext->name   = 'addonRichtext';
+		$cbRichtext->label  = $this->_('Rich-text insert');
+		$cbRichtext->label2 = $this->_('Add “Insert from library” to TinyMCE / CKEditor');
+		$cbRichtext->description = $this->_('Insert a library image into rich-text fields, in the admin and the front-end inline editor.');
+		if ($this->get('addonRichtext')) $cbRichtext->attr('checked', 'checked');
+		$addons->add($cbRichtext);
+
+		$inputfields->add($addons);
+
 		// --- Thumbnail rendering ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Thumbnail');
