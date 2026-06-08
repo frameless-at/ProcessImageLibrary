@@ -211,6 +211,9 @@
 	z-index: 5;
 	background: var(--pw-main-background, #fff);
 	border-bottom: 1px solid var(--pw-border-color, #e0e0e0);
+	/* Sit 1px below the filter box so its 1px outline (drawn just outside the
+	   box) stays visible instead of being painted over by this bar's bg. */
+	margin-top: 1px;
 }
 .ml-picker-bar--bottom {
 	border-top: 1px solid var(--pw-border-color, #e0e0e0);
