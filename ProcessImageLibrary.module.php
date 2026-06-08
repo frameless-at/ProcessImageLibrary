@@ -476,47 +476,34 @@ class ProcessImageLibrary extends Process {
 		// without re-uploading.
 		$this->addHookAfter('InputfieldImage::render', $this, 'addLibraryPickButton');
 
-		// "Insert from library" button in every TinyMCE rich-text field — opens
-		// the picker in insert mode and drops an <img> referencing the chosen
-		// library image (no copy: one shared file, embedded everywhere).
-		$this->addHookBefore('InputfieldTinyMCE::renderReady', $this, 'addLibraryTinyMceButton');
+		// "Insert from library" in every TinyMCE rich-text field. We can't add
+		// the toolbar/plugin server-side reliably (TinyMCE's renderReady isn't
+		// hookable and its settings are cached), so we use PW's documented
+		// client-side InputfieldTinyMCE.onConfig() callback: our admin script
+		// adds the plugin + toolbar button per editor before init. This hook
+		// just enqueues that script and exposes the URLs/labels.
+		$this->addHookAfter('InputfieldTinyMCE::render', $this, 'addLibraryTinyMceButton');
 	}
 
 	/**
-	 * Register our TinyMCE plugin + toolbar button on every InputfieldTinyMCE.
-	 *
-	 * external_plugins keys come from each URL's basename, so the file basename
-	 * ("mllibrary") IS the TinyMCE plugin name and the toolbar token. The URL is
-	 * passed root-relative because InputfieldTinyMCESettings re-prefixes the site
-	 * root. The picker-insert URL is exposed via $config->js for the plugin.
+	 * Enqueue the TinyMCE glue (onConfig registration) + the picker config on
+	 * any page that renders a rich-text field. Idempotent — $config->scripts
+	 * dedupes by URL and $config->js merges, so firing per field is harmless.
 	 */
 	public function addLibraryTinyMceButton(HookEvent $event): void {
-		$inputfield = $event->object;
 		$config = $this->wire('config');
-
 		$libUrl = $this->libraryPageUrl();
 		if ($libUrl === '') return;
 
-		// Plugin URL relative to the site root (settings adds the root back).
-		$abs  = $config->urls($this) . 'mllibrary.js?v=' . (@filemtime($config->paths($this) . 'mllibrary.js') ?: '1');
-		$root = $config->urls->root;
-		$rel  = (strpos($abs, $root) === 0) ? substr($abs, strlen($root)) : ltrim($abs, '/');
+		$base = $config->paths($this);
+		$url  = $config->urls($this);
+		$cfgVer = @filemtime($base . 'ml-tinymce-config.js') ?: '1';
+		$config->scripts->add($url . 'ml-tinymce-config.js?v=' . $cfgVer);
 
-		$ext = $inputfield->get('extPlugins');
-		if (!is_array($ext)) $ext = [];
-		$already = false;
-		foreach ($ext as $u) { if (strpos((string) $u, 'mllibrary.js') !== false) { $already = true; break; } }
-		if (!$already) { $ext[] = $rel; $inputfield->set('extPlugins', $ext); }
-
-		// Append our button to the toolbar (once).
-		$toolbar = (string) $inputfield->get('toolbar');
-		if (strpos($toolbar, 'mllibrary') === false) {
-			$inputfield->set('toolbar', trim($toolbar . ' mllibrary'));
-		}
-
-		// The plugin reads this to open the picker in insert mode.
+		$pluginVer = @filemtime($base . 'mllibrary.js') ?: '1';
 		$config->js('ImageLibraryInsert', [
 			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
+			'pluginUrl' => $url . 'mllibrary.js?v=' . $pluginVer,
 			'label'     => $this->_('Insert from library'),
 		]);
 	}
