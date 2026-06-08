@@ -311,6 +311,9 @@ class ProcessImageLibrary extends Process {
 	 * honours and remembers it in one round trip.
 	 */
 	protected function getViewMode(): string {
+		// The picker is a gallery for choosing an image — the table view (inline
+		// editing, columns, sorting) has no place there. Force masonry.
+		if ($this->pickerMode) return self::VIEW_MASONRY;
 		$req = (string) $this->wire('input')->get('view');
 		if (in_array($req, $this->viewModes(), true)) {
 			$prefs = $this->getUserPrefs();
@@ -1050,10 +1053,10 @@ class ProcessImageLibrary extends Process {
 		// — visually identical to InputfieldImage's own size slider —
 		// instead of a browser-styled <input type=range>.
 		$this->wire('modules')->get('JqueryUI');
-		if (!$this->pickerMode) {
-			$prefs = $this->getUserPrefs();
-			$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
-		}
+		// Bookmarks stay in the picker too — saved filter sets are the fastest
+		// way into a large library when you're hunting for one image to insert.
+		$prefs = $this->getUserPrefs();
+		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= $this->renderPickerBar('top');   // sticky — stays in the viewport
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
@@ -1062,7 +1065,10 @@ class ProcessImageLibrary extends Process {
 		// stay bound to the same DOM nodes for the life of the page.
 		// Full $customCols set (not the field-narrowed one) so the
 		// picker shows every column regardless of the active filter.
-		$out .= $this->renderColumnsDialog($customCols);
+		// Table-only concern → skip it in the (masonry-only) picker.
+		if (!$this->pickerMode) {
+			$out .= $this->renderColumnsDialog($customCols);
+		}
 		if (!$this->pickerMode) {
 			$out .= $this->renderExportImportBar($filters);
 		}
@@ -1444,7 +1450,10 @@ class ProcessImageLibrary extends Process {
 			// A duplicated image is a single representative tile: NO inline editor
 			// / replace / delete on it. Clicking opens a modal with the table view
 			// of this image's copies (where each copy is edited individually).
-			$isDup    = ((int) ($row['dupCount'] ?? 0)) >= 2;
+			// In the picker, duplicates are just images to pick once — no badge,
+			// no cluster modal, no replace/delete. Treat every tile as a plain,
+			// selectable tile there.
+			$isDup    = !$this->pickerMode && ((int) ($row['dupCount'] ?? 0)) >= 2;
 			$thumbCls = 'ml-cell-thumb';
 			if ($isDup) {
 				$thumbCls .= ' ml-dup-cluster';
@@ -1479,9 +1488,9 @@ class ProcessImageLibrary extends Process {
 					. ' width="' . $attrW . '"'
 					. ' height="' . $attrH . '">';
 			}
-			// Replace / delete only on non-duplicate tiles; a duplicated image is
-			// managed copy-by-copy inside its cluster modal.
-			if ($editable && !$isDup) {
+			// Replace / delete only on non-duplicate tiles, and never in the
+			// picker (you don't manage source images while inserting one).
+			if ($editable && !$isDup && !$this->pickerMode) {
 				$replaceLabel = $san->entities(sprintf($this->_('Replace %s'), (string) $row['basename']));
 				$deleteLabel  = $san->entities(sprintf($this->_('Delete %s'),  (string) $row['basename']));
 				$out .= '<button type="button" class="ml-replace-btn"'
@@ -1491,7 +1500,9 @@ class ProcessImageLibrary extends Process {
 					. ' title="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
 			}
-			$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
+			if (!$this->pickerMode) {
+				$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
+			}
 			$out .= '</div>'; // .ml-cell-thumb
 			$out .= '</div>'; // .ml-card
 		}
@@ -5805,7 +5816,10 @@ class ProcessImageLibrary extends Process {
 		// click and AJAX-swaps the results in place. The server both
 		// honours and persists the chosen mode (see getViewMode()).
 		$currentView = $this->getViewMode();
-		$out .= $this->renderViewToggle($filters, $page, $sort, $dir, $pageSize);
+		// No table/masonry switch in the picker — it's masonry-only.
+		if (!$this->pickerMode) {
+			$out .= $this->renderViewToggle($filters, $page, $sort, $dir, $pageSize);
+		}
 		// Per-page picker. Client-side JS intercepts the change event,
 		// rewrites the URL and triggers the AJAX refresh; non-JS users
 		// see the picker but it requires a manual reload to take effect.

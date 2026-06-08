@@ -115,6 +115,22 @@
 				}
 			});
 
+			// In the picker, clicking ANYWHERE on a tile toggles its selection —
+			// the natural gesture when you're choosing an image, not just the
+			// small checkbox. Skip the checkbox/label itself (it toggles
+			// natively) and any link/button so those keep their own behaviour.
+			results && results.addEventListener('click', function (e) {
+				if (!e.target.closest) return;
+				if (e.target.closest('.ml-card-select') || e.target.closest('a, button')) return;
+				var card = e.target.closest('.ml-card');
+				if (!card) return;
+				var cb = card.querySelector('.ml-select-row');
+				if (!cb) return;
+				e.preventDefault();
+				cb.checked = !cb.checked;
+				cb.dispatchEvent(new Event('change', { bubbles: true }));
+			});
+
 			// Assign one (pageId:field:basename) key to the target field.
 			function assignKey(key) {
 				var parts = String(key).split(':');

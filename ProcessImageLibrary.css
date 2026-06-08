@@ -214,6 +214,18 @@
 .ml-root--picker .ml-card {
 	position: relative;
 }
+/* Whole tile is the click target in the picker (click = select). */
+.ml-root--picker .ml-card .ml-cell-thumb {
+	cursor: pointer;
+}
+/* Clear selected state on the tile so a click reads as a pick. */
+.ml-root--picker .ml-card:has(.ml-select-row:checked) {
+	outline: 3px solid var(--pw-main-color, #eb1d61);
+	outline-offset: -3px;
+}
+.ml-root--picker .ml-card:has(.ml-select-row:checked) .ml-thumb {
+	filter: brightness(0.92);
+}
 /* Selection checkbox overlay on a masonry tile — bottom-left, clear of the
    replace / delete icons (top) and the duplicate badge (bottom-right). Just
    the checkbox on a minimal backdrop: no padding, no rounded corners. */
