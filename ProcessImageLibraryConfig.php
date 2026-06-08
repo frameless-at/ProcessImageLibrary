@@ -47,6 +47,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$cbPicker->label  = $this->_('Image-field picker');
 		$cbPicker->label2 = $this->_('Add a “Choose from library” button to every image field');
 		$cbPicker->description = $this->_('Assign an existing library image to a page’s image field without re-uploading.');
+		$cbPicker->columnWidth = 50;
 		if ($this->get('addonPicker')) $cbPicker->attr('checked', 'checked');
 		$addons->add($cbPicker);
 
@@ -55,6 +56,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$cbRichtext->label  = $this->_('Rich-text insert');
 		$cbRichtext->label2 = $this->_('Add “Insert from library” to TinyMCE / CKEditor');
 		$cbRichtext->description = $this->_('Insert a library image into rich-text fields, in the admin and the front-end inline editor.');
+		$cbRichtext->columnWidth = 50;
 		if ($this->get('addonRichtext')) $cbRichtext->attr('checked', 'checked');
 		$addons->add($cbRichtext);
 
