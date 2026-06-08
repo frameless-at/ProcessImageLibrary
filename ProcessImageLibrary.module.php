@@ -542,9 +542,11 @@ class ProcessImageLibrary extends Process {
 		if ($libUrl === '') return '';
 
 		$pluginVer = @filemtime($config->paths($this) . 'mllibrary-cke.js') ?: '1';
+		$iconVer   = @filemtime($config->paths($this) . 'mllibrary-icon.svg') ?: '1';
 		$cfg = json_encode([
 			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
 			'pluginUrl' => $config->urls($this) . 'mllibrary-cke.js?v=' . $pluginVer,
+			'iconUrl'   => $config->urls($this) . 'mllibrary-icon.svg?v=' . $iconVer,
 			'label'     => $this->_('Insert from library'),
 		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 
@@ -565,6 +567,7 @@ class ProcessImageLibrary extends Process {
 			. "if(g.indexOf('PWImage')!==-1){g.push('PWImageLibrary');d=true;break;}}}if(!d)tb.push(['PWImageLibrary']);}}"
 			. "function run(){var PW=window.ProcessWire;if(!PW||!PW.config)return;"
 			. "if(!PW.config.ImageLibraryInsert)PW.config.ImageLibraryInsert={pickerUrl:C.pickerUrl,label:C.label};"
+			. "if(!PW.config.ImageLibraryInsert.iconUrl)PW.config.ImageLibraryInsert.iconUrl=C.iconUrl;"
 			. "var g=PW.config.InputfieldCKEditor;if(g){g.plugins=g.plugins||{};if(!g.plugins.mllibrary)g.plugins.mllibrary=C.pluginUrl;}"
 			. "if(typeof CKEDITOR!=='undefined'){try{CKEDITOR.plugins.addExternal('mllibrary',C.pluginUrl,'');}catch(e){}}"
 			. "for(var k in PW.config){if(k.indexOf('InputfieldCKEditor_')===0)patch(PW.config[k]);}"

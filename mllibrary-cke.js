@@ -13,14 +13,6 @@
 (function () {
 	if (typeof CKEDITOR === 'undefined') return;
 
-	var SVG =
-		'<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">' +
-		'<rect x="1" y="4" width="9" height="8" rx="1" fill="#fff" stroke="#5b5b5b"/>' +
-		'<rect x="6" y="2" width="9" height="8" rx="1" fill="#fff" stroke="#5b5b5b"/>' +
-		'<circle cx="8.5" cy="4.5" r="1" fill="#5b5b5b"/>' +
-		'<path d="M6.5 8.5l2-2 1.5 1.5 2-2 2.5 2.5" fill="none" stroke="#5b5b5b"/></svg>';
-	var ICON = 'data:image/svg+xml,' + encodeURIComponent(SVG);
-
 	function cfg() {
 		return (window.ProcessWire && ProcessWire.config && ProcessWire.config.ImageLibraryInsert) || {};
 	}
@@ -71,12 +63,10 @@
 	CKEDITOR.plugins.add('mllibrary', {
 		init: function (editor) {
 			editor.addCommand('mllibrary', { exec: function () { openPicker(editor); } });
-			editor.ui.addButton('PWImageLibrary', {
-				label: label(),
-				command: 'mllibrary',
-				toolbar: 'insert,20',
-				icon: ICON
-			});
+			var btn = { label: label(), command: 'mllibrary', toolbar: 'insert,20' };
+			var ic = cfg().iconUrl;
+			if (ic) btn.icon = ic;   // a real SVG file URL (CKEditor 4 rejects data-URIs)
+			editor.ui.addButton('PWImageLibrary', btn);
 		}
 	});
 })();
