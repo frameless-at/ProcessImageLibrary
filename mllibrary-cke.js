@@ -23,6 +23,11 @@
 		if (!c.pickerUrl || typeof pwModalWindow === 'undefined') return;
 
 		var $iframe = pwModalWindow(c.pickerUrl, { title: label() }, 'large');
+		// Fill the dialog width, and lift the whole modal above the front-end
+		// inline editor (which otherwise overlaps it).
+		$iframe.css('width', '100%');
+		$iframe.closest('.ui-dialog').css('z-index', 9999);
+		if (window.jQuery) window.jQuery('.ui-widget-overlay').css('z-index', 9998);
 
 		function onMessage(e) {
 			if (e.origin !== location.origin) return;
