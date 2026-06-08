@@ -12,16 +12,16 @@
 /* Filter bar — InputfieldForm-rendered. The admin theme handles
    most layout, spacing and labels; module-specific overrides
    below tighten the rest. */
+/* margin-top needs !important to beat two admin rules that otherwise push the
+   filter box down from the bookmark tabs (gap + the active underline floating):
+     body.modal .InputfieldForm { margin-top: 20px }   (modal iframe only)
+     *+.uk-margin { margin-top: 20px !important }       (global, hence !important) */
 .ml-filter-bar {
-	margin: 0;
+	margin: 0 !important;
 }
-/* The collapsed "Filters" box sits flush under the bookmark tabs (no gap, so
-   the active tab's red underline meets its top edge) and gets the bottom border
-   the admin theme leaves off when collapsed. */
-.ml-filter-bar .Inputfield_mlFilters {
-	margin-top: 0;
-}
-.ml-filter-bar .Inputfield_mlFilters > .InputfieldHeader {
+/* The filter box's bottom border belongs on the form's own list (the visible
+   box), not on the collapsed fieldset header. */
+.ml-filter-bar > ul {
 	border-bottom: 1px solid var(--pw-border-color, #e5e5e5);
 }
 
