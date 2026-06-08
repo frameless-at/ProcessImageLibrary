@@ -548,18 +548,30 @@ class ProcessImageLibrary extends Process {
 			'label'     => $this->_('Insert from library'),
 		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 
+		// CKEditor has no onConfig-style queue and stores each field's config in
+		// TWO places (ProcessWire.config.InputfieldCKEditor_<field> AND a
+		// data-configdata attribute), read at init time. Rather than race the
+		// instanceCreated event, we patch that DATA directly (idempotently, a few
+		// times to catch late output): add our plugin to the global plugins map
+		// (InputfieldCKEditor.js addExternal-loads it), and add 'mllibrary' to
+		// extraPlugins + the 'PWImageLibrary' button to the toolbar in every
+		// per-field config + every data-configdata attribute. CKEditor reads the
+		// patched config whenever it inits (admin on ready, front-end on click).
 		return "\n<script>(function(){var C=$cfg;"
-			. "function reg(){if(typeof CKEDITOR==='undefined')return false;"
-			. "window.ProcessWire=window.ProcessWire||{};ProcessWire.config=ProcessWire.config||{};"
-			. "if(!ProcessWire.config.ImageLibraryInsert)ProcessWire.config.ImageLibraryInsert={pickerUrl:C.pickerUrl,label:C.label};"
-			. "if(CKEDITOR._mlLibReg)return true;CKEDITOR._mlLibReg=true;"
-			. "CKEDITOR.plugins.addExternal('mllibrary',C.pluginUrl,'');"
-			. "CKEDITOR.on('instanceCreated',function(ev){ev.editor.on('configLoaded',function(){var c=ev.editor.config;"
-			. "var ep=c.extraPlugins||'';if((','+ep+',').indexOf(',mllibrary,')===-1)c.extraPlugins=ep?ep+',mllibrary':'mllibrary';"
-			. "if(Object.prototype.toString.call(c.toolbar)==='[object Array]'){var done=false;for(var i=0;i<c.toolbar.length;i++){var g=c.toolbar[i];"
-			. "if(g&&g.push){if(g.indexOf('PWImageLibrary')!==-1){done=true;break;}if(g.indexOf('PWImage')!==-1){g.push('PWImageLibrary');done=true;break;}}}"
-			. "if(!done)c.toolbar.push(['PWImageLibrary']);}});});return true;}"
-			. "if(!reg()){var n=0,iv=setInterval(function(){if(reg()||++n>200)clearInterval(iv);},25);}})();</script>";
+			. "function patch(f){if(!f||typeof f!=='object')return;var ep=f.extraPlugins||'';"
+			. "if((','+ep+',').indexOf(',mllibrary,')===-1)f.extraPlugins=ep?ep+',mllibrary':'mllibrary';"
+			. "var tb=f.toolbar;if(Object.prototype.toString.call(tb)==='[object Array]'){var d=false;"
+			. "for(var i=0;i<tb.length;i++){var g=tb[i];if(g&&g.push){if(g.indexOf('PWImageLibrary')!==-1){d=true;break;}"
+			. "if(g.indexOf('PWImage')!==-1){g.push('PWImageLibrary');d=true;break;}}}if(!d)tb.push(['PWImageLibrary']);}}"
+			. "function run(){var PW=window.ProcessWire;if(!PW||!PW.config)return;"
+			. "if(!PW.config.ImageLibraryInsert)PW.config.ImageLibraryInsert={pickerUrl:C.pickerUrl,label:C.label};"
+			. "var g=PW.config.InputfieldCKEditor;if(g){g.plugins=g.plugins||{};if(!g.plugins.mllibrary)g.plugins.mllibrary=C.pluginUrl;}"
+			. "if(typeof CKEDITOR!=='undefined'){try{CKEDITOR.plugins.addExternal('mllibrary',C.pluginUrl,'');}catch(e){}}"
+			. "for(var k in PW.config){if(k.indexOf('InputfieldCKEditor_')===0)patch(PW.config[k]);}"
+			. "var els=document.querySelectorAll('[data-configdata]');for(var j=0;j<els.length;j++){"
+			. "try{var o=JSON.parse(els[j].getAttribute('data-configdata'));patch(o);els[j].setAttribute('data-configdata',JSON.stringify(o));}catch(e){}}}"
+			. "run();if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',run);"
+			. "var n=0,iv=setInterval(function(){run();if(++n>15)clearInterval(iv);},40);})();</script>";
 	}
 
 	/** Admin path: append the glue to each rich-text field's render output. */
