@@ -15,6 +15,15 @@
 .ml-filter-bar {
 	margin: 0;
 }
+/* The collapsed "Filters" box sits flush under the bookmark tabs (no gap, so
+   the active tab's red underline meets its top edge) and gets the bottom border
+   the admin theme leaves off when collapsed. */
+.ml-filter-bar .Inputfield_mlFilters {
+	margin-top: 0;
+}
+.ml-filter-bar .Inputfield_mlFilters > .InputfieldHeader {
+	border-bottom: 1px solid var(--pw-border-color, #e5e5e5);
+}
 
 /* Cap the tag-filter checkbox grid so a large tag pool stays
    usable instead of pushing the rest of the filter UI off-screen.
@@ -1374,8 +1383,10 @@ textarea.ml-langtabs-pane {
 }
 
 /* Bookmarks bar — chrome inherited from .WireTabs + .uk-tab classes
-   set by the admin theme. */
+   set by the admin theme. Tight: small space above, NONE below, so the
+   active tab's red underline butts directly against the filter box. */
 .ml-bookmarks-tabs {
+	margin-top: 0.35rem;
 	margin-bottom: 0;
 }
 /* Uniform 30 px gap between every tab so the bookmark trash button
