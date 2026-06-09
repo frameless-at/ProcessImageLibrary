@@ -30,14 +30,13 @@
 		if (!isFrontEnd() || document.getElementById('ml-fe-dialog-z')) return;
 		var s = document.createElement('style');
 		s.id = 'ml-fe-dialog-z';
-		// z-index above the inline editor + iframe-fill rules that replace the
-		// admin-only CSS missing on the front end (which left PW's image dialog
-		// after a pick shrunk). Covers our picker AND pwimage.
+		// z-index above the inline editor + width:100% on the iframe (replaces
+		// admin-only CSS missing on the front end). NOT height — the front-end
+		// dialog content has no fixed height, so height:100% collapses the iframe.
 		s.textContent =
 			'.ui-dialog{z-index:9999 !important}' +
 			'.ui-widget-overlay{z-index:9998 !important}' +
-			'.ui-dialog .ui-dialog-content{padding:0 !important}' +
-			'.ui-dialog .pw-modal-window{width:100% !important;height:100% !important;display:block;border:0}';
+			'.ui-dialog .pw-modal-window{width:100% !important}';
 		(document.head || document.documentElement).appendChild(s);
 	}
 
