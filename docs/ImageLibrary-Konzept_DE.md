@@ -73,6 +73,7 @@ ProcessImageLibrary/
 ├── docs/
 │   ├── ImageLibrary-Concept_EN.md
 │   ├── ImageLibrary-Konzept_DE.md
+│   ├── deduplication-design.md       # De-Duplizierung: Design-Rationale + Storage-Strategie-Analyse
 │   └── screenshots/
 ├── README.md
 └── LICENSE
@@ -311,7 +312,7 @@ Ein Toolbar-**View-Toggle** (rechts in der Pagination-Zeile) schaltet zwischen d
 
 Jedes verwaltete Bild wird über seinen **exakten Byte-Inhalt** gefingerprintet (`content_hash`, xxh128 wo verfügbar, sonst md5), und byte-identische Kopien werden per **Hardlinks** auf einen Inode kollabiert — **verlustfrei und reversibel**: die Bytes ändern sich nie, jede Kopie kann jederzeit wieder ihre eigene Datei bekommen. Sowohl Originale **als auch** PWs generierte Variations sowie Page-Version-Files (`…/<id>/v<n>/`) werden dedupliziert, über alle Pages und Felder. Die Link-Counts des Dateisystems sind die Source of Truth (keine Manifest-Tabelle); Byte-Identität wird unmittelbar vor jedem Link erneut verifiziert.
 
-Es läuft **automatisch** — bei jedem `Pages::saved` (die Bilder der gespeicherten Page werden gefingerprintet und ein bereits existierender Zwilling sofort verlinkt), stündlich via `LazyCron` und einmal als begrenzter Pass beim Install. Das **Deduplication**-Fieldset der Config-Seite zeigt den gesparten Platz (*Disk space reclaimed* / *Copies sharing a file* / *Exact-duplicate clusters*) und bietet manuelle Tools — **Scan and reclaim (live)**, **Re-measure**, **Revert (un-share all)** — über gechunkte, zeit-budgetierte Endpoints (`scan-step`, `reclaim-step`, `revert-step`, `disk-audit`) mit Live-Progress-Panel. Im Listing machen ein *Duplicates*-Filter (kontextuell, kollabiert jeden Cluster auf einen Repräsentanten), ein Kopienzähler-Badge auf Tabellen- + Masonry-Kacheln, das Tabellen-Cluster-Aufklappen und das Masonry-Cluster-Modal die Duplikate prüfbar. Hash-Store: `process_imagelibrary_hashes` (lazy angelegt, beim Uninstall gedroppt).
+Es läuft **automatisch** — bei jedem `Pages::saved` (die Bilder der gespeicherten Page werden gefingerprintet und ein bereits existierender Zwilling sofort verlinkt), stündlich via `LazyCron` und einmal als begrenzter Pass beim Install. Das **Deduplication**-Fieldset der Config-Seite zeigt den gesparten Platz (*Disk space reclaimed* / *Copies sharing a file* / *Exact-duplicate clusters*) und bietet manuelle Tools — **Scan and reclaim (live)**, **Re-measure**, **Revert (un-share all)** — über gechunkte, zeit-budgetierte Endpoints (`scan-step`, `reclaim-step`, `revert-step`, `disk-audit`) mit Live-Progress-Panel. Im Listing machen ein *Duplicates*-Filter (kontextuell, kollabiert jeden Cluster auf einen Repräsentanten), ein Kopienzähler-Badge auf Tabellen- + Masonry-Kacheln, das Tabellen-Cluster-Aufklappen und das Masonry-Cluster-Modal die Duplikate prüfbar. Hash-Store: `process_imagelibrary_hashes` (lazy angelegt, beim Uninstall gedroppt). Design-Rationale + Storage-Strategie-Analyse: [`deduplication-design.md`](deduplication-design.md).
 
 ## Collections
 

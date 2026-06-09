@@ -73,6 +73,7 @@ ProcessImageLibrary/
 ├── docs/
 │   ├── ImageLibrary-Concept_EN.md
 │   ├── ImageLibrary-Konzept_DE.md
+│   ├── deduplication-design.md       # de-duplication design rationale + storage-strategy analysis
 │   └── screenshots/
 ├── README.md
 └── LICENSE
@@ -311,7 +312,7 @@ A toolbar **view toggle** (right of the pagination row) switches between the dat
 
 Every managed image is fingerprinted by its **exact byte content** (`content_hash`, xxh128 where available else md5) and byte-identical copies are collapsed onto a single inode via **hardlinks** — **lossless and reversible**: bytes never change, any copy can be given its own file again. Both originals **and** PW's generated variations, plus page-version files (`…/<id>/v<n>/`), are deduplicated, across all pages and fields. The filesystem's link counts are the source of truth (no manifest table); byte-identity is re-verified immediately before every link.
 
-It runs **automatically** — on every `Pages::saved` (the saved page's images are fingerprinted and any existing twin linked at once), hourly via `LazyCron`, and once as a bounded pass at install. The config page's **Deduplication** fieldset shows the disk saved (*Disk space reclaimed* / *Copies sharing a file* / *Exact-duplicate clusters*) and offers manual tools — **Scan and reclaim (live)**, **Re-measure**, **Revert (un-share all)** — backed by chunked, time-budgeted endpoints (`scan-step`, `reclaim-step`, `revert-step`, `disk-audit`) with a live progress panel. In the listing, a *Duplicates* filter (contextual, collapsing each cluster to one representative), a copy-count badge on table + masonry tiles, the table cluster expand/collapse, and the masonry cluster modal surface duplicates for review. Hash store: `process_imagelibrary_hashes` (created lazily, dropped on uninstall).
+It runs **automatically** — on every `Pages::saved` (the saved page's images are fingerprinted and any existing twin linked at once), hourly via `LazyCron`, and once as a bounded pass at install. The config page's **Deduplication** fieldset shows the disk saved (*Disk space reclaimed* / *Copies sharing a file* / *Exact-duplicate clusters*) and offers manual tools — **Scan and reclaim (live)**, **Re-measure**, **Revert (un-share all)** — backed by chunked, time-budgeted endpoints (`scan-step`, `reclaim-step`, `revert-step`, `disk-audit`) with a live progress panel. In the listing, a *Duplicates* filter (contextual, collapsing each cluster to one representative), a copy-count badge on table + masonry tiles, the table cluster expand/collapse, and the masonry cluster modal surface duplicates for review. Hash store: `process_imagelibrary_hashes` (created lazily, dropped on uninstall). Design rationale + storage-strategy analysis: [`deduplication-design.md`](deduplication-design.md).
 
 ## Collections
 
