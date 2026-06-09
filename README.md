@@ -19,6 +19,7 @@ A ProcessWire admin module that puts every image across every page and every ima
   - [Scope](#scope)
 - [Filtering](#filtering)
 - [Bookmarks](#bookmarks)
+- [Collections](#collections)
 - [The table](#the-table)
   - [Columns dialog](#columns-dialog)
   - [Pagination row](#pagination-row)
@@ -34,6 +35,9 @@ A ProcessWire admin module that puts every image across every page and every ima
 - [Export / Import](#export--import)
   - [Export](#export)
   - [Import](#import)
+- [Picker add-ons](#picker-add-ons)
+  - [Image-field picker](#image-field-picker)
+  - [Rich-text insert](#rich-text-insert)
 - [Performance](#performance)
 - [Accessibility](#accessibility)
 - [File layout](#file-layout)
@@ -42,21 +46,23 @@ A ProcessWire admin module that puts every image across every page and every ima
 ## Quick tour
 
 - **Single view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates — including images that live inside Repeater / RepeaterMatrix fields, resolved up to their owner page. Rows are `(page, field, basename)` tuples.
-- **Table or masonry gallery** — toggle between the data table and a thumbnail gallery that packs every image edge-to-edge for fast visual scanning; click a tile to open the per-image editor. A size slider scales thumbnails (table) / tiles (gallery) live. Both choices persist per user via `$user->meta`.
+- **Table or masonry gallery** — toggle between the data table and a thumbnail gallery that packs tiles into **height-balanced columns** (shortest-column masonry) for fast visual scanning; click a tile to open the per-image editor, or use the hover-revealed checkbox to select it. A size slider scales thumbnails (table) / tiles (gallery) live. Both choices persist per user via `$user->meta`.
 - **Inline editing** for description, tags and any custom subfields (PW 3.0.142+ field-on-image templates). Click a cell, type, hit save — that's it. Multilang installs get per-language tabs in the editor.
 - **Bulk edits as paintbrush** — tick a few rows, then edit any cell on a selected row to broadcast the change to all selected rows. Works for description, tags, customs, and filenames (with placeholder syntax for numbering).
 - **Replace image in place** — drag a file onto the row or click the upload icon. The basename + every URL stay intact, variations regenerate, metadata is preserved. Extension match enforced so format conversions can't sneak in.
 - **Delete (single + batch)** — trash icon on the row hides behind a confirm dialog. Selection-as-paintbrush works here too: with N rows ticked, clicking the trash on any selected row deletes the whole selection.
 - **Bookmarks** — save the current filter combination as a named tab above the filter bar. Click a tab to jump back to that view; the filter form repopulates so what you see matches what's applied. Persisted per user via `$user->meta`, cross-device. The "+ Add bookmark" tab surfaces only when the active filter isn't already saved.
+- **Collections** — curate an arbitrary set of images that no filter could reproduce: tick checkboxes, save them as a named collection tab in the same strip. Recall the exact set instantly via a short `?coll=<id>` URL (the image keys live in `$user->meta`, never the URL — a 100-image collection is still a ~12-character link). Grow / trim a collection by clicking its tab while a selection is active; the cursor shows whether the click **adds** (+) or **removes** (−). Collections can themselves be filtered.
+- **Picker add-ons** (optional, off by default) — two opt-in integrations that let editors pull a library image in elsewhere: a *Choose from library* button on every image field, and an *Insert from library* button in TinyMCE / CKEditor (admin + front-end inline editor). No re-upload — the existing file is assigned / embedded; on a versioned page it lands in that version's folder.
 - **Filter, sort, paginate** with URL-state persistence so the view is bookmarkable. Per-user column visibility and order, page size — all stored in `$user->meta` so they follow the user across devices.
 - **Export / Import** the current filter set as JSON or CSV, edit externally, re-upload to apply. Multilang values round-trip in language-suffixed columns.
 - **Server-side performance** with `findRaw` + `WireCache` so listings stay fast across thousands of images. Thumbnails reuse PW's lazily-generated 260 px admin variation whenever possible, falling back to a custom size only when the configured display exceeds it.
 
 ## Table and gallery views
 
-The toolbar carries a **view toggle** (top-right, next to the per-page picker): the data **table** for editing metadata column by column, or a **masonry gallery** for browsing visually. The gallery packs every thumbnail into a tidy left-to-right grid — click any tile to open the per-image editor (full crop / focus / metadata), and the per-row replace / delete actions stay available on hover. The **size slider** beside the toggle scales thumbnails (table) or tiles (gallery) live; the chosen view and zoom both persist per user across devices.
+The toolbar carries a **view toggle** (top-right, next to the per-page picker): the data **table** for editing metadata column by column, or a **masonry gallery** for browsing visually. The gallery packs thumbnails into **height-balanced columns**: each tile keeps its natural aspect ratio (no crop) and the next tile always drops into the currently shortest column, so the columns stay even instead of ragged. The predicted tile height comes from the server-rendered image dimensions, so the layout settles immediately without waiting for images to load. Click any tile to open the per-image editor (full crop / focus / metadata); the same **selection checkbox** the picker uses sits in the tile's bottom-left corner — hover-revealed here, like the replace / delete actions, and staying visible once ticked — so tiles can be selected for bulk edits or collections just as in the table (the selection is shared across both views). The **size slider** beside the toggle scales thumbnails (table) or tiles (gallery) live; the chosen view and zoom both persist per user across devices.
 
-![Masonry gallery view of the Image Library: the same toolbar with the size slider and table / gallery toggle, below it a dense grid of flower thumbnails of varying heights packed edge-to-edge](docs/screenshots/04-masonry.png)
+![Masonry gallery view of the Image Library: the same toolbar with the size slider and table / gallery toggle, below it a grid of flower thumbnails of varying heights packed into even, height-balanced columns](docs/screenshots/04-masonry.png)
 
 ## Requirements
 
@@ -88,7 +94,9 @@ Two-tier model:
 
 Under **Modules → Configure → ProcessImageLibrary** (or via the **Config** link in the page header).
 
-![Module configuration screenshot showing the Thumbnail, Pagination, Default sort, Columns and Scope fieldsets](docs/screenshots/02-config.png)
+![Module configuration screenshot showing the Picker add-ons, Thumbnail, Pagination, Default sort, Columns and Scope fieldsets](docs/screenshots/02-config.png)
+
+A collapsed **Picker add-ons** fieldset sits at the top (both toggles **off** by default) — the library itself works either way. See [Picker add-ons](#picker-add-ons) for what they do.
 
 ### Thumbnail
 
@@ -149,14 +157,35 @@ After **Apply** the fieldset auto-collapses so the table has full vertical room.
 A tab strip sits above the filter bar with the user's saved filter combinations. PW-native chrome — the same `WireTabs` + `uk-tab` markup the rest of the admin uses (Page Edit, Profile, etc.), so the look matches and no module-specific CSS is involved.
 
 - **Show all** is always the leftmost tab — empty filter state.
-- **Saved bookmarks** sit between, in the order they were created. Each tab carries an `×` button on hover (only inside its own tab area) to delete.
-- **+ Add bookmark** is the rightmost tab and only appears when the active filter is BOTH non-empty AND not already saved — so it surfaces exactly when there's a new combination worth keeping, and disappears the moment you save it or switch back to a saved view.
+- **Saved bookmarks** sit between, in the order they were created. Each tab carries an `×` button on hover (only inside its own tab area) to delete. [Collections](#collections) share the same strip, marked with an icon.
+- **+ Add bookmark** is the rightmost tab and appears when the active filter is BOTH non-empty AND not already saved — so it surfaces exactly when there's a new combination worth keeping. When a checkbox **selection** is active instead, the same button relabels to **+ Add collection** and saves the selection (see [Collections](#collections)).
 
 Clicking a bookmark navigates via the same AJAX swap the filter form uses, and **resets + repopulates the filter form** so the visible inputs match the bookmark's state — no stale checkboxes left from the previous filter. Active tab is computed by canonicalising the current URL against each bookmark's saved querystring (filter-shaped params only, sorted, empty values dropped).
 
 What's stored: only **filter** params (`q`, `template`, `field`, `tags`, `no_desc`, `no_tags`, `no_custom_*`). Sort, direction, page size and page number stay orthogonal — switching bookmarks doesn't clobber your current sort.
 
-Storage piggy-backs on `$user->meta('imageLibraryPrefs')` alongside the existing `columns` + `pageSize` keys — cross-device, no new endpoint.
+Storage piggy-backs on `$user->meta('imageLibraryPrefs')` alongside the existing `columns`, `pageSize`, `viewMode`, `thumbScale` and `collections` keys — cross-device, no new endpoint.
+
+## Collections
+
+Where a [bookmark](#bookmarks) saves a *filter*, a **collection** saves a *specific, hand-picked set of images* — useful when the set can't be expressed as a filter (e.g. filter to `red +flowers`, then keep only the three you actually want). Collections live in the same tab strip as bookmarks, marked with an icon, and work in the admin **and** the picker — handy for pulling up a curated set while inserting images.
+
+![The bookmark / collection tab strip: filter bookmark tabs followed by icon-marked collection tabs, with the "+ Add collection" button shown while images are selected, plus the save-collection name dialog](docs/screenshots/13-collections.png)
+
+**Storage, not URL.** A collection stores its image identity keys (`pageId:fieldName:basename`) as data in `$user->meta('imageLibraryPrefs')` under `collections`, each as `{ id, name, keys[] }`. Recall is a short `?coll=<id>` URL — a 100-image collection is a ~12-character link, never a multi-kilobyte query string that would blow past URL limits. The server resolves the id back to the key set and filters the grid to it.
+
+**Create.** Tick image checkboxes (table or masonry). The bookmark bar's add button relabels to **+ Add collection**; click it, name the set, save. The checkboxes clear as confirmation, and the new collection tab joins the strip.
+
+**Recall, add, remove — driven by the cursor.** With a selection active, clicking a collection tab curates it instead of navigating, and the cursor signals which way:
+
+- Hovering a collection you're **not** viewing shows a **`+`** cursor — the click **adds** the selection to that collection.
+- Hovering the collection you **are** viewing (its tab is active) shows a **`−`** cursor — the click **removes** the selected images from it (the rows leave the grid in place and the count updates).
+
+Either way the checkboxes clear as confirmation. With **no** selection, a collection tab behaves like any tab — it recalls the set — and its `×` (delete) appears on hover.
+
+**Snapshot semantics.** A collection is a snapshot of identities: images deleted or renamed after the fact simply drop out of the recalled view, silently. Duplicate markers are *contextual* (an image is only flagged when ≥2 of its byte-identical copies are present in the current view), so they appear inside a collection only if you deliberately added two copies of the same image to it.
+
+**Filterable.** A collection can be narrowed: applying a filter (or Reset) while viewing one keeps `?coll` in the URL, so the filters apply *within* the collection rather than replacing it. Deleting the collection you're viewing drops `?coll` and reloads (any other active filters stay).
 
 ## The table
 
@@ -343,6 +372,30 @@ Upload a previously exported (and externally edited) JSON or CSV. The import:
 - Skips rows whose values match what's already stored (idempotent — re-running the same file is a safe no-op)
 - Reports per-row failures in the same modal pattern as bulk edits
 
+## Picker add-ons
+
+Two **optional** integrations that surface the library *outside* its own admin page, so editors can drop an existing library image into a page without re-uploading it. Both are **off by default** — the library is fully usable without them — and toggle independently in the collapsed **Picker add-ons** fieldset under [Module configuration](#module-configuration). Each opens the library in a modal **picker**: the normal table / gallery with selection checkboxes and a *Use selected* bar.
+
+Enabling either toggle makes the module `autoload` so its hooks run on the relevant edit screens; after flipping a toggle, run **Modules → Refresh** once.
+
+### Image-field picker
+
+*Config: “Image-field picker” → adds a “Choose from library” button to every image field.*
+
+A **Choose from library** button is appended to every `InputfieldImage` in the page editor, beside the native upload control. It opens the picker scoped to that field; selecting an image copies the chosen file into the target field (native image fields can only reference files in their own page folder, so the bytes are copied), carrying the source's description / tags / custom subfields over, language-aware. The fresh copy is then hard-linked to its byte-identical source, so it costs ~no extra disk.
+
+**Version-aware.** When the page editor is working in a [PagesVersions](https://processwire.com/) version, the pick lands in that version's files folder (`…/<id>/v<n>/`), not the live page — and is de-duplicated on the spot.
+
+![Page editor with an image field: the native "Choose File" control next to the added "Choose from library" button, and the library opened as a modal picker with selection checkboxes and a "Use selected" bar](docs/screenshots/14-image-field-picker.png)
+
+### Rich-text insert
+
+*Config: “Rich-text insert” → adds “Insert from library” to TinyMCE / CKEditor.*
+
+An **Insert from library** button (gallery icon) joins the toolbar of every TinyMCE and CKEditor field, right next to the native image button — in the admin **and** the front-end inline editor (PageFrontEdit). It opens the picker; a single pick hands straight off to ProcessWire's own image dialog (crop / resize / caption / align) pointed at the library file, and the `<img>` is only inserted once you confirm there — nothing is dropped into the page beforehand. Multiple picks insert directly. The embedded `<img>` references the shared library file, so no copy is made.
+
+![A CKEditor / TinyMCE toolbar with the "Insert from library" gallery-icon button next to the native image button, and the library picker open in a modal above the editor](docs/screenshots/15-richtext-insert.png)
+
 ## Performance
 
 - **Read pipeline**: `findRaw` pulls every image's subfields in one query, flattens to a flat row list, sorts + slices in PHP, only the visible slice ever touches `Pageimage` objects. Cached via `WireCache::saveFor()`.
@@ -364,11 +417,17 @@ ProcessImageLibrary/
 ├── ProcessImageLibrary.module.php       # main module + AJAX endpoints + renders + filter/sort/pagination
 ├── ProcessImageLibrary.info.json        # module metadata
 ├── ProcessImageLibraryConfig.php        # module-config UI
-├── ProcessImageLibrary.js               # admin script: inline edit, bulk, columns dialog, AJAX nav
+├── ProcessImageLibrary.js               # admin script: inline edit, bulk, columns dialog, collections, masonry, AJAX nav
 ├── ProcessImageLibrary.css              # admin styles
+├── ml-library-pick.js                   # add-on: "Choose from library" button glue on image fields
+├── mllibrary.js                         # add-on: TinyMCE "Insert from library" adapter
+├── mllibrary-cke.js                     # add-on: CKEditor 4 "Insert from library" adapter
+├── mllibrary-common.js                  # add-on: shared picker / native-dialog logic for both editors
+├── mllibrary-icon.svg                   # add-on: CKEditor toolbar icon
 ├── src/
 │   ├── ImageLibraryDiscovery.php        # trait: image-field / template / tags-config introspection
 │   ├── ImageLibraryMultilang.php        # trait: per-language read/write, name⇄id mapping
+│   ├── ImageLibraryHashing.php          # trait: content-hash de-duplication (hard-links byte-identical copies)
 │   └── ImageLibraryExportImport.php     # trait: JSON + CSV emit, parse, idempotent re-apply
 ├── docs/
 │   ├── ImageLibrary-Concept_EN.md      # architecture / design notes (English)
