@@ -1702,17 +1702,17 @@ class ProcessImageLibrary extends Process {
 			}
 			$out .= '<div class="ml-row ml-card"' . $rowAttrs . '>';
 
-			// Picker mode: a selection checkbox per tile (same .ml-select-row
-			// the table uses, so the shared selection logic applies in both
-			// views). Rendered for every image — sources need not be editable.
-			if ($this->pickerMode) {
-				$selKey = $this->rowKey(
-					(int) $row['pageId'], (string) $row['fieldName'], (string) $row['basename']
-				);
-				$out .= '<label class="ml-card-select">'
-					. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
-					. $san->entities($selKey) . '"></label>';
-			}
+			// Selection checkbox per tile — the same .ml-select-row the table
+			// uses, so the shared selection logic applies in every view. Always
+			// rendered; in the picker it's always visible, in the normal masonry
+			// view it hover-reveals like the replace/delete buttons and stays
+			// visible once checked (CSS).
+			$selKey = $this->rowKey(
+				(int) $row['pageId'], (string) $row['fieldName'], (string) $row['basename']
+			);
+			$out .= '<label class="ml-card-select">'
+				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
+				. $san->entities($selKey) . '"></label>';
 
 			// A duplicated image is a single representative tile: NO inline editor
 			// / replace / delete on it. Clicking opens a modal with the table view

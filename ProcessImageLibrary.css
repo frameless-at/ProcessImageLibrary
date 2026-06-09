@@ -255,6 +255,23 @@
 	margin: 0;
 	cursor: pointer;
 }
+/* Normal masonry view (NOT the picker, where it's always visible): the
+   checkbox hover-reveals exactly like the replace/delete buttons, but stays
+   visible once checked so the selection reads at a glance. */
+.ml-root:not(.ml-root--picker) .ml-card .ml-card-select {
+	opacity: 0;
+	transition: opacity 0.12s ease-out;
+}
+.ml-root:not(.ml-root--picker) .ml-card:hover .ml-card-select,
+.ml-root:not(.ml-root--picker) .ml-card:focus-within .ml-card-select,
+.ml-root:not(.ml-root--picker) .ml-card:has(.ml-select-row:checked) .ml-card-select {
+	opacity: 1;
+}
+/* Selected-tile outline, same affordance as the picker. */
+.ml-root:not(.ml-root--picker) .ml-card:has(.ml-select-row:checked) {
+	outline: 3px solid var(--pw-main-color, #eb1d61);
+	outline-offset: -3px;
+}
 
 /* Duplicate indicator pill ("N", bottom-right of the thumbnail). On a
    cluster head row it doubles as the expand/collapse toggle (.ml-dup-toggle
