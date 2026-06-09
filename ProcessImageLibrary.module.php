@@ -510,18 +510,17 @@ class ProcessImageLibrary extends Process {
 	 * because the front-end editor doesn't reliably echo them.
 	 */
 	protected function tinyMceGlueScript(): string {
-		$config = $this->wire('config');
 		$libUrl = $this->libraryPageUrl();
 		if ($libUrl === '') return '';
 
-		$pluginVer = @filemtime($config->paths($this) . 'mllibrary.js') ?: '1';
 		$cfg = json_encode([
 			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
-			'pluginUrl' => $config->urls($this) . 'mllibrary.js?v=' . $pluginVer,
+			'pluginUrl' => $this->assetUrl('mllibrary.js'),
 			'label'     => $this->_('Insert from library'),
 		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 
-		return "\n<script>(function(){var C=$cfg;"
+		return $this->richtextCommonLoader()
+			. "\n<script>(function(){var C=$cfg;"
 			. "function reg(){var I=window.InputfieldTinyMCE;if(!I||typeof I.onConfig!=='function')return false;"
 			. "window.ProcessWire=window.ProcessWire||{};ProcessWire.config=ProcessWire.config||{};"
 			. "ProcessWire.config.ImageLibraryInsert=C;"
@@ -549,16 +548,13 @@ class ProcessImageLibrary extends Process {
 	 * opens the picker, inserts the image, hands off to PW's image dialog.
 	 */
 	protected function ckEditorGlueScript(): string {
-		$config = $this->wire('config');
 		$libUrl = $this->libraryPageUrl();
 		if ($libUrl === '') return '';
 
-		$pluginVer = @filemtime($config->paths($this) . 'mllibrary-cke.js') ?: '1';
-		$iconVer   = @filemtime($config->paths($this) . 'mllibrary-icon.svg') ?: '1';
 		$cfg = json_encode([
 			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
-			'pluginUrl' => $config->urls($this) . 'mllibrary-cke.js?v=' . $pluginVer,
-			'iconUrl'   => $config->urls($this) . 'mllibrary-icon.svg?v=' . $iconVer,
+			'pluginUrl' => $this->assetUrl('mllibrary-cke.js'),
+			'iconUrl'   => $this->assetUrl('mllibrary-icon.svg'),
 			'label'     => $this->_('Insert from library'),
 		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 
@@ -571,7 +567,8 @@ class ProcessImageLibrary extends Process {
 		// extraPlugins + the 'PWImageLibrary' button to the toolbar in every
 		// per-field config + every data-configdata attribute. CKEditor reads the
 		// patched config whenever it inits (admin on ready, front-end on click).
-		return "\n<script>(function(){var C=$cfg;"
+		return $this->richtextCommonLoader()
+			. "\n<script>(function(){var C=$cfg;"
 			. "function patch(f){if(!f||typeof f!=='object')return;var ep=f.extraPlugins||'';"
 			. "if((','+ep+',').indexOf(',mllibrary,')===-1)f.extraPlugins=ep?ep+',mllibrary':'mllibrary';"
 			. "var tb=f.toolbar;if(Object.prototype.toString.call(tb)==='[object Array]'){var d=false;"
@@ -634,10 +631,7 @@ class ProcessImageLibrary extends Process {
 		$libUrl = $this->libraryPageUrl();
 		if ($libUrl === '') return;
 
-		$config = $this->wire('config');
-		$san    = $this->wire('sanitizer');
-		$jsVer  = @filemtime($config->paths($this) . 'ml-library-pick.js') ?: '1';
-		$config->scripts->add($config->urls($this) . 'ml-library-pick.js?v=' . $jsVer);
+		$this->wire('config')->scripts->add($this->assetUrl('ml-library-pick.js'));
 
 		$fname     = (string) $field->name;
 		$pickerUrl = $libUrl . '?picker=1&modal=1&target_page=' . (int) $page->id
@@ -658,6 +652,31 @@ class ProcessImageLibrary extends Process {
 
 		$event->return .= '<div class="ml-lib-pick-wrap" style="margin-top:.4rem">'
 			. $btn->render() . '</div>';
+	}
+
+	/**
+	 * Cache-busted URL for one of this module's own asset files: the public URL
+	 * plus a ?v=<filemtime> query so browsers refetch on change without a version
+	 * bump. Falls back to ?v=1 if the file can't be stat'd.
+	 */
+	protected function assetUrl(string $file): string {
+		$config = $this->wire('config');
+		$ver = @filemtime($config->paths($this) . $file) ?: '1';
+		return $config->urls($this) . $file . '?v=' . $ver;
+	}
+
+	/**
+	 * Inline loader that pulls in mllibrary-common.js once per page (guarded by a
+	 * marker id), before any editor inits. Both rich-text glues emit it; the
+	 * shared MLImageLibrary it defines is only used on user click, long after the
+	 * async fetch resolves, so plain head-append loading is safe.
+	 */
+	protected function richtextCommonLoader(): string {
+		$url = json_encode($this->assetUrl('mllibrary-common.js'),
+			JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+		return "\n<script>(function(){if(document.getElementById('ml-richtext-common'))return;"
+			. "var s=document.createElement('script');s.id='ml-richtext-common';s.src=$url;"
+			. "(document.head||document.documentElement).appendChild(s);})();</script>";
 	}
 
 	/** URL of the module's own admin page (for building picker links). */
