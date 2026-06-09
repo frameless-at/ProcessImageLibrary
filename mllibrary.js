@@ -44,6 +44,25 @@
 		(document.head || document.documentElement).appendChild(s);
 	}
 
+	// After PW opens its image dialog (pwimage) on a front-end phone, pwModalWindow
+	// fails to upsize it to full-screen, leaving a tiny box. Force the freshly
+	// opened modal to fill the viewport ourselves. Only the small-screen case PW
+	// mis-sizes; desktop is fine.
+	function fitDialogFrontEnd() {
+		if (!isFrontEnd() || !window.jQuery) return;
+		var jq = window.jQuery;
+		if (jq(window).width() > 700) return;
+		setTimeout(function () {
+			var $f = jq('.pw-modal-window.ui-dialog-content').last();
+			if (!$f.length) return;
+			try {
+				$f.dialog('option', 'width', jq(window).width());
+				$f.dialog('option', 'height', jq(window).height());
+				$f.dialog('option', 'position', { my: 'left top', at: 'left top' });
+			} catch (e) { /* not a dialog (yet) */ }
+		}, 350);
+	}
+
 	tinymce.PluginManager.add('mllibrary', function (editor) {
 
 		function cfg() {
@@ -90,6 +109,7 @@
 						img.removeAttribute('data-mlnew');
 						editor.selection.select(img);
 						window.pwTinyMCE_image(editor);
+						fitDialogFrontEnd();
 						return;
 					}
 				}
