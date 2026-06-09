@@ -30,12 +30,17 @@ Ein ProcessWire-Modul, das **alle Bilder einer PW-Installation** in einer einzig
 - Spalten-Konfiguration per User in `$user->meta('imageLibraryPrefs')` — **cross-device**, inklusive Page-Size
 - Auto-Erkennung von **Custom Fields on Images** (`field-{fieldname}`-Template, PW 3.0.142+)
 - AdminThemeUikit Light- / Dark-Theme-Integration via `--pw-*`-CSS-Custom-Properties
+- **Tabellen- oder Masonry-Gallery-Ansicht** — Toolbar-Toggle zwischen Daten-Tabelle und Thumbnail-Gallery; die Gallery behält das natürliche Seitenverhältnis jedes Bilds und packt die Kacheln per Shortest-Column-Platzierung in höhenbalancierte Spalten. Ein per-User-Thumbnail-Größen-Slider skaliert Thumbs / Kacheln live; Ansicht + Zoom persistieren in `$user->meta`, cross-device (siehe [Ansichten](#ansichten-tabelle--masonry-gallery))
+- **Automatische De-Duplizierung** — byte-identische Bilder werden gefingerprintet (`content_hash`) und auf einen Hardlink-Inode kollabiert (verlustfrei, reversibel; Originale + Variations + Page-Version-Files). Läuft bei jedem Save + stündlich (`LazyCron`) + Install-Pass; ein *Duplicates*-Filter, Kopienzähler-Badges und ein Cluster-Aufklappen / -Modal machen sie sichtbar, die Config-Seite bietet Scan / Re-measure / Revert. Design-Detail in [`dedup-design.md`](dedup-design.md) (siehe [De-Duplizierung](#de-duplizierung))
+- **Collections** — eine handverlesene Bildmenge, per User gespeichert (`collections: {id, name, keys[]}`), abrufbar über eine kurze `?coll=<id>`-URL; kuratiert per Klick auf einen Collection-Tab bei aktiver Auswahl (Cursor signalisiert Hinzufügen vs. Entfernen), und selbst filterbar (siehe [Collections](#collections))
+- **Picker-Add-ons** (optional, default aus) — bringen die Library außerhalb ihrer Admin-Page: ein *Choose from library*-Button an jedem Image-Feld (versionsbewusste Zuweisung) und ein *Insert from library*-Button in TinyMCE / CKEditor (Admin + Frontend-Inline-Editor) (siehe [Picker-Add-ons](#picker-add-ons))
+- **Rename schreibt Rich-Text-Embeds um** — nach einer Basename-Änderung schreibt derselbe `contentType=html`-Scan jeden Embed des alten Files auf den neuen Stem um (Original + Variations, alle Sprachen, Repeater-aware), damit Embeds nicht still brechen
 
 **Out-of-Scope (auch in der aktuellen Version):**
 
-- Standalone-Upload neuer Bilder (Replace tauscht einen bestehenden Slot; ein eigenständiger Upload nicht)
+- Standalone-Upload komplett neuer Bilder (Replace tauscht einen bestehenden Slot, der Picker weist ein bestehendes Library-File zu; ein eigenständiger Upload wird nicht angeboten)
 - Bilder zwischen Pages verschieben
-- Variations-Management (Crop / Focus / Re-Generate) — Modul zeigt den Variations-Zähler, regeneriert aber nicht
+- Eigenes Variations-Management (Crop / Focus / Re-Generate) — das Modul zeigt den Variations-Zähler und öffnet bei Klick auf den Thumb PWs **nativen** Per-Bild-Editor (Crop / Focus / Variations-UI), regeneriert / verwaltet Variations aber nicht selbst
 - Re-Sort innerhalb eines Image-Felds (`$img->sort`)
 
 ## Architektur
@@ -53,19 +58,28 @@ ProcessImageLibrary/
 ├── ProcessImageLibraryConfig.php
 ├── ProcessImageLibrary.css
 ├── ProcessImageLibrary.js
+├── assets/                           # feature-spezifische Frontend-Assets
+│   ├── reclaim-live.js / .css        # De-Dup-Config: Live-Scan / Reclaim / Revert / Audit-UI
+│   ├── library-pick.js               # Add-on: "Choose from library" an Image-Feldern
+│   ├── insert-mce.js                 # Add-on: TinyMCE-"Insert from library"-Adapter
+│   ├── insert-cke.js                 # Add-on: CKEditor-4-"Insert from library"-Adapter
+│   ├── insert-common.js              # Add-on: geteilte Picker- / Native-Dialog-Logik
+│   └── insert-icon.svg               # Add-on: CKEditor-Toolbar-Icon
 ├── src/
 │   ├── ImageLibraryDiscovery.php     # Trait: Image-Field / Template / Tags-Config-Introspection
 │   ├── ImageLibraryMultilang.php     # Trait: per-Sprache Read/Write, name⇄id-Mapping
+│   ├── ImageLibraryHashing.php       # Trait: content-hash De-Dup (Hardlink, Reclaim, Audit, Revert)
 │   └── ImageLibraryExportImport.php  # Trait: JSON + CSV emit, parse, idempotent Re-Apply
 ├── docs/
 │   ├── ImageLibrary-Concept_EN.md
 │   ├── ImageLibrary-Konzept_DE.md
+│   ├── dedup-design.md               # De-Duplizierung: Design-Rationale + Phasen-Plan
 │   └── screenshots/
 ├── README.md
 └── LICENSE
 ```
 
-Die `src/`-Traits halten das Main-Modul-File auf AJAX-Endpoints + Rendering fokussiert; Discovery, Multilang und Export/Import besitzen jeweils einen kohärenten Slice.
+Die `src/`-Traits halten das Main-Modul-File auf AJAX-Endpoints + Rendering fokussiert; Discovery, Multilang, Hashing/De-Dup und Export/Import besitzen jeweils einen kohärenten Slice.
 
 **Methods:**
 
@@ -78,7 +92,10 @@ Die `src/`-Traits halten das Main-Modul-File auf AJAX-Endpoints + Rendering foku
 - `___executeDelete()` — AJAX-POST mit einem `items`-Array; Einzel + Batch teilen denselben Pfad. Pro Page `$page->editable()`, dann `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed-Listen, damit JS die Rows ausfaden lassen und Partial-Failures via Bulk-Result-Dialog reporten kann.
 - `___executeExport()` — Direct-Download von JSON oder CSV unter Berücksichtigung der aktiven Filter. Liest `urlVariant` (`original` Default; `260` / `512` / `1024` für same-axis Variations) und emittiert die passende URL in der `url`-Spalte; die gewählte Variante wird in `meta.urlVariant` festgehalten.
 - `___executeImport()` — AJAX-POST, akzeptiert eine vorher exportierte (und extern bearbeitete) JSON/CSV-Datei und schreibt zurück; idempotent (unverändert gebliebene Items werden geskippt).
-- `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size + Bookmarks in `$user->meta('imageLibraryPrefs')` (debounced). Bookmarks werden via `$sanitizer->text(maxLength: 80)` für den Namen und `canonicalizeBookmarkQs()` für den Querystring validiert, damit Save- und Load-Shape konsistent bleiben.
+- `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size + View-Mode + Thumbnail-Scale + Bookmarks + **Collections** in `$user->meta('imageLibraryPrefs')` (debounced). Bookmarks werden via `$sanitizer->text(maxLength: 80)` für den Namen und `canonicalizeBookmarkQs()` für den Querystring validiert; Collections via `sanitizeCollection()` (alnum-id, gekappter Name, sanitisierte + deduplizierte + gekappte Row-Keys) — damit Save- und Load-Shape konsistent bleiben.
+- `___executeAssign()` — AJAX-POST (Image-Feld-Picker-Add-on): kopiert ein bestehendes Library-Bild in das Image-Feld einer Ziel-Page (native Image-Felder referenzieren nur ihren eigenen Page-Ordner, daher werden die Bytes kopiert), überträgt Description / Tags / Customs sprach-bewusst. Versionsbewusst — arbeitet der Editor in einer `PagesVersions`-Version, landet die Kopie in `…/<id>/v<n>/` und wird sofort gegen ihre byte-identische Quelle gehardlinkt.
+- `___executeClusterTable()` — AJAX-GET, rendert die editierbare Mini-Tabelle der Kopien eines Duplikat-Clusters für das Masonry-Cluster-Modal.
+- `___executeScanStep()` / `___executeReclaimStep()` / `___executeRevertStep()` / `___executeDiskAudit()` — gechunkte, zeit-budgetierte De-Dup-Endpoints, die die Live-Tools „Scan and reclaim" / „Revert" / „Re-measure" der Config-Seite treiben (Fingerprint-Scan, Hardlink-Reclaim, Un-Share, Real-Disk-Audit). Siehe [`dedup-design.md`](dedup-design.md).
 - `___executeUsage()` — AJAX-POST, Where-used-Preflight für den Delete-Confirm-Dialog. Akzeptiert `items=[{pageId, basename}, …]`, liefert `usage: { "pid:basename": [ {pageId, pageTitle, editUrl, fieldName}, … ] }`. Reverse-Scan über jedes `FieldtypeTextarea` per `$pages->findIDs("{field}%='/{pid}/{stem}.', include=all")` — der `%=`-Substring-Selector ist multilang-, repeater- und access-aware, kein raw SQL. Das Stem-Prefix-Needle fängt das Original UND jede PW-derivative Variation (`foo.500x300.jpg`, `foo.500x300-cropped.jpg`, `…hidpi.jpg`) mit einem Needle, weil `pwimage` üblicherweise eine resized Variation einfügt, nicht das Original. Editor-agnostisch — beide `pwimage`-Plugins (CKEditor + TinyMCE) schreiben dasselbe URL-Schema. Gate ist Existenz + Editability, NICHT `viewable()`: ein Admin mit `image-library-access` plus Per-Page-Edit-Rechten muss über Embeds Bescheid wissen, auch wenn die Page im Frontend nicht für ihn sichtbar ist.
 - `___executeWidget()` — AJAX-GET, rendert das von PW konfigurierte Inputfield für ein Page-Reference-Custom-Subfield (PageAutocomplete / PageListSelect / ASMSelect / etc.). Snapshotted `$config->scripts` / `$config->styles` vor + nach dem Render, damit nur die NEUEN Asset-URLs zurück zum Client gehen. Das Popup injiziert das HTML, lazy-loaded neue Scripts / Styles und feuert das `'reloaded'`-DOM-Event auf jedes `.Inputfield`, damit PWs delegierte Init-Handler die UI hochziehen. Save läuft über `___executeSave`; `coerceCustomValue()` formt `[id]` zu einem int (Single-Page-Feld) oder zu einem frischen `PageArray` (Multi-Page) — letzteres ist nötig, damit `FieldtypePage::sanitizeValuePageArray()` REPLACE statt MERGE macht.
 - `___install()` / `___uninstall()` — Admin-Page-Lifecycle + Permission `image-library-access`.
@@ -241,7 +258,7 @@ Auto-entdeckt (jedes Custom-Field-Subfield des `field-{fieldname}`-Templates). C
 - **FieldtypeOptions** (single + multi) → Display der Option-Label(s); Inline-Editor ist ein natives `<select>` (single) bzw. eine touch-freundliche Checkbox-Liste (multi)
 - **FieldtypePage** (single + multi) → Display der Page-Title(s); Inline-Editor rendert **das von PW tatsächlich konfigurierte Inputfield** für dieses Feld — PageAutocomplete / PageListSelect / PageListSelectMultiple / ASMSelect / was auch immer die Field-Config wählt — via `___executeWidget`, damit 1000e wählbare Pages die korrekte Search / Hierarchy / Sort-UX bekommen, ohne dass das Modul irgendwas davon nachbaut
 
-**Konfig:** Per User in `$user->meta('imageLibraryPrefs')` — Cross-device-persistiert via `___executeUserPrefs`. Struktur: `{columns: {visible: {col: bool}, order: [col]}, pageSize: int|null}`. Default-Set: Pflicht + Description + Tags + Custom-Fields (Admin kann eine Default-Hidden-Liste in der Module-Config setzen).
+**Konfig:** Per User in `$user->meta('imageLibraryPrefs')` — Cross-device-persistiert via `___executeUserPrefs`. Struktur: `{columns: {visible: {col: bool}, order: [col]}, pageSize: int|null, viewMode: 'table'|'masonry', thumbScale: float, bookmarks: [{name, qs}], collections: [{id, name, keys[]}]}`. Default-Set: Pflicht + Description + Tags + Custom-Fields (Admin kann eine Default-Hidden-Liste in der Module-Config setzen).
 
 ## Edit-Semantik
 
@@ -286,6 +303,29 @@ Spalten-Klick toggelt ascending/descending. Sortierbare Felder: Page-Title, Fiel
 ## Pagination
 
 50 Rows/Seite als built-in-Default (Module-Config überschreibbar). URL-State `?p=3` + `?ps=100`. Total-Count + „Page 3 of 25" in der Pagination-Zeile. Picker im Pagination-Block (Optionen ebenfalls Module-Config) — Auswahl persistiert in `$user->meta('imageLibraryPrefs').pageSize`, gilt also cross-device. Die Pagination-Zeile wird oben und unten gerendert; rechts daneben ein `fa-columns`-Icon, das den Spalten-Picker-Dialog öffnet.
+
+## Ansichten: Tabelle & Masonry-Gallery
+
+Ein Toolbar-**View-Toggle** (rechts in der Pagination-Zeile) schaltet zwischen der Daten-**Tabelle** und einer **Masonry-Gallery** um. Die Gallery behält das natürliche Seitenverhältnis jedes Thumbnails (kein Crop) und packt die Kacheln per **Shortest-Column**-Platzierung in **höhenbalancierte Spalten**: die nächste Kachel kommt in die aktuell kürzeste Spalte, anhand der server-gerenderten Bildmaße (`<img width/height>`), sodass das Layout sofort sitzt, ohne aufs Bild-Laden zu warten. Gallery-Kacheln tragen dieselbe Auswahl-Checkbox (hover-eingeblendet, unten links), Replace- / Delete-Aktionen und das Duplikat-Badge wie Tabellen-Zeilen, und das Selection-Set ist zwischen beiden Ansichten geteilt; Klick auf eine Kachel öffnet PWs nativen Per-Bild-Editor. Ein per-User-**Thumbnail-Größen-Slider** skaliert Tabellen-Thumbs / Gallery-Kacheln live; Ansichtswahl und Zoom persistieren in `$user->meta`, cross-device.
+
+## De-Duplizierung
+
+Jedes verwaltete Bild wird über seinen **exakten Byte-Inhalt** gefingerprintet (`content_hash`, xxh128 wo verfügbar, sonst md5), und byte-identische Kopien werden per **Hardlinks** auf einen Inode kollabiert — **verlustfrei und reversibel**: die Bytes ändern sich nie, jede Kopie kann jederzeit wieder ihre eigene Datei bekommen. Sowohl Originale **als auch** PWs generierte Variations sowie Page-Version-Files (`…/<id>/v<n>/`) werden dedupliziert, über alle Pages und Felder. Die Link-Counts des Dateisystems sind die Source of Truth (keine Manifest-Tabelle); Byte-Identität wird unmittelbar vor jedem Link erneut verifiziert.
+
+Es läuft **automatisch** — bei jedem `Pages::saved` (die Bilder der gespeicherten Page werden gefingerprintet und ein bereits existierender Zwilling sofort verlinkt), stündlich via `LazyCron` und einmal als begrenzter Pass beim Install. Das **Deduplication**-Fieldset der Config-Seite zeigt den gesparten Platz (*Disk space reclaimed* / *Copies sharing a file* / *Exact-duplicate clusters*) und bietet manuelle Tools — **Scan and reclaim (live)**, **Re-measure**, **Revert (un-share all)** — über gechunkte, zeit-budgetierte Endpoints (`scan-step`, `reclaim-step`, `revert-step`, `disk-audit`) mit Live-Progress-Panel. Im Listing machen ein *Duplicates*-Filter (kontextuell, kollabiert jeden Cluster auf einen Repräsentanten), ein Kopienzähler-Badge auf Tabellen- + Masonry-Kacheln, das Tabellen-Cluster-Aufklappen und das Masonry-Cluster-Modal die Duplikate prüfbar. Hash-Store: `process_imagelibrary_hashes` (lazy angelegt, beim Uninstall gedroppt). **Volle Design-Rationale + Phasen-Plan: [`dedup-design.md`](dedup-design.md).**
+
+## Collections
+
+Eine **Collection** speichert eine *handverlesene Menge konkreter Bilder* (wo ein Bookmark einen *Filter* speichert) — für Mengen, die kein Filter herstellen kann. Sie liegt per User in `$user->meta('imageLibraryPrefs').collections` als `{id, name, keys[]}` (die Row-Identity-Keys `pageId:fieldName:basename`), abrufbar über eine kurze `?coll=<id>`-URL — die Keys bleiben serverseitig, sodass eine 100-Bild-Collection ein ~12-Zeichen-Link ist, kein mehrere Kilobyte langer Query-String. Der Server löst die id zurück auf das Key-Set und verengt das Grid darauf.
+
+Collections teilen sich den Bookmark-Tab-Strip (icon-markiert) und funktionieren im Admin **und** im Picker. Anlegen: Checkboxen anhaken → der Add-Button der Leiste wird zu *Add collection* → Name + Save (die Checkboxen werden geleert). Kuratieren: bei aktiver Auswahl fügt ein Klick auf einen Collection-Tab die Auswahl hinzu (nicht-aktiver Tab → `+`-Cursor) oder entfernt sie aus der gerade betrachteten (aktiver Tab → `−`-Cursor). Filterbar: `?coll` koexistiert mit den Filter-Params, Filtern verengt also *innerhalb* der Collection (`applyRowFilters` schneidet zuerst auf das sel-Set, dann die normalen Filter); Löschen der betrachteten Collection entfernt `?coll` und lädt neu.
+
+## Picker-Add-ons
+
+Zwei **optionale, standardmäßig deaktivierte** Integrationen (Config-Fieldset *Picker add-ons*), die die Library *außerhalb* ihrer Admin-Page sichtbar machen, jeweils als Modal-Picker. Aktivieren macht das Modul `autoload` (nach dem Umschalten **Modules → Refresh**).
+
+- **Image-Feld-Picker** (`addonPicker`) — ein *Choose from library*-Button an jedem `InputfieldImage`. Die Zuweisung kopiert das gewählte File ins Ziel-Feld (native Image-Felder referenzieren nur ihren eigenen Page-Ordner, daher werden die Bytes via `___executeAssign` kopiert), überträgt Description / Tags / Customs sprach-bewusst und hardlinkt die Kopie gegen ihre byte-identische Quelle. **Versionsbewusst:** beim Bearbeiten einer `PagesVersions`-Version landet die Kopie im `v<n>/`-Ordner dieser Version.
+- **Rich-Text-Insert** (`addonRichtext`) — ein *Insert from library*-Button (Gallery-Icon) in jedem TinyMCE- und CKEditor-Feld, im Admin **und** im Frontend-Inline-Editor. Eine Einzelauswahl übergibt direkt an PWs eigenen Bild-Dialog (Crop / Resize / Caption / Align), bevor das `<img>` eingefügt wird; das eingebettete Bild referenziert das geteilte Library-File (keine Kopie). Verdrahtet durch Inline-Glue, das dünne Per-Editor-Adapter (`assets/insert-mce.js` / `insert-cke.js`) über einem geteilten Kern (`assets/insert-common.js`) lädt; der TinyMCE- / CKEditor-Plugin-Name bleibt `mllibrary`.
 
 ## Permissions
 
@@ -336,8 +376,9 @@ MIT (oder GPL, je nach Repo-Konvention). Modul sollte als Public-Module auf modu
 
 ## Roadmap (geplant)
 
-- **Where-used beim Rename**: vor dem Commit eines Rename anzeigen, welche Pages das Bild noch über seinen *aktuellen* Basename einbetten (`contentType=html`-Textarea-Scan — derselbe Where-used-Preflight, den der Delete-Confirm schon via `___executeUsage` macht). Nur als Hinweis, damit der Editor weiß, dass der Rename diese Embeds bricht, und sie fixen kann. Spiegelt das Delete-Verhalten auf den Rename-Pfad.
-- **Thumbnail-Größen-Slider**: ein per-User-Slider im View, um die Tabellen-Thumbnails interaktiv zu skalieren, persistiert in `$user->meta` neben den Column-/Page-Size-Prefs (cross-device). Ergänzt — ersetzt nicht — die Admin-Config-Thumbnail-Maße, die der Default bleiben.
+- **Überarbeiten und Verbessern der Tag-Verwaltung** — Tag-Handling durchgängig prüfen und verbessern: den Inline-Editor über die `useTags`-Modi hinweg (frei `1` vs. Whitelist `2` vs. gemischt `8|9`), den Multi-Select-Tags-Filter, das Autocomplete aus verwendeten Tags und die Add- / Replace- / Remove-Pinsel-Modi. Wahrscheinliche Richtungen: library-weites Tag-**Rename / Merge** (einen Tag überall umbenennen, wo er verwendet wird), eine klarere Whitelist-Edit-UX und ein vereinheitlichter Tag-Pool über heterogene Felder hinweg. Scope noch offen — vor der Umsetzung zu spezifizieren.
+
+*Kürzlich umgesetzt (vorher auf dieser Roadmap): der per-User-Thumbnail-Größen-Slider und Where-used beim Rename — jetzt als aktives Embed-Umschreiben implementiert (der Rename schreibt die Rich-Text-Embeds um, statt nur zu warnen).*
 
 ## Verbleibende Open Questions
 
