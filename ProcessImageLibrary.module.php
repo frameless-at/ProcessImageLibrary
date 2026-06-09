@@ -5218,10 +5218,8 @@ class ProcessImageLibrary extends Process {
 				// per-collection "+" adds the selection to that existing set.
 				'bookmarkAdd'       => $this->_('Add bookmark'),
 				'collectionAdd'     => $this->_('Add collection'),
-				'collectionAddTo'   => $this->_('Add selection to this collection'),
 				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
-				'collectionRemoveFrom' => $this->_('Remove selection from this collection'),
-				'collectionRemoved'    => $this->_('Removed %d image(s) from the collection'),
+				'collectionRemoved' => $this->_('Removed %d image(s) from the collection'),
 				// Delete confirm + result labels. The JS substitutes %d
 				// for the count; the %d placeholder stays literal in the
 				// translatable strings.
@@ -5319,8 +5317,6 @@ class ProcessImageLibrary extends Process {
 		$allLabel = $san->entities($this->_('Show all'));
 		$delTitle = $san->entities($this->_('Delete bookmark'));
 		$collDelTitle = $san->entities($this->_('Delete collection'));
-		$collAddTitle = $san->entities($this->_('Add selection to this collection'));
-		$collRemTitle = $san->entities($this->_('Remove selection from this collection'));
 
 		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
 
@@ -5366,15 +5362,10 @@ class ProcessImageLibrary extends Process {
 				. '<i class="fa fa-clone" aria-hidden="true"></i> '
 				. $san->entities((string) ($c['name'] ?? ''))
 				. '</a>'
-				// +/− actions (big plain glyphs), shown only while a selection
-				// exists (.ml-has-selection). "+" adds the selection to THIS
-				// collection; "−" (only on the active collection) removes it.
-				. '<span class="ml-coll-actions">'
-				. '<button type="button" class="ml-bookmark-addsel"'
-				. ' aria-label="' . $collAddTitle . '" title="' . $collAddTitle . '">+</button>'
-				. '<button type="button" class="ml-bookmark-delsel"'
-				. ' aria-label="' . $collRemTitle . '" title="' . $collRemTitle . '">&minus;</button>'
-				. '</span>'
+				// Curate actions are cursor-driven, not buttons: while a selection
+				// exists, clicking a collection tab adds (non-active) or removes
+				// (active) the selection — the cursor signals which. The × below
+				// only deletes the collection (and is hidden during selection).
 				. '<button type="button" class="ml-bookmark-del"'
 				. ' aria-label="' . $collDelTitle . '"'
 				. ' title="' . $collDelTitle . '">'

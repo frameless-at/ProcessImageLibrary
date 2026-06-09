@@ -3100,12 +3100,14 @@
 
 		// -- Gallery masonry layout ------------------------------------
 		// TRUE masonry: each thumbnail keeps its natural aspect ratio (no
-		// crop) and the tiles are distributed round-robin into N equal
-		// flex columns, so the reading order stays left-to-right (row by
-		// row) and the columns fill the full width. N is derived from the
-		// container width and the size slider, recomputed on render, on
-		// slider change and on resize. Re-parenting cards is safe: they
-		// stay inside .ml-results, where every handler is delegated.
+		// crop) and tiles are packed into N equal flex columns by always
+		// dropping the next tile into the SHORTEST column so far — so the
+		// columns stay height-balanced (no ragged bottoms / big gaps). The
+		// predicted height comes from each <img>'s width/height attributes
+		// (server-rendered natural ratio), so no wait for image load and no
+		// reflow. N is derived from the container width and the size slider,
+		// recomputed on render, on slider change and on resize. Re-parenting
+		// cards is safe: they stay inside .ml-results (delegated handlers).
 		var galleryCards = null; // source-ordered .ml-card nodes for this render
 		function galleryColumnCount(masonry) {
 			var w = masonry.clientWidth || 0;
@@ -3133,15 +3135,28 @@
 			if (!galleryCards || !galleryCards.length) return;
 			var n = galleryColumnCount(masonry);
 			if (masonry.getAttribute('data-cols') === String(n)) return; // unchanged → skip
-			var cols = [], i;
+			var cols = [], colH = [], i;
 			for (i = 0; i < n; i++) {
 				var col = document.createElement('div');
 				col.className = 'ml-masonry-col';
 				cols.push(col);
+				colH.push(0);
 			}
-			// Round-robin (card i → column i % n) keeps the first row in
-			// left-to-right source order.
-			galleryCards.forEach(function (card, idx) { cols[idx % n].appendChild(card); });
+			// Per-tile height in column-width units (h/w of the natural-ratio
+			// image), plus a small constant for the inter-tile gap so a column
+			// of many short tiles still counts its gaps. Pack each tile into the
+			// currently shortest column → balanced heights.
+			var gapUnit = 0.04;   // ≈ one --ml-gap relative to a column width
+			galleryCards.forEach(function (card) {
+				var img = card.querySelector('img.ml-thumb');
+				var w = img ? parseFloat(img.getAttribute('width'))  : 0;
+				var h = img ? parseFloat(img.getAttribute('height')) : 0;
+				var ratio = (w > 0 && h > 0) ? (h / w) : 1;   // relative height
+				var min = 0;
+				for (var c = 1; c < n; c++) { if (colH[c] < colH[min]) min = c; }
+				cols[min].appendChild(card);
+				colH[min] += ratio + gapUnit;
+			});
 			masonry.textContent = '';
 			for (i = 0; i < n; i++) masonry.appendChild(cols[i]);
 			masonry.setAttribute('data-cols', String(n));
@@ -3286,27 +3301,6 @@
 				a.innerHTML = '<i class="fa fa-clone" aria-hidden="true"></i> ';
 				a.appendChild(document.createTextNode(c.name || ''));
 				li.appendChild(a);
-				// +/− actions (big plain glyphs); CSS reveals them only while a
-				// selection exists, and "−" only on the active collection.
-				var actions = document.createElement('span');
-				actions.className = 'ml-coll-actions';
-				var addSel = document.createElement('button');
-				addSel.type = 'button';
-				addSel.className = 'ml-bookmark-addsel';
-				var addSelLabel = labels.collectionAddTo || 'Add selection to this collection';
-				addSel.setAttribute('aria-label', addSelLabel);
-				addSel.title = addSelLabel;
-				addSel.textContent = '+';
-				var delSel = document.createElement('button');
-				delSel.type = 'button';
-				delSel.className = 'ml-bookmark-delsel';
-				var delSelLabel = labels.collectionRemoveFrom || 'Remove selection from this collection';
-				delSel.setAttribute('aria-label', delSelLabel);
-				delSel.title = delSelLabel;
-				delSel.textContent = '−';   // minus sign
-				actions.appendChild(addSel);
-				actions.appendChild(delSel);
-				li.appendChild(actions);
 				li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
 				ul.insertBefore(li, addLi);
 			});
@@ -3398,70 +3392,77 @@
 		// Click delegation on the bookmarks bar — wraps Add, tab
 		// activation and delete in one handler so reorder via re-
 		// rendering doesn't invalidate listeners.
+		// Confirmation after a curate action: uncheck every selected box, drop
+		// the selection, refresh dependent UI (select-all header, cursor state).
+		function clearSelectionConfirm() {
+			selection.clear();
+			if (results) {
+				results.querySelectorAll('.ml-select-row:checked').forEach(function (cb) { cb.checked = false; });
+			}
+			syncSelectAllHeader();
+			syncBookmarkActive();
+		}
+
+		// Adjust the visible "… N images" summary by a delta (e.g. after a remove
+		// pulls rows out of the current view).
+		function bumpPaginationTotal(delta) {
+			if (!delta) return;
+			document.querySelectorAll('.ml-pagination-summary').forEach(function (el) {
+				el.textContent = el.textContent.replace(/\b(\d+)(\s+image)/, function (m, num, suf) {
+					return Math.max(0, parseInt(num, 10) + delta) + suf;
+				});
+			});
+		}
+
+		// Add the current selection to an EXISTING collection (one you're not
+		// viewing). Merge + de-dupe; confirm by clearing the selection.
+		function addSelectionToCollection(collId) {
+			var selKeys = Array.from(selection);
+			var coll = collections.filter(function (c) { return c && c.id === collId; })[0];
+			if (!coll || !selKeys.length) return;
+			var before = coll.keys.length;
+			coll.keys = Array.from(new Set(coll.keys.concat(selKeys)));
+			var added = coll.keys.length - before;
+			saveUserPrefs();
+			clearSelectionConfirm();
+			announce((labels.collectionUpdated || 'Added %d image(s) to the collection')
+				.replace('%d', String(added)));
+		}
+
+		// Remove the current selection FROM the collection you're viewing. Pulls
+		// the rows out of the grid in place (no server round-trip → no race with
+		// the debounced save), bumps the count, clears the selection.
+		function removeSelectionFromCollection(collId) {
+			var selKeys = Array.from(selection);
+			var coll = collections.filter(function (c) { return c && c.id === collId; })[0];
+			if (!coll || !selKeys.length) return;
+			var dropSet = {};
+			selKeys.forEach(function (k) { dropSet[k] = true; });
+			var was = coll.keys.length;
+			coll.keys = coll.keys.filter(function (k) { return !dropSet[k]; });
+			var removed = was - coll.keys.length;
+			selKeys.forEach(function (k) {
+				// k is wrapped in quotes here, so the raw value is correct (row
+				// keys never contain a double-quote).
+				if (results) {
+					var cb = results.querySelector('.ml-select-row[data-key="' + k + '"]');
+					var row = cb && cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
+					if (row) row.remove();
+				}
+			});
+			saveUserPrefs();
+			clearSelectionConfirm();
+			bumpPaginationTotal(-removed);
+			announce((labels.collectionRemoved || 'Removed %d image(s) from the collection')
+				.replace('%d', String(removed)));
+		}
+
 		document.addEventListener('click', function (e) {
 			if (!e.target.closest) return;
 			var add = e.target.closest('.ml-bookmarks-add a');
 			if (add) {
 				e.preventDefault();
 				openBookmarkAddDialog();
-				return;
-			}
-			// "+" on a collection tab → add the current selection to that set.
-			var addSel = e.target.closest('.ml-bookmark-addsel');
-			if (addSel) {
-				e.preventDefault();
-				e.stopPropagation();
-				var aLi = addSel.closest('li');
-				var aCid = aLi && aLi.dataset.collId;
-				var selKeys = (typeof selection !== 'undefined') ? Array.from(selection) : [];
-				if (!aCid || !selKeys.length) return;
-				var coll = collections.filter(function (c) { return c && c.id === aCid; })[0];
-				if (!coll) return;
-				var before = coll.keys.length;
-				// Merge + de-dupe (order-stable: existing first, then new).
-				coll.keys = Array.from(new Set(coll.keys.concat(selKeys)));
-				var added = coll.keys.length - before;
-				saveUserPrefs();
-				announce((labels.collectionUpdated || 'Added %d image(s) to the collection')
-					.replace('%d', String(added)));
-				return;
-			}
-			// "−" on the active collection → remove the selection FROM it. Only
-			// rendered on the collection you're currently viewing.
-			var delSel = e.target.closest('.ml-bookmark-delsel');
-			if (delSel) {
-				e.preventDefault();
-				e.stopPropagation();
-				var dLi = delSel.closest('li');
-				var dCid = dLi && dLi.dataset.collId;
-				var dKeys = (typeof selection !== 'undefined') ? Array.from(selection) : [];
-				if (!dCid || !dKeys.length) return;
-				var dColl = collections.filter(function (c) { return c && c.id === dCid; })[0];
-				if (!dColl) return;
-				var dropSet = {};
-				dKeys.forEach(function (k) { dropSet[k] = true; });
-				var was = dColl.keys.length;
-				dColl.keys = dColl.keys.filter(function (k) { return !dropSet[k]; });
-				var removed = was - dColl.keys.length;
-				// Pull the removed rows out of the grid in place (we're viewing
-				// this collection) and clear them from the selection — no server
-				// round-trip, so no race with the debounced prefs save.
-				dKeys.forEach(function (k) {
-					// k is wrapped in quotes here, so a raw value is correct (row
-					// keys never contain a double-quote); CSS.escape would wrongly
-					// escape the ':'/'.' inside the quoted attribute value.
-					if (results) {
-						var cb = results.querySelector('.ml-select-row[data-key="' + k + '"]');
-						var row = cb && cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
-						if (row) row.remove();
-					}
-					selection.delete(k);
-				});
-				saveUserPrefs();
-				syncSelectAllHeader();
-				syncBookmarkActive();
-				announce((labels.collectionRemoved || 'Removed %d image(s) from the collection')
-					.replace('%d', String(removed)));
 				return;
 			}
 			var del = e.target.closest('.ml-bookmark-del');
@@ -3491,6 +3492,19 @@
 			var tab = e.target.closest('a.ml-bookmark');
 			if (tab) {
 				e.preventDefault();
+				// Curate mode: while a selection exists, clicking a collection tab
+				// ADDS the selection to it (a collection you're not viewing) or
+				// REMOVES it (the collection you're currently inside — its tab is
+				// active). The cursor over the tab signals which. No selection →
+				// normal recall.
+				var tLi = tab.closest('li');
+				var tCid = tLi && tLi.dataset.collId;
+				var hasSelNow = (typeof selection !== 'undefined') && selection.size > 0;
+				if (tCid && hasSelNow) {
+					if (tLi.classList.contains('uk-active')) removeSelectionFromCollection(tCid);
+					else addSelectionToCollection(tCid);
+					return;
+				}
 				var qs = tab.dataset.qs || '';
 				applyBookmarkToForm(qs);
 				// Bookmark switches the filter set → clear the selection.

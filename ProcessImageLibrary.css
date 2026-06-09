@@ -1405,11 +1405,6 @@ textarea.ml-langtabs-pane {
 	opacity: 0.6;
 	margin-right: 0.15rem;
 }
-/* Collection tabs reserve right-side room for the +/− actions (shown while
-   selecting) or the × delete chip (shown otherwise). */
-.ml-bookmarks-tabs > li[data-coll-id] > a {
-	margin-right: 40px;
-}
 /* Delete (×) chip — round button in the right gap. Hover-reveal. Deletes a
    filter bookmark, or (no selection) a collection. */
 .ml-bookmark-del {
@@ -1440,51 +1435,20 @@ textarea.ml-langtabs-pane {
 	color: #c33;
 }
 /* While a selection is active you're CURATING, not deleting — hide the × on
-   collection tabs and surface the +/− actions instead. */
+   collection tabs. Clicking the tab itself adds/removes the selection; the
+   cursor says which. */
 .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] .ml-bookmark-del {
 	display: none;
 }
-
-/* +/− collection actions: big, plain glyphs (no button chrome), stacked and
-   vertically centred at the tab's right edge. Present only while selecting. */
-.ml-coll-actions {
-	position: absolute;
-	top: 0;
-	bottom: 0;
-	right: 6px;
-	display: none;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	line-height: 1;
+/* Curate cursors (selection active):
+   - a NON-active collection tab → "+" (the click ADDS the selection to it);
+   - the ACTIVE collection tab (you're inside it) → "−" (the click REMOVES the
+     selection from it). Custom SVG cursors, native copy/pointer as fallback. */
+.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] > a {
+	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
 }
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] .ml-coll-actions {
-	display: flex;
-}
-.ml-bookmark-addsel,
-.ml-bookmark-delsel {
-	border: 0;
-	background: transparent;
-	padding: 0;
-	margin: 0;
-	cursor: pointer;
-	font-size: 1.45rem;
-	line-height: 0.85;
-	font-weight: 700;
-	color: var(--pw-text-color, #666);
-	display: flex;
-	align-items: center;
-	justify-content: center;
-}
-.ml-bookmark-addsel:hover { color: #2a2; }
-.ml-bookmark-delsel:hover { color: #c33; }
-/* The "−" only when you're INSIDE that collection (its tab is active) and
-   selecting images within it. */
-.ml-bookmark-delsel {
-	display: none;
-}
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].uk-active .ml-bookmark-delsel {
-	display: flex;
+.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].uk-active > a {
+	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
 
 /* Empty / debug */
