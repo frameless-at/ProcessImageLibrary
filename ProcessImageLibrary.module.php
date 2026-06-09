@@ -41,6 +41,9 @@ class ProcessImageLibrary extends Process {
 	protected bool $pickerMode = false;
 	protected int $pickerTargetPage = 0;
 	protected string $pickerTargetField = '';
+	// When the editor is working in a page version (PagesVersions), the assign
+	// must target that version (its own v<n>/ files folder), not the live page.
+	protected int $pickerTargetVersion = 0;
 	// Insert mode: the picker is opened from a rich-text (TinyMCE) editor to
 	// embed a library image. No target field — it returns the image URL to the
 	// opener instead of assigning to an InputfieldImage.
@@ -647,6 +650,10 @@ class ProcessImageLibrary extends Process {
 		$fname     = (string) $field->name;
 		$pickerUrl = $libUrl . '?picker=1&modal=1&target_page=' . (int) $page->id
 			. '&target_field=' . urlencode($fname);
+		// If the page editor is working in a version, carry it through so the
+		// assign lands in that version's files folder, not the live page.
+		$version = $this->activePageVersion($page);
+		if ($version > 0) $pickerUrl .= '&target_version=' . $version;
 		$label = $this->_('Choose from library');
 
 		// Built from PW's own InputfieldButton so it matches the native
@@ -694,6 +701,21 @@ class ProcessImageLibrary extends Process {
 	protected function libraryPageUrl(): string {
 		$p = $this->wire('pages')->get('template=admin, name=' . self::ADMIN_PAGE_NAME . ', include=all');
 		return ($p && $p->id) ? $p->url : '';
+	}
+
+	/**
+	 * Version number the given page is currently loaded as (PagesVersions), or 0
+	 * for the live page / when the module isn't installed. Used to route a
+	 * library pick into the active version instead of the live page.
+	 */
+	protected function activePageVersion(Page $page): int {
+		$modules = $this->wire('modules');
+		if (!$modules->isInstalled('PagesVersions')) return 0;
+		try {
+			return (int) $modules->get('PagesVersions')->pageVersionNumber($page);
+		} catch (\Throwable $e) {
+			return 0;
+		}
 	}
 
 	/**
@@ -973,6 +995,31 @@ class ProcessImageLibrary extends Process {
 		$srcPath = (string) $srcImg->filename;
 		if ($srcPath === '' || !is_file($srcPath)) return $this->jsonError('Source file missing', 404);
 
+		// Version context: when the editor is working in a page version, the
+		// chosen image must land in THAT version (its own v<n>/ files folder),
+		// not the live page. getPageVersion() returns the page carrying the
+		// version property, so PagesVersions' path hook redirects its files to
+		// v<n>/. A normal save() is blocked on a version page, so $persist()
+		// writes the field's version record + flushes files explicitly instead.
+		$version       = max(0, (int) $input->post('targetVersion'));
+		$pagesVersions = null;
+		if ($version > 0 && $this->wire('modules')->isInstalled('PagesVersions')) {
+			$pagesVersions = $this->wire('modules')->get('PagesVersions');
+			$verPage = $pagesVersions->getPageVersion($tgtPage, $version);
+			if (!$verPage || !$verPage->id) {
+				return $this->jsonError('Target version not found', 404);
+			}
+			$tgtPage = $verPage;
+		}
+		$persist = function () use ($pagesVersions, &$tgtPage, $tgtField, $field, $version) {
+			if ($pagesVersions) {
+				$tgtPage->filesManager->save();                       // flush new file into v<n>/
+				$pagesVersions->savePageFieldVersion($tgtPage, $field, $version);
+			} else {
+				$tgtPage->save($tgtField);
+			}
+		};
+
 		$tgtPage->of(false);
 		$images   = $tgtPage->get($tgtField);
 		$maxFiles = (int) $field->maxFiles;
@@ -986,7 +1033,7 @@ class ProcessImageLibrary extends Process {
 
 		try {
 			$images->add($srcPath);
-			$tgtPage->save($tgtField);
+			$persist();
 		} catch (\Throwable $e) {
 			return $this->jsonError('Add failed: ' . $e->getMessage());
 		}
@@ -1017,7 +1064,7 @@ class ProcessImageLibrary extends Process {
 						}
 					}
 				}
-				if ($touched) $tgtPage->save($tgtField);
+				if ($touched) $persist();
 			} catch (\Throwable $e) {}
 		}
 
@@ -1105,9 +1152,10 @@ class ProcessImageLibrary extends Process {
 		if ($tpPage && $tpPage->id && $tpPage->editable()
 			&& $tFld && $tFld->type instanceof FieldtypeImage
 			&& $tpPage->template->hasField($tf)) {
-			$this->pickerMode        = true;
-			$this->pickerTargetPage  = $tp;
-			$this->pickerTargetField = $tf;
+			$this->pickerMode          = true;
+			$this->pickerTargetPage    = $tp;
+			$this->pickerTargetField   = $tf;
+			$this->pickerTargetVersion = max(0, (int) $in->get('target_version'));
 		}
 	}
 
@@ -1182,6 +1230,9 @@ class ProcessImageLibrary extends Process {
 				' data-picker="1" data-target-page="%d" data-target-field="%s"',
 				$this->pickerTargetPage, $sanitizer->entities($this->pickerTargetField)
 			);
+			if ($this->pickerTargetVersion > 0) {
+				$pickerAttrs .= ' data-target-version="' . $this->pickerTargetVersion . '"';
+			}
 			if ($this->pickerInsertMode) $pickerAttrs .= ' data-pick-mode="insert"';
 		}
 		$rootAttrs = sprintf(

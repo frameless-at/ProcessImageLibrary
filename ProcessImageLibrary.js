@@ -146,6 +146,8 @@
 				fd.append('srcBasename',  basename || '');
 				fd.append('targetPageId', root.dataset.targetPage || '');
 				fd.append('targetField',  root.dataset.targetField || '');
+				// Editing a page version → assign into that version, not live.
+				fd.append('targetVersion', root.dataset.targetVersion || '');
 				appendCsrf(fd);
 				return fetch(assignUrl, {
 					method: 'POST', credentials: 'same-origin',

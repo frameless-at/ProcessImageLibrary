@@ -44,9 +44,27 @@
 		document.head.appendChild(s);
 	})();
 
+	// Page version currently being edited (PagesVersions), or 0. This is the
+	// same signal PW's native image dialog uses; it's the authoritative source,
+	// so we read it here at click time and let the picker assign into that
+	// version (its own v<n>/ files folder) instead of the live page.
+	function activeVersion() {
+		try {
+			var pv = window.ProcessWire && ProcessWire.config && ProcessWire.config.PagesVersions;
+			return pv && pv.version ? parseInt(pv.version, 10) : 0;
+		} catch (e) { return 0; }
+	}
+
 	function openPicker(btn) {
 		var url = btn.getAttribute('data-picker-url');
 		if (!url) return;
+		// Carry the active version into the picker if the server didn't already
+		// (it appends target_version when it can detect the version server-side;
+		// this client read covers the case where it couldn't).
+		var version = activeVersion();
+		if (version > 0 && url.indexOf('target_version=') === -1) {
+			url += '&target_version=' + version;
+		}
 
 		var dlg = document.createElement('dialog');
 		dlg.className = 'ml-pick-dialog';
