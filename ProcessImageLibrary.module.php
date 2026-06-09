@@ -1068,6 +1068,26 @@ class ProcessImageLibrary extends Process {
 			} catch (\Throwable $e) {}
 		}
 
+		// Immediate dedup. The live path gets this for free via the Pages::saved
+		// auto-hash hook, but savePageFieldVersion() doesn't fire it — so for a
+		// version assign, hardlink the fresh copy to its byte-identical source
+		// right here (we literally just copied $srcPath into v<n>/, so they ARE
+		// identical). Version files don't fit the (page,field,basename)-keyed
+		// hash store, so this is a targeted link rather than a full rescan.
+		// Best effort — never fail the assign over a dedup miss.
+		if ($pagesVersions && $new) {
+			try {
+				$newPath = (string) $new->filename;
+				if ($newPath !== '' && is_file($newPath)
+					&& !$this->sameInode($srcPath, $newPath)
+					&& $this->filesByteIdentical($srcPath, $newPath)) {
+					$this->hardlinkReplace($srcPath, $newPath);
+				}
+			} catch (\Throwable $e) {
+				$this->wire('log')->error('ImageLibrary: version dedup link failed: ' . $e->getMessage());
+			}
+		}
+
 		$this->wire('cache')->deleteFor($this);
 		return $this->jsonResponse([
 			'ok'       => true,
