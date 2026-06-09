@@ -30,7 +30,14 @@
 		if (!isFrontEnd() || document.getElementById('ml-fe-dialog-z')) return;
 		var s = document.createElement('style');
 		s.id = 'ml-fe-dialog-z';
-		s.textContent = '.ui-dialog{z-index:9999 !important}.ui-widget-overlay{z-index:9998 !important}';
+		// z-index above the inline editor + iframe-fill rules that replace the
+		// admin-only CSS missing on the front end (which left PW's image dialog
+		// after a pick shrunk). Covers our picker AND pwimage.
+		s.textContent =
+			'.ui-dialog{z-index:9999 !important}' +
+			'.ui-widget-overlay{z-index:9998 !important}' +
+			'.ui-dialog .ui-dialog-content{padding:0 !important}' +
+			'.ui-dialog .pw-modal-window{width:100% !important;height:100% !important;display:block;border:0}';
 		(document.head || document.documentElement).appendChild(s);
 	}
 
