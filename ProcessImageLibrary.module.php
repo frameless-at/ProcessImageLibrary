@@ -4461,14 +4461,14 @@ class ProcessImageLibrary extends Process {
 	 * @return array<int,array<string,mixed>>
 	 */
 	protected function applyRowFilters(array $rows, array $filters): array {
-		// Collection recall (?coll=): keep ONLY the rows whose identity key is in
-		// the saved set, and nothing else — a collection is an explicit snapshot,
-		// so other filter params are ignored. Rows whose images were since
-		// deleted/renamed simply don't match and drop out silently.
+		// Collection recall (?coll=): narrow to the saved set FIRST, then let the
+		// normal filters below apply WITHIN it — a collection can be filtered, so
+		// coll and the filter params coexist rather than replace each other. Rows
+		// whose images were since deleted/renamed simply don't match here.
 		$sel = $filters['sel'] ?? [];
 		if (!empty($sel)) {
 			$selSet = array_fill_keys($sel, true);
-			return array_values(array_filter($rows, function ($r) use ($selSet) {
+			$rows = array_values(array_filter($rows, function ($r) use ($selSet) {
 				$key = ((int) $r['pageId']) . ':' . $r['fieldName'] . ':' . $r['basename'];
 				return isset($selSet[$key]);
 			}));

@@ -2847,6 +2847,11 @@
 					}
 				});
 				if (tagsList.length) params.append('tags', tagsList.join(','));
+				// Filtering INSIDE a collection must narrow the collection, not
+				// replace it — carry the active ?coll through so the server keeps
+				// the membership set and applies the filters within it.
+				var activeColl = currentColl();
+				if (activeColl) params.append('coll', activeColl);
 				var qs = params.toString() ? '?' + params.toString() : '';
 				// Filter changes the result set → clear the selection.
 				replaceFromQs(qs, true, true);
@@ -2899,8 +2904,11 @@
 				applyFieldCapabilityFilter();
 				updateResetVisibility();
 				recomputeFilterLabels();
-				// Reset clears the filter → clear the selection too.
-				replaceFromQs('', true, true);
+				// Reset clears the filters → clear the selection too. Inside a
+				// collection, keep ?coll so reset returns to the FULL collection
+				// (not the whole library).
+				var resetColl = currentColl();
+				replaceFromQs(resetColl ? '?coll=' + encodeURIComponent(resetColl) : '', true, true);
 			});
 		}
 
@@ -3376,6 +3384,9 @@
 				cleanup();
 				rerenderBookmarksList();
 				saveUserPrefs();
+				// A new collection consumes the selection → uncheck the boxes as
+				// confirmation (also flips the bar back out of collection mode).
+				if (isCollection) clearSelectionConfirm();
 				announce(isCollection
 					? (labels.collectionSaved || 'Collection saved')
 					: (labels.bookmarkSaved || 'Bookmark saved'));
@@ -3479,6 +3490,14 @@
 					rerenderBookmarksList();
 					saveUserPrefs();
 					announce(labels.collectionDeleted || 'Collection deleted');
+					// If we're currently viewing the deleted collection, drop ?coll
+					// from the URL and reload (keep any other filters that were on).
+					if (currentColl() === cid) {
+						var u = new URLSearchParams(location.search.replace(/^\?/, ''));
+						u.delete('coll');
+						var rest = u.toString();
+						replaceFromQs(rest ? '?' + rest : '', true, true);
+					}
 					return;
 				}
 				var idx = parseInt(li.dataset.bookmarkIdx, 10);
