@@ -8,8 +8,8 @@
 > a tonal layout, so it wasn't reliable enough to ship. The sections below that
 > describe near-dup detection are kept as a design record but are NOT in the code.
 >
-> Scenario driving this: an existing site with **1000+ images of which ~350 are
-> unique** (≈650 exact or near-duplicate copies scattered across pages/fields).
+> Scenario driving this: an existing site with **10000+ images of which ~3500 are
+> unique** (≈6500 exact or near-duplicate copies scattered across pages/fields).
 
 ## Goal
 
@@ -79,7 +79,7 @@ let duplicates be managed as one asset. Nothing moves; nothing is migrated.
   benefit without a separate asset store.
 - **Optional physical collapse** — see storage strategies below. Off by default.
 
-This makes the 650 stray copies behave like the 350 assets they really are — on
+This makes the 6500 stray copies behave like the 3500 assets they really are — on
 the existing site, today, with no migration and no new field types.
 
 ## Storage strategies — feasibility (what actually touches disk)
