@@ -2,12 +2,13 @@
  * TinyMCE adapter for "Insert from library".
  *
  * Registers a toolbar button (and Insert-menu item) on every InputfieldTinyMCE
- * field; the shared MLImageLibrary (mllibrary-common.js) does the real work:
+ * field; the shared MLImageLibrary (assets/insert-common.js) does the real work:
  * open the library picker, then for a single pick hand the file straight to
  * PW's native image dialog WITHOUT pre-inserting it.
  *
- * The plugin file's basename ("mllibrary") IS the TinyMCE plugin name and the
- * toolbar token — the PHP glue injects both. cfg comes from
+ * The TinyMCE plugin name + toolbar token are "mllibrary" (the key the PHP glue
+ * sets in s.external_plugins and the toolbar string) — an internal identifier,
+ * independent of this file's name. cfg comes from
  * ProcessWire.config.ImageLibraryInsert (set by the glue).
  */
 (function () {
@@ -44,7 +45,7 @@
 		}
 
 		// TinyMCE's built-in "gallery" icon — the same shape we ship to CKEditor
-		// as mllibrary-icon.svg, so both editors match.
+		// as assets/insert-icon.svg, so both editors match.
 		editor.ui.registry.addButton('mllibrary', {
 			icon: 'gallery',
 			tooltip: cfg().label || 'Insert from library',

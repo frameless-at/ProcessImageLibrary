@@ -529,7 +529,7 @@ class ProcessImageLibrary extends Process {
 
 		$cfg = json_encode([
 			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
-			'pluginUrl' => $this->assetUrl('mllibrary.js'),
+			'pluginUrl' => $this->assetUrl('assets/insert-mce.js'),
 			'label'     => $this->_('Insert from library'),
 		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 
@@ -567,8 +567,8 @@ class ProcessImageLibrary extends Process {
 
 		$cfg = json_encode([
 			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
-			'pluginUrl' => $this->assetUrl('mllibrary-cke.js'),
-			'iconUrl'   => $this->assetUrl('mllibrary-icon.svg'),
+			'pluginUrl' => $this->assetUrl('assets/insert-cke.js'),
+			'iconUrl'   => $this->assetUrl('assets/insert-icon.svg'),
 			'label'     => $this->_('Insert from library'),
 		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 
@@ -632,8 +632,8 @@ class ProcessImageLibrary extends Process {
 	/**
 	 * Append a "Choose from library" button to an InputfieldImage in the page
 	 * editor. The button opens the library in picker mode (modal iframe) scoped
-	 * to this page + field; the small ml-library-pick.js glue handles the modal
-	 * and refreshes the field after an image is assigned.
+	 * to this page + field; the small assets/library-pick.js glue handles the
+	 * modal and refreshes the field after an image is assigned.
 	 */
 	public function addLibraryPickButton(HookEvent $event): void {
 		$inputfield = $event->object;
@@ -645,7 +645,7 @@ class ProcessImageLibrary extends Process {
 		$libUrl = $this->libraryPageUrl();
 		if ($libUrl === '') return;
 
-		$this->wire('config')->scripts->add($this->assetUrl('ml-library-pick.js'));
+		$this->wire('config')->scripts->add($this->assetUrl('assets/library-pick.js'));
 
 		$fname     = (string) $field->name;
 		$pickerUrl = $libUrl . '?picker=1&modal=1&target_page=' . (int) $page->id
@@ -684,13 +684,13 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Inline loader that pulls in mllibrary-common.js once per page (guarded by a
+	 * Inline loader that pulls in assets/insert-common.js once per page (guarded by a
 	 * marker id), before any editor inits. Both rich-text glues emit it; the
 	 * shared MLImageLibrary it defines is only used on user click, long after the
 	 * async fetch resolves, so plain head-append loading is safe.
 	 */
 	protected function richtextCommonLoader(): string {
-		$url = json_encode($this->assetUrl('mllibrary-common.js'),
+		$url = json_encode($this->assetUrl('assets/insert-common.js'),
 			JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 		return "\n<script>(function(){if(document.getElementById('ml-richtext-common'))return;"
 			. "var s=document.createElement('script');s.id='ml-richtext-common';s.src=$url;"

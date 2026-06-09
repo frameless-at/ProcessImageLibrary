@@ -1,7 +1,7 @@
 /**
  * Shared "Insert from library" logic for both rich-text editors.
  *
- * mllibrary.js (TinyMCE) and mllibrary-cke.js (CKEditor 4) are thin adapters:
+ * insert-mce.js (TinyMCE) and insert-cke.js (CKEditor 4) are thin adapters:
  * each registers a toolbar button with its editor and, on click, calls
  * MLImageLibrary.openPicker(adapter). Everything else — opening the library
  * picker, receiving the pick, and handing a single pick to PW's native image

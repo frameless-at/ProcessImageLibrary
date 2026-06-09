@@ -1,11 +1,11 @@
 /**
  * CKEditor 4 adapter for "Insert from library" (legacy-editor twin of
- * mllibrary.js).
+ * insert-mce.js).
  *
  * Registered + wired up by the inline glue (ckEditorGlueScript): the glue adds
  * this plugin to extraPlugins and the "PWImageLibrary" button to the toolbar.
  * Here we define the command + button; the shared MLImageLibrary
- * (mllibrary-common.js) does the real work: open the library picker, then for a
+ * (assets/insert-common.js) does the real work: open the library picker, then for a
  * single pick hand the file straight to PW's native image dialog WITHOUT
  * pre-inserting it.
  *

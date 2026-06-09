@@ -454,11 +454,13 @@ ProcessImageLibrary/
 ├── ProcessImageLibraryConfig.php        # module-config UI
 ├── ProcessImageLibrary.js               # admin script: inline edit, bulk, columns dialog, collections, masonry, AJAX nav
 ├── ProcessImageLibrary.css              # admin styles
-├── ml-library-pick.js                   # add-on: "Choose from library" button glue on image fields
-├── mllibrary.js                         # add-on: TinyMCE "Insert from library" adapter
-├── mllibrary-cke.js                     # add-on: CKEditor 4 "Insert from library" adapter
-├── mllibrary-common.js                  # add-on: shared picker / native-dialog logic for both editors
-├── mllibrary-icon.svg                   # add-on: CKEditor toolbar icon
+├── assets/                              # feature-specific front-end assets
+│   ├── reclaim-live.js / .css           # de-dup config: live scan / reclaim / revert / audit UI
+│   ├── library-pick.js                  # add-on: "Choose from library" button glue on image fields
+│   ├── insert-mce.js                    # add-on: TinyMCE "Insert from library" adapter
+│   ├── insert-cke.js                    # add-on: CKEditor 4 "Insert from library" adapter
+│   ├── insert-common.js                 # add-on: shared picker / native-dialog logic for both editors
+│   └── insert-icon.svg                  # add-on: CKEditor toolbar icon
 ├── src/
 │   ├── ImageLibraryDiscovery.php        # trait: image-field / template / tags-config introspection
 │   ├── ImageLibraryMultilang.php        # trait: per-language read/write, name⇄id mapping

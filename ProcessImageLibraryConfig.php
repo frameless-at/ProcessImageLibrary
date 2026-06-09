@@ -303,10 +303,10 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			$cfg     = $this->wire('config');
 			$modPath = $cfg->paths($instance);
 			$modUrl  = $cfg->urls($instance);
-			$jsVer   = @filemtime($modPath . 'ml-reclaim-live.js') ?: '1';
-			$cssVer  = @filemtime($modPath . 'ml-reclaim-live.css') ?: '1';
-			$cfg->scripts->add($modUrl . 'ml-reclaim-live.js?v=' . $jsVer);
-			$cfg->styles->add($modUrl . 'ml-reclaim-live.css?v=' . $cssVer);
+			$jsVer   = @filemtime($modPath . 'assets/reclaim-live.js') ?: '1';
+			$cssVer  = @filemtime($modPath . 'assets/reclaim-live.css') ?: '1';
+			$cfg->scripts->add($modUrl . 'assets/reclaim-live.js?v=' . $jsVer);
+			$cfg->styles->add($modUrl . 'assets/reclaim-live.css?v=' . $cssVer);
 		}
 
 		// Status read-out. The <strong> values carry classes so the live JS
