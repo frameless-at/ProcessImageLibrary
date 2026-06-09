@@ -97,13 +97,22 @@
 			$iframe.on('dialogclose', cleanup);
 		}
 
+		// Same "stacked photos" icon as the CKEditor button (mllibrary-icon.svg)
+		// so both editors match. Registered as a custom TinyMCE icon.
+		editor.ui.registry.addIcon('mllibrary',
+			'<svg width="24" height="24" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round">'
+			+ '<path d="M5.6 4.6V3.2Q5.6 2.6 6.2 2.6H13Q13.6 2.6 13.6 3.2V10"/>'
+			+ '<rect x="2.4" y="5" width="8.6" height="8.6" rx="1"/>'
+			+ '<circle cx="4.8" cy="7.6" r="0.85" fill="currentColor" stroke="none"/>'
+			+ '<path d="M2.9 12l2-2.2 1.5 1.6 1.7-1.9 2.2 2.4"/></svg>');
+
 		editor.ui.registry.addButton('mllibrary', {
-			icon: 'gallery',
+			icon: 'mllibrary',
 			tooltip: cfg().label || 'Insert from library',
 			onAction: open
 		});
 		editor.ui.registry.addMenuItem('mllibrary', {
-			icon: 'gallery',
+			icon: 'mllibrary',
 			text: cfg().label || 'Insert from library',
 			onAction: open
 		});
