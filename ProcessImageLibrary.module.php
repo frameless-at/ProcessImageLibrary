@@ -527,9 +527,15 @@ class ProcessImageLibrary extends Process {
 			. "ProcessWire.config.ImageLibraryInsert=C;"
 			. "if(I._mlLibReg)return true;I._mlLibReg=true;"
 			. "I.onConfig(function(s){s.external_plugins=s.external_plugins||{};s.external_plugins.mllibrary=C.pluginUrl;"
-			. "if(typeof s.toolbar==='string'&&s.toolbar.indexOf('mllibrary')===-1)s.toolbar=s.toolbar+' mllibrary';"
-			. "if(s.menu&&s.menu.insert&&typeof s.menu.insert.items==='string'&&s.menu.insert.items.indexOf('mllibrary')===-1)"
-			. "s.menu.insert.items=s.menu.insert.items+' mllibrary';});return true;}"
+			// Place the button right AFTER the native image button (pwimage), to
+			// match CKEditor; fall back to a plain 'image' button, then the end.
+			. "if(typeof s.toolbar==='string'&&s.toolbar.indexOf('mllibrary')===-1){"
+			. "if(s.toolbar.indexOf('pwimage')!==-1)s.toolbar=s.toolbar.replace('pwimage','pwimage mllibrary');"
+			. "else if(/(^|\\s)image(\\s|$)/.test(s.toolbar))s.toolbar=s.toolbar.replace(/(^|\\s)image(\\s|$)/,'$1image mllibrary$2');"
+			. "else s.toolbar=s.toolbar+' mllibrary';}"
+			. "if(s.menu&&s.menu.insert&&typeof s.menu.insert.items==='string'&&s.menu.insert.items.indexOf('mllibrary')===-1){"
+			. "var mi=s.menu.insert.items;s.menu.insert.items=mi.indexOf('pwimage')!==-1?mi.replace('pwimage','pwimage mllibrary'):mi+' mllibrary';}"
+			. "});return true;}"
 			. "if(!reg()){var n=0,iv=setInterval(function(){if(reg()||++n>200)clearInterval(iv);},25);}})();</script>";
 	}
 
