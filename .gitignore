@@ -10,3 +10,8 @@
 
 # Third-party module kept locally only as a reference / study copy.
 /MediaHub-1.19.0/
+
+# ProcessWire core — Dropbox sync has dumped a full wire/ tree here; it is
+# NOT part of this module repo. Kept on disk, never tracked.
+/wire/
+/processwire-*/
