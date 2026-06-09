@@ -3286,16 +3286,27 @@
 				a.innerHTML = '<i class="fa fa-clone" aria-hidden="true"></i> ';
 				a.appendChild(document.createTextNode(c.name || ''));
 				li.appendChild(a);
-				// "+" — add the current selection to this collection (CSS reveals
-				// it only while a selection exists).
+				// +/− actions (big plain glyphs); CSS reveals them only while a
+				// selection exists, and "−" only on the active collection.
+				var actions = document.createElement('span');
+				actions.className = 'ml-coll-actions';
 				var addSel = document.createElement('button');
 				addSel.type = 'button';
 				addSel.className = 'ml-bookmark-addsel';
 				var addSelLabel = labels.collectionAddTo || 'Add selection to this collection';
 				addSel.setAttribute('aria-label', addSelLabel);
 				addSel.title = addSelLabel;
-				addSel.innerHTML = '<i class="fa fa-plus" aria-hidden="true"></i>';
-				li.appendChild(addSel);
+				addSel.textContent = '+';
+				var delSel = document.createElement('button');
+				delSel.type = 'button';
+				delSel.className = 'ml-bookmark-delsel';
+				var delSelLabel = labels.collectionRemoveFrom || 'Remove selection from this collection';
+				delSel.setAttribute('aria-label', delSelLabel);
+				delSel.title = delSelLabel;
+				delSel.textContent = '−';   // minus sign
+				actions.appendChild(addSel);
+				actions.appendChild(delSel);
+				li.appendChild(actions);
 				li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
 				ul.insertBefore(li, addLi);
 			});
@@ -3413,6 +3424,44 @@
 				saveUserPrefs();
 				announce((labels.collectionUpdated || 'Added %d image(s) to the collection')
 					.replace('%d', String(added)));
+				return;
+			}
+			// "−" on the active collection → remove the selection FROM it. Only
+			// rendered on the collection you're currently viewing.
+			var delSel = e.target.closest('.ml-bookmark-delsel');
+			if (delSel) {
+				e.preventDefault();
+				e.stopPropagation();
+				var dLi = delSel.closest('li');
+				var dCid = dLi && dLi.dataset.collId;
+				var dKeys = (typeof selection !== 'undefined') ? Array.from(selection) : [];
+				if (!dCid || !dKeys.length) return;
+				var dColl = collections.filter(function (c) { return c && c.id === dCid; })[0];
+				if (!dColl) return;
+				var dropSet = {};
+				dKeys.forEach(function (k) { dropSet[k] = true; });
+				var was = dColl.keys.length;
+				dColl.keys = dColl.keys.filter(function (k) { return !dropSet[k]; });
+				var removed = was - dColl.keys.length;
+				// Pull the removed rows out of the grid in place (we're viewing
+				// this collection) and clear them from the selection — no server
+				// round-trip, so no race with the debounced prefs save.
+				dKeys.forEach(function (k) {
+					// k is wrapped in quotes here, so a raw value is correct (row
+					// keys never contain a double-quote); CSS.escape would wrongly
+					// escape the ':'/'.' inside the quoted attribute value.
+					if (results) {
+						var cb = results.querySelector('.ml-select-row[data-key="' + k + '"]');
+						var row = cb && cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
+						if (row) row.remove();
+					}
+					selection.delete(k);
+				});
+				saveUserPrefs();
+				syncSelectAllHeader();
+				syncBookmarkActive();
+				announce((labels.collectionRemoved || 'Removed %d image(s) from the collection')
+					.replace('%d', String(removed)));
 				return;
 			}
 			var del = e.target.closest('.ml-bookmark-del');

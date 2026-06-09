@@ -1405,12 +1405,14 @@ textarea.ml-langtabs-pane {
 	opacity: 0.6;
 	margin-right: 0.15rem;
 }
-/* Collection tabs carry TWO chips (+ add-selection, × delete) → wider gap. */
+/* Collection tabs reserve right-side room for the +/− actions (shown while
+   selecting) or the × delete chip (shown otherwise). */
 .ml-bookmarks-tabs > li[data-coll-id] > a {
-	margin-right: 56px;
+	margin-right: 40px;
 }
-.ml-bookmark-del,
-.ml-bookmark-addsel {
+/* Delete (×) chip — round button in the right gap. Hover-reveal. Deletes a
+   filter bookmark, or (no selection) a collection. */
+.ml-bookmark-del {
 	position: absolute;
 	top: 10%;
 	right: 0.25rem;
@@ -1437,21 +1439,52 @@ textarea.ml-langtabs-pane {
 .ml-bookmark-del:hover {
 	color: #c33;
 }
-/* "+" chip sits to the LEFT of the × on collection tabs. Only present while a
-   checkbox selection exists (the bar gets .ml-has-selection); hover-reveal. */
-.ml-bookmark-addsel {
-	right: 1.85rem;
+/* While a selection is active you're CURATING, not deleting — hide the × on
+   collection tabs and surface the +/− actions instead. */
+.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] .ml-bookmark-del {
 	display: none;
 }
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] .ml-bookmark-addsel {
-	display: inline-flex;
+
+/* +/− collection actions: big, plain glyphs (no button chrome), stacked and
+   vertically centred at the tab's right edge. Present only while selecting. */
+.ml-coll-actions {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	right: 6px;
+	display: none;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	line-height: 1;
 }
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id]:hover .ml-bookmark-addsel,
-.ml-bookmarks-tabs.ml-has-selection .ml-bookmark-addsel:focus-visible {
-	opacity: 1;
+.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] .ml-coll-actions {
+	display: flex;
 }
-.ml-bookmark-addsel:hover {
-	color: #393;
+.ml-bookmark-addsel,
+.ml-bookmark-delsel {
+	border: 0;
+	background: transparent;
+	padding: 0;
+	margin: 0;
+	cursor: pointer;
+	font-size: 1.45rem;
+	line-height: 0.85;
+	font-weight: 700;
+	color: var(--pw-text-color, #666);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.ml-bookmark-addsel:hover { color: #2a2; }
+.ml-bookmark-delsel:hover { color: #c33; }
+/* The "−" only when you're INSIDE that collection (its tab is active) and
+   selecting images within it. */
+.ml-bookmark-delsel {
+	display: none;
+}
+.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].uk-active .ml-bookmark-delsel {
+	display: flex;
 }
 
 /* Empty / debug */
