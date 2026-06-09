@@ -1395,8 +1395,15 @@ textarea.ml-langtabs-pane {
 /* Per-tab delete button — round 32 × 32 chip with an X icon, sits in
    the right gap of each user bookmark tab. Hover-only reveal; same
    red-on-hover the thumbnail trash uses. */
-.ml-bookmarks-tabs > li[data-bookmark-idx] {
+.ml-bookmarks-tabs > li[data-bookmark-idx],
+.ml-bookmarks-tabs > li[data-coll-id] {
 	position: relative;
+}
+/* Collection tabs: a saved set of specific images. The leading icon (set in
+   markup) distinguishes them from filter bookmarks; mute it so the name leads. */
+.ml-bookmark--collection > .fa {
+	opacity: 0.6;
+	margin-right: 0.15rem;
 }
 .ml-bookmark-del {
 	position: absolute;

@@ -2547,6 +2547,8 @@
 					if (t.checked) selection.add(key);
 					else selection.delete(key);
 					syncSelectAllHeader();
+					// Selection drives the "Save collection" (+) affordance.
+					syncBookmarkActive();
 				} else if (t.classList.contains('ml-select-all')) {
 					if (t.checked) {
 						// Check all rows on the current page.
@@ -2565,6 +2567,7 @@
 						});
 					}
 					syncSelectAllHeader();
+					syncBookmarkActive();
 				} else if (t.classList.contains('ml-page-size-picker')) {
 					// Drop ?p — the current page number rarely makes
 					// sense at the new size; landing back on page 1 is
@@ -2986,6 +2989,12 @@
 		var bookmarks = (userPrefs.bookmarks && Array.isArray(userPrefs.bookmarks))
 			? userPrefs.bookmarks.slice()
 			: [];
+		// Collections: saved sets of specific images ({id, name, keys[]}).
+		// Recalled via ?coll=<id>; the keys live here + in $user->meta, never
+		// in the URL (a 100-image collection stays a ~12-char link).
+		var collections = (userPrefs.collections && Array.isArray(userPrefs.collections))
+			? userPrefs.collections.slice()
+			: [];
 
 		var savePrefsTimer = null;
 		// Current result layout ('table' | 'masonry'). The server is the
@@ -3006,6 +3015,7 @@
 					},
 					pageSize:  readCurrentPageSize(),
 					bookmarks: bookmarks,
+					collections: collections,
 					thumbScale: thumbScale,
 					viewMode:  viewMode
 				}));
@@ -3168,32 +3178,43 @@
 			return '?' + out.toString();
 		}
 
+		// Active collection id from the URL (?coll=<id>), '' if none.
+		function currentColl() {
+			return new URLSearchParams(location.search.replace(/^\?/, '')).get('coll') || '';
+		}
+
 		function syncBookmarkActive() {
 			var tabs = document.querySelectorAll('.ml-bookmarks-tabs > li');
 			if (!tabs.length) return;
-			var current = canonicalFilterQs(location.search);
-			tabs.forEach(function (li) {
-				li.classList.remove('uk-active');
-			});
-			// Walk every tab with a .ml-bookmark anchor — that's both
-			// "Show all" (qs="") and the saved bookmarks. First match
-			// wins the active marker.
+			var current = canonicalFilterQs(location.search);   // filter-only
+			var coll    = currentColl();
 			var bookmarkMatched = false;
 			tabs.forEach(function (li) {
+				li.classList.remove('uk-active');
 				var a = li.querySelector('a.ml-bookmark');
 				if (!a) return;
-				var qs = a.dataset.qs || '';
-				if (qs === current && !li.classList.contains('uk-active')) {
-					li.classList.add('uk-active');
-					// A non-empty match means the current URL state
-					// IS a saved bookmark — gates the Add button.
-					if (qs !== '') bookmarkMatched = true;
+				if (li.dataset.collId) {
+					// Collection tab — active iff its id is the one in the URL.
+					if (li.dataset.collId === coll && coll !== '') li.classList.add('uk-active');
+				} else {
+					// "Show all" (qs="") or a filter bookmark.
+					var qs = a.dataset.qs || '';
+					if (qs === '') {
+						if (current === '' && coll === '') li.classList.add('uk-active');
+					} else if (qs === current && coll === '') {
+						li.classList.add('uk-active');
+						bookmarkMatched = true;        // current URL IS a saved filter
+					}
 				}
 			});
-			// Add button visible only when a filter is active that's
-			// NOT already a saved bookmark; otherwise hidden.
+			// Add button: shown when a checkbox selection exists (→ save as
+			// collection — takes priority, works even under an active filter),
+			// OR when a non-saved filter is active (→ save as filter bookmark).
 			var addLi = document.querySelector('.ml-bookmarks-add');
-			if (addLi) addLi.hidden = (current === '' || bookmarkMatched);
+			if (addLi) {
+				var hasSel = (typeof selection !== 'undefined') && selection.size > 0;
+				addLi.hidden = !(hasSel || (current !== '' && !bookmarkMatched));
+			}
 		}
 
 		function bookmarksContainer() {
@@ -3212,6 +3233,15 @@
 				if (i === 0 || li === addLi) return;
 				li.remove();
 			});
+			function makeDelBtn(label) {
+				var del = document.createElement('button');
+				del.type = 'button';
+				del.className = 'ml-bookmark-del';
+				del.setAttribute('aria-label', label);
+				del.title = label;
+				del.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
+				return del;
+			}
 			bookmarks.forEach(function (b, idx) {
 				var li = document.createElement('li');
 				li.dataset.bookmarkIdx = String(idx);
@@ -3221,21 +3251,43 @@
 				a.dataset.qs = b.qs || '';
 				a.textContent = b.name;
 				li.appendChild(a);
-				var del = document.createElement('button');
-				del.type = 'button';
-				del.className = 'ml-bookmark-del';
-				del.setAttribute('aria-label', labels.bookmarkDelete || 'Delete bookmark');
-				del.title = labels.bookmarkDelete || 'Delete bookmark';
-				del.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
-				li.appendChild(del);
+				li.appendChild(makeDelBtn(labels.bookmarkDelete || 'Delete bookmark'));
+				ul.insertBefore(li, addLi);
+			});
+			// Collection tabs after the filter bookmarks, icon-marked. data-qs
+			// is the short ?coll=<id> recall link — the same AJAX swap pipeline
+			// applies it (server resolves the id → image keys).
+			collections.forEach(function (c) {
+				if (!c || !c.id) return;
+				var li = document.createElement('li');
+				li.dataset.collId = c.id;
+				var a = document.createElement('a');
+				a.className = 'ml-bookmark ml-bookmark--collection';
+				var qs = '?coll=' + encodeURIComponent(c.id);
+				a.href = location.pathname + qs;
+				a.dataset.qs = qs;
+				a.innerHTML = '<i class="fa fa-clone" aria-hidden="true"></i> ';
+				a.appendChild(document.createTextNode(c.name || ''));
+				li.appendChild(a);
+				li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
 				ul.insertBefore(li, addLi);
 			});
 			syncBookmarkActive();
 		}
 
+		// Short, URL-safe id for a new collection.
+		function newCollectionId() {
+			return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+		}
+
 		function openBookmarkAddDialog() {
+			// A checkbox selection ALWAYS means "save as collection" — even with
+			// an active filter (the filter is just how you got to the selection).
+			// No selection + active filter → save the filter as a bookmark.
+			var selKeys = (typeof selection !== 'undefined') ? Array.from(selection) : [];
+			var isCollection = selKeys.length > 0;
 			var current = canonicalFilterQs(location.search);
-			if (current === '') {
+			if (!isCollection && current === '') {
 				announce(labels.bookmarkEmpty || 'Apply some filters first.');
 				return;
 			}
@@ -3243,12 +3295,17 @@
 			dialog.className = 'ml-bookmark-dialog';
 
 			var header = document.createElement('header');
-			header.textContent = labels.bookmarkSave || 'Save bookmark';
+			header.textContent = isCollection
+				? (labels.collectionSave || 'Save collection')
+				: (labels.bookmarkSave || 'Save bookmark');
 			dialog.appendChild(header);
 
 			var hint = document.createElement('p');
 			hint.className = 'ml-popup-hint';
-			hint.textContent = labels.bookmarkHint || 'Saves the active filter combination under a name.';
+			hint.textContent = isCollection
+				? (labels.collectionHint || 'Saves the %d selected image(s) as a named collection.')
+					.replace('%d', String(selKeys.length))
+				: (labels.bookmarkHint || 'Saves the active filter combination under a name.');
 			dialog.appendChild(hint);
 
 			var input = document.createElement('input');
@@ -3279,11 +3336,17 @@
 			function commit() {
 				var name = input.value.trim();
 				if (!name) { input.focus(); return; }
-				bookmarks.push({ name: name, qs: current });
+				if (isCollection) {
+					collections.push({ id: newCollectionId(), name: name, keys: selKeys });
+				} else {
+					bookmarks.push({ name: name, qs: current });
+				}
 				cleanup();
 				rerenderBookmarksList();
 				saveUserPrefs();
-				announce(labels.bookmarkSaved || 'Bookmark saved');
+				announce(isCollection
+					? (labels.collectionSaved || 'Collection saved')
+					: (labels.bookmarkSaved || 'Bookmark saved'));
 			}
 			saveBtn.addEventListener('click', commit);
 			input.addEventListener('keydown', function (e) {
@@ -3311,6 +3374,16 @@
 				e.stopPropagation();
 				var li = del.closest('li');
 				if (!li) return;
+				// Collection delete (li carries data-coll-id) vs filter-bookmark
+				// delete (li carries data-bookmark-idx).
+				if (li.dataset.collId) {
+					var cid = li.dataset.collId;
+					collections = collections.filter(function (c) { return c && c.id !== cid; });
+					rerenderBookmarksList();
+					saveUserPrefs();
+					announce(labels.collectionDeleted || 'Collection deleted');
+					return;
+				}
 				var idx = parseInt(li.dataset.bookmarkIdx, 10);
 				if (isNaN(idx) || idx < 0 || idx >= bookmarks.length) return;
 				bookmarks.splice(idx, 1);

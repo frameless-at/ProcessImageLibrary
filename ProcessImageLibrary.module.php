@@ -250,6 +250,7 @@ class ProcessImageLibrary extends Process {
 		$order   = [];
 		$pageSize = null;
 		$bookmarks = [];
+		$collections = [];
 		$thumbScale = null;
 		$viewMode = null;
 		if (is_array($raw)) {
@@ -279,6 +280,15 @@ class ProcessImageLibrary extends Process {
 					$bookmarks[] = ['name' => $name, 'qs' => $qs];
 				}
 			}
+			// Collections: a saved set of specific images (row-keys), recalled
+			// by ?coll=<id>. Stored as DATA here (not in the URL) so a 100-image
+			// collection stays a 12-char link. See sanitizeCollection().
+			if (isset($raw['collections']) && is_array($raw['collections'])) {
+				foreach ($raw['collections'] as $c) {
+					$clean = $this->sanitizeCollection($c);
+					if ($clean !== null) $collections[] = $clean;
+				}
+			}
 			if (isset($raw['thumbScale'])) {
 				$ts = (float) $raw['thumbScale'];
 				if ($ts >= self::THUMB_SCALE_MIN && $ts <= self::THUMB_SCALE_MAX) {
@@ -290,11 +300,12 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 		return [
-			'columns'    => ['visible' => $visible, 'order' => $order],
-			'pageSize'   => $pageSize,
-			'bookmarks'  => $bookmarks,
-			'thumbScale' => $thumbScale,
-			'viewMode'   => $viewMode,
+			'columns'     => ['visible' => $visible, 'order' => $order],
+			'pageSize'    => $pageSize,
+			'bookmarks'   => $bookmarks,
+			'collections' => $collections,
+			'thumbScale'  => $thumbScale,
+			'viewMode'    => $viewMode,
 		];
 	}
 
@@ -1225,7 +1236,7 @@ class ProcessImageLibrary extends Process {
 		// Bookmarks stay in the picker too — saved filter sets are the fastest
 		// way into a large library when you're hunting for one image to insert.
 		$prefs = $this->getUserPrefs();
-		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks']);
+		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks'], $prefs['collections']);
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= $this->renderPickerBar('top');   // sticky — stays in the viewport
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
@@ -3574,11 +3585,12 @@ class ProcessImageLibrary extends Process {
 
 		$sanitizer = $this->wire('sanitizer');
 		$clean = [
-			'columns'    => ['visible' => [], 'order' => []],
-			'pageSize'   => null,
-			'bookmarks'  => [],
-			'thumbScale' => null,
-			'viewMode'   => null,
+			'columns'     => ['visible' => [], 'order' => []],
+			'pageSize'    => null,
+			'bookmarks'   => [],
+			'collections' => [],
+			'thumbScale'  => null,
+			'viewMode'    => null,
 		];
 		if (isset($data['columns']) && is_array($data['columns'])) {
 			$cols = $data['columns'];
@@ -3607,6 +3619,13 @@ class ProcessImageLibrary extends Process {
 				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
 				if ($name === '') continue;
 				$clean['bookmarks'][] = ['name' => $name, 'qs' => $qs];
+			}
+		}
+		if (isset($data['collections']) && is_array($data['collections'])) {
+			foreach ($data['collections'] as $c) {
+				$col = $this->sanitizeCollection($c);
+				if ($col !== null) $clean['collections'][] = $col;
+				if (count($clean['collections']) >= self::COLLECTION_MAX) break;
 			}
 		}
 		if (isset($data['thumbScale'])) {
@@ -4040,6 +4059,8 @@ class ProcessImageLibrary extends Process {
 		}
 		$tags = array_values(array_unique($tags));
 
+		$coll = (string) ($params['coll'] ?? '');
+
 		return [
 			'q'         => trim((string) ($params['q'] ?? '')),
 			'template'  => in_array($template, $eligibleTemplates, true) ? $template : '',
@@ -4048,6 +4069,8 @@ class ProcessImageLibrary extends Process {
 			'no_tags'   => !empty($params['no_tags']),
 			'no_custom' => $noCustom,
 			'tags'      => $tags,
+			'coll'      => preg_replace('/[^a-z0-9]/i', '', $coll) ?? '',
+			'sel'       => $coll !== '' ? $this->resolveCollectionKeys($coll) : [],
 		];
 	}
 
@@ -4060,6 +4083,66 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function rowKey(int $pageId, string $fieldName, string $basename): string {
 		return sprintf('%d:%s:%s', $pageId, $fieldName, $basename);
+	}
+
+	/** Hard caps so a malicious / runaway payload can't bloat $user->meta. */
+	const COLLECTION_MAX        = 200;   // collections per user
+	const COLLECTION_KEYS_MAX   = 5000;  // images per collection
+
+	/**
+	 * Validate + canonicalise one image-identity key ("pageId:fieldName:
+	 * basename"). Returns the rebuilt key, or '' if malformed — so stored /
+	 * resolved keys always match the exact shape rowKey() emits for the grid.
+	 */
+	protected function sanitizeRowKey(string $key): string {
+		$parts = explode(':', $key, 3);
+		if (count($parts) !== 3) return '';
+		$pageId = (int) $parts[0];
+		$field  = $this->wire('sanitizer')->fieldName($parts[1]);
+		$base   = basename($parts[2]);
+		if ($pageId <= 0 || $field === '' || $base === '') return '';
+		return $this->rowKey($pageId, $field, $base);
+	}
+
+	/**
+	 * Validate one raw collection ({id, name, keys[]}) from client/meta into a
+	 * clean record, or null if unusable. id is alnum, name is capped text, keys
+	 * are sanitised + de-duplicated + capped.
+	 *
+	 * @param mixed $c
+	 * @return array{id:string,name:string,keys:array<int,string>}|null
+	 */
+	protected function sanitizeCollection($c): ?array {
+		if (!is_array($c)) return null;
+		$id   = preg_replace('/[^a-z0-9]/i', '', (string) ($c['id'] ?? '')) ?? '';
+		$name = $this->wire('sanitizer')->text((string) ($c['name'] ?? ''), ['maxLength' => 80]);
+		if ($id === '' || $name === '') return null;
+
+		$keys = [];
+		if (isset($c['keys']) && is_array($c['keys'])) {
+			foreach ($c['keys'] as $k) {
+				$clean = $this->sanitizeRowKey((string) $k);
+				if ($clean !== '') $keys[$clean] = true;          // de-dupe
+				if (count($keys) >= self::COLLECTION_KEYS_MAX) break;
+			}
+		}
+		if (!$keys) return null;
+		return ['id' => $id, 'name' => $name, 'keys' => array_keys($keys)];
+	}
+
+	/**
+	 * Row-keys of the saved collection with the given id (empty if none). The
+	 * source for the ?coll= grid filter — keys live in $user->meta, never the URL.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function resolveCollectionKeys(string $id): array {
+		$id = preg_replace('/[^a-z0-9]/i', '', $id) ?? '';
+		if ($id === '') return [];
+		foreach ($this->getUserPrefs()['collections'] as $c) {
+			if (($c['id'] ?? '') === $id) return $c['keys'];
+		}
+		return [];
 	}
 
 	/**
@@ -4167,6 +4250,11 @@ class ProcessImageLibrary extends Process {
 		}
 		$tags = array_values(array_unique($tags));
 
+		// Collection recall: ?coll=<id> resolves (server-side, from $user->meta)
+		// to an explicit row-key set. Exposed as 'sel'; applyRowFilters narrows
+		// the grid to exactly those images.
+		$coll = (string) $input->get('coll');
+
 		return [
 			'q'              => trim((string) $input->get('q')),
 			'template'       => in_array($template, $eligibleTemplates, true) ? $template : '',
@@ -4176,6 +4264,8 @@ class ProcessImageLibrary extends Process {
 			'no_custom'      => $noCustom,
 			'dupes'          => (bool) $input->get('dupes'),
 			'tags'           => $tags,
+			'coll'           => preg_replace('/[^a-z0-9]/i', '', $coll) ?? '',
+			'sel'            => $coll !== '' ? $this->resolveCollectionKeys($coll) : [],
 		];
 	}
 
@@ -4300,6 +4390,19 @@ class ProcessImageLibrary extends Process {
 	 * @return array<int,array<string,mixed>>
 	 */
 	protected function applyRowFilters(array $rows, array $filters): array {
+		// Collection recall (?coll=): keep ONLY the rows whose identity key is in
+		// the saved set, and nothing else — a collection is an explicit snapshot,
+		// so other filter params are ignored. Rows whose images were since
+		// deleted/renamed simply don't match and drop out silently.
+		$sel = $filters['sel'] ?? [];
+		if (!empty($sel)) {
+			$selSet = array_fill_keys($sel, true);
+			return array_values(array_filter($rows, function ($r) use ($selSet) {
+				$key = ((int) $r['pageId']) . ':' . $r['fieldName'] . ':' . $r['basename'];
+				return isset($selSet[$key]);
+			}));
+		}
+
 		$q        = mb_strtolower($filters['q']);
 		$hasQ     = $q !== '';
 		$tplName  = (string) ($filters['template'] ?? '');
@@ -5034,6 +5137,12 @@ class ProcessImageLibrary extends Process {
 				'bookmarkDeleted'  => $this->_('Bookmark deleted'),
 				'bookmarkDelete'   => $this->_('Delete bookmark'),
 				'bookmarkEmpty'    => $this->_('Apply some filters first.'),
+				// Collection labels — saving a checkbox selection as a named set.
+				'collectionSave'    => $this->_('Save collection'),
+				'collectionHint'    => $this->_('Saves the %d selected image(s) as a named collection.'),
+				'collectionSaved'   => $this->_('Collection saved'),
+				'collectionDeleted' => $this->_('Collection deleted'),
+				'collectionDelete'  => $this->_('Delete collection'),
 				// Delete confirm + result labels. The JS substitutes %d
 				// for the count; the %d placeholder stays literal in the
 				// translatable strings.
@@ -5120,21 +5229,23 @@ class ProcessImageLibrary extends Process {
 	 *
 	 * @param array<int,array{name:string,qs:string}> $bookmarks
 	 */
-	protected function renderBookmarksBar(array $filters, array $bookmarks): string {
+	protected function renderBookmarksBar(array $filters, array $bookmarks, array $collections = []): string {
 		$san  = $this->wire('sanitizer');
 		$page = $this->wire('page');
 
 		$currentCanon = $this->canonicalizeBookmarkQs(http_build_query($this->bookmarkFilterPayload($filters)));
+		$currentColl  = (string) ($filters['coll'] ?? '');
 		$addTitle = $san->entities($this->_('Save current filter as bookmark'));
 		$addLabel = $san->entities($this->_('Add bookmark'));
 		$allLabel = $san->entities($this->_('Show all'));
 		$delTitle = $san->entities($this->_('Delete bookmark'));
+		$collDelTitle = $san->entities($this->_('Delete collection'));
 
 		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
 
 		// Baseline "Show all" tab first — empty querystring, active
-		// iff nothing filter-shaped is currently set.
-		$allActive = ($currentCanon === '') ? ' class="uk-active"' : '';
+		// iff nothing filter-shaped AND no collection is currently set.
+		$allActive = ($currentCanon === '' && $currentColl === '') ? ' class="uk-active"' : '';
 		$out .= '<li' . $allActive . '>'
 			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
 			. $allLabel . '</a></li>';
@@ -5160,10 +5271,31 @@ class ProcessImageLibrary extends Process {
 				. '</li>';
 		}
 
-		// Add button rightmost — opens the name-dialog. Hidden unless
-		// the current filter is BOTH non-empty AND not already saved
-		// as a bookmark; JS mirrors the same logic on every URL change
-		// so the toggle stays live.
+		// Collection tabs (saved image sets) after the filter bookmarks, in the
+		// same strip but icon-marked. Recalled via ?coll=<id>.
+		foreach ($collections as $c) {
+			$cid = (string) ($c['id'] ?? '');
+			if ($cid === '') continue;
+			$qs = '?coll=' . rawurlencode($cid);
+			$active = ($cid === $currentColl) ? ' class="uk-active"' : '';
+			$out .= '<li' . $active . ' data-coll-id="' . $san->entities($cid) . '">'
+				. '<a class="ml-bookmark ml-bookmark--collection"'
+				. ' href="' . $san->entities($page->url . $qs) . '"'
+				. ' data-qs="' . $san->entities($qs) . '">'
+				. '<i class="fa fa-clone" aria-hidden="true"></i> '
+				. $san->entities((string) ($c['name'] ?? ''))
+				. '</a>'
+				. '<button type="button" class="ml-bookmark-del"'
+				. ' aria-label="' . $collDelTitle . '"'
+				. ' title="' . $collDelTitle . '">'
+				. '<i class="fa fa-times" aria-hidden="true"></i>'
+				. '</button>'
+				. '</li>';
+		}
+
+		// Add button rightmost — opens the name-dialog. Server-side it's hidden
+		// unless a non-saved filter is active; the JS additionally reveals it
+		// whenever a checkbox selection exists (→ "save as collection").
 		$addHidden = ($currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
 		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
 			. ' title="' . $addTitle . '">'
@@ -6063,6 +6195,9 @@ class ProcessImageLibrary extends Process {
 			'no_desc'        => $filters['no_desc'] ? '1' : '',
 			'no_tags'        => $filters['no_tags'] ? '1' : '',
 			'dupes'          => !empty($filters['dupes']) ? '1' : '',
+			// Collection recall id only — NOT the resolved key list ('sel'),
+			// which stays server-side so pagination links stay short.
+			'coll'           => (string) ($filters['coll'] ?? ''),
 			'p'              => $page > 1 ? (string) $page : '',
 			'sort'           => ($sort !== '' && $sort !== $defSort) ? $sort : '',
 			'dir'            => ($dir !== '' && $dir !== $defDir) ? $dir : '',
