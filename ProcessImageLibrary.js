@@ -3209,13 +3209,28 @@
 					}
 				}
 			});
+			// A checkbox selection enables collection actions: the per-collection
+			// "+" chips (CSS-gated by this class) and the add-button's collection
+			// mode. Mark the strip so the CSS can reveal the chips.
+			var hasSel = (typeof selection !== 'undefined') && selection.size > 0;
+			var ul = bookmarksContainer();
+			if (ul) ul.classList.toggle('ml-has-selection', hasSel);
+
 			// Add button: shown when a checkbox selection exists (→ save as
 			// collection — takes priority, works even under an active filter),
 			// OR when a non-saved filter is active (→ save as filter bookmark).
+			// Its label reflects which it'll do.
 			var addLi = document.querySelector('.ml-bookmarks-add');
 			if (addLi) {
-				var hasSel = (typeof selection !== 'undefined') && selection.size > 0;
 				addLi.hidden = !(hasSel || (current !== '' && !bookmarkMatched));
+				var addA = addLi.querySelector('a');
+				if (addA) {
+					var addLabel = hasSel
+						? (labels.collectionAdd || 'Add collection')
+						: (labels.bookmarkAdd || 'Add bookmark');
+					addA.innerHTML = '<i class="fa fa-plus" aria-hidden="true"></i> ';
+					addA.appendChild(document.createTextNode(addLabel));
+				}
 			}
 		}
 
@@ -3271,6 +3286,16 @@
 				a.innerHTML = '<i class="fa fa-clone" aria-hidden="true"></i> ';
 				a.appendChild(document.createTextNode(c.name || ''));
 				li.appendChild(a);
+				// "+" — add the current selection to this collection (CSS reveals
+				// it only while a selection exists).
+				var addSel = document.createElement('button');
+				addSel.type = 'button';
+				addSel.className = 'ml-bookmark-addsel';
+				var addSelLabel = labels.collectionAddTo || 'Add selection to this collection';
+				addSel.setAttribute('aria-label', addSelLabel);
+				addSel.title = addSelLabel;
+				addSel.innerHTML = '<i class="fa fa-plus" aria-hidden="true"></i>';
+				li.appendChild(addSel);
 				li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
 				ul.insertBefore(li, addLi);
 			});
@@ -3368,6 +3393,26 @@
 			if (add) {
 				e.preventDefault();
 				openBookmarkAddDialog();
+				return;
+			}
+			// "+" on a collection tab → add the current selection to that set.
+			var addSel = e.target.closest('.ml-bookmark-addsel');
+			if (addSel) {
+				e.preventDefault();
+				e.stopPropagation();
+				var aLi = addSel.closest('li');
+				var aCid = aLi && aLi.dataset.collId;
+				var selKeys = (typeof selection !== 'undefined') ? Array.from(selection) : [];
+				if (!aCid || !selKeys.length) return;
+				var coll = collections.filter(function (c) { return c && c.id === aCid; })[0];
+				if (!coll) return;
+				var before = coll.keys.length;
+				// Merge + de-dupe (order-stable: existing first, then new).
+				coll.keys = Array.from(new Set(coll.keys.concat(selKeys)));
+				var added = coll.keys.length - before;
+				saveUserPrefs();
+				announce((labels.collectionUpdated || 'Added %d image(s) to the collection')
+					.replace('%d', String(added)));
 				return;
 			}
 			var del = e.target.closest('.ml-bookmark-del');

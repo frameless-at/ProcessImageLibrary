@@ -5214,6 +5214,12 @@ class ProcessImageLibrary extends Process {
 				'collectionSaved'   => $this->_('Collection saved'),
 				'collectionDeleted' => $this->_('Collection deleted'),
 				'collectionDelete'  => $this->_('Delete collection'),
+				// Add-button label swaps to this while a selection exists, and the
+				// per-collection "+" adds the selection to that existing set.
+				'bookmarkAdd'       => $this->_('Add bookmark'),
+				'collectionAdd'     => $this->_('Add collection'),
+				'collectionAddTo'   => $this->_('Add selection to this collection'),
+				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
 				// Delete confirm + result labels. The JS substitutes %d
 				// for the count; the %d placeholder stays literal in the
 				// translatable strings.
@@ -5311,6 +5317,7 @@ class ProcessImageLibrary extends Process {
 		$allLabel = $san->entities($this->_('Show all'));
 		$delTitle = $san->entities($this->_('Delete bookmark'));
 		$collDelTitle = $san->entities($this->_('Delete collection'));
+		$collAddTitle = $san->entities($this->_('Add selection to this collection'));
 
 		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
 
@@ -5356,6 +5363,13 @@ class ProcessImageLibrary extends Process {
 				. '<i class="fa fa-clone" aria-hidden="true"></i> '
 				. $san->entities((string) ($c['name'] ?? ''))
 				. '</a>'
+				// "+" — add the current checkbox selection to THIS collection.
+				// Revealed by JS only while a selection exists (.ml-has-selection).
+				. '<button type="button" class="ml-bookmark-addsel"'
+				. ' aria-label="' . $collAddTitle . '"'
+				. ' title="' . $collAddTitle . '">'
+				. '<i class="fa fa-plus" aria-hidden="true"></i>'
+				. '</button>'
 				. '<button type="button" class="ml-bookmark-del"'
 				. ' aria-label="' . $collDelTitle . '"'
 				. ' title="' . $collDelTitle . '">'
