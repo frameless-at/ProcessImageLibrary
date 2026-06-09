@@ -32,6 +32,9 @@ A ProcessWire admin module that puts every image across every page and every ima
   - [Embeds follow the rename](#embeds-follow-the-rename)
 - [Replacing files](#replacing-files)
 - [Deleting images](#deleting-images)
+- [Deduplication](#deduplication)
+  - [Browsing duplicates](#browsing-duplicates)
+  - [Reclaiming disk](#reclaiming-disk-config-page)
 - [Export / Import](#export--import)
   - [Export](#export)
   - [Import](#import)
@@ -51,6 +54,7 @@ A ProcessWire admin module that puts every image across every page and every ima
 - **Bulk edits as paintbrush** — tick a few rows, then edit any cell on a selected row to broadcast the change to all selected rows. Works for description, tags, customs, and filenames (with placeholder syntax for numbering).
 - **Replace image in place** — drag a file onto the row or click the upload icon. The basename + every URL stay intact, variations regenerate, metadata is preserved. Extension match enforced so format conversions can't sneak in.
 - **Delete (single + batch)** — trash icon on the row hides behind a confirm dialog. Selection-as-paintbrush works here too: with N rows ticked, clicking the trash on any selected row deletes the whole selection.
+- **Automatic de-duplication** — byte-identical images are fingerprinted and collapsed onto one hardlinked file (lossless, reversible), so duplicate copies cost disk space only once. Runs by itself (on save + hourly); a *Duplicates* filter, copy-count badges and an expandable cluster view surface them, and the config page shows the disk saved with manual Scan / Re-measure / Revert tools.
 - **Bookmarks** — save the current filter combination as a named tab above the filter bar. Click a tab to jump back to that view; the filter form repopulates so what you see matches what's applied. Persisted per user via `$user->meta`, cross-device. The "+ Add bookmark" tab surfaces only when the active filter isn't already saved.
 - **Collections** — curate an arbitrary set of images that no filter could reproduce: tick checkboxes, save them as a named collection tab in the same strip. Recall the exact set instantly via a short `?coll=<id>` URL (the image keys live in `$user->meta`, never the URL — a 100-image collection is still a ~12-character link). Grow / trim a collection by clicking its tab while a selection is active; the cursor shows whether the click **adds** (+) or **removes** (−). Collections can themselves be filtered.
 - **Picker add-ons** (optional, off by default) — two opt-in integrations that let editors pull a library image in elsewhere: a *Choose from library* button on every image field, and an *Insert from library* button in TinyMCE / CKEditor (admin + front-end inline editor). No re-upload — the existing file is assigned / embedded; on a versioned page it lands in that version's folder.
@@ -96,7 +100,7 @@ Under **Modules → Configure → ProcessImageLibrary** (or via the **Config** l
 
 ![Module configuration screenshot showing the Picker add-ons, Thumbnail, Pagination, Default sort, Columns and Scope fieldsets](docs/screenshots/02-config.png)
 
-A collapsed **Picker add-ons** fieldset sits at the top (both toggles **off** by default) — the library itself works either way. See [Picker add-ons](#picker-add-ons) for what they do.
+A collapsed **Picker add-ons** fieldset sits at the top (both toggles **off** by default) — the library itself works either way. See [Picker add-ons](#picker-add-ons) for what they do. A **Deduplication** fieldset at the bottom shows the disk saved and offers manual Scan / Re-measure / Revert tools — see [Deduplication](#deduplication).
 
 ### Thumbnail
 
@@ -145,6 +149,7 @@ Available filters:
 | Missing description | Rows whose description is empty |
 | Missing tags | Rows whose tags are empty |
 | Missing &lt;custom&gt; | One checkbox per custom subfield; rows whose value for that subfield is empty |
+| Duplicates | Only images with ≥2 byte-identical copies present in the current view; each cluster collapses to one representative (see [Deduplication](#deduplication)) |
 
 **Live capability narrowing.** As soon as you pick a Template or an Image field, the rest of the filter bar collapses to what's actually applicable: the Tags fieldset hides when the selection has no `useTags` field, and each `Missing <custom>` checkbox hides when the selection doesn't expose that subfield. Selecting just a Template uses the union of capabilities across its image fields, so a template whose only image field has no tags / no customs also drops those filters. Stale ticks get cleared automatically so what you submit matches what you see.
 
@@ -315,6 +320,36 @@ A confirm dialog always intervenes — count in the header, first eight filename
 ![Delete confirm dialog for a batch of 4 images: the header counts the selection, the files are listed inline, and a red "Still referenced in rich-text fields" block names img_6426.jpeg with a link to the "Flowers" page body field that still embeds it](docs/screenshots/11-delete.png)
 
 **Where-used preflight.** Before you confirm, the dialog runs a server-side scan over every Textarea field and lists the pages that still embed each image in their rich text. CKEditor and TinyMCE both insert images through the same `pwimage` plugin with the deterministic URL shape `/site/assets/files/{pageId}/{basename}` (or a sized variation `…/{stem}.WxH.{ext}`), so a single PW selector — `field%='/pageId/stem.'` — catches the original AND every PW-derived variation. The selector route is multilang-, repeater- and access-aware out of the box. Each reference is rendered as a link straight to that page's edit screen (new tab) so you can fix the embed before — or instead of — deleting. The list is advisory; you can still confirm the delete.
+
+## Deduplication
+
+The library fingerprints every managed image by its **exact byte content** and collapses byte-identical copies onto a single file via **hardlinks** — so the same picture used on ten pages costs disk space once, not ten times. It's **lossless and reversible**: the bytes never change, and any copy can be given its own independent file again at any time. Both originals **and** ProcessWire's generated variations (the sized thumbnails that pile up identically in each copy's folder) are deduplicated, across all pages and fields — and page-version files (`…/<id>/v<n>/`) too. The filesystem's own link counts are the source of truth (no manifest table); byte-identity is re-verified immediately before every link, so a wrong link is impossible.
+
+**It runs itself.** De-duplication happens automatically — on every page save (the saved page's images are fingerprinted and any existing byte-identical twin is linked right away), hourly via `LazyCron`, and once as a bounded pass at install to clear any existing backlog. In normal use you never have to think about it.
+
+### Browsing duplicates
+
+- **Duplicates filter** — a *Duplicates* checkbox in the [filter bar](#filtering). It's **contextual**: an image is treated as a duplicate only when ≥2 of its byte-identical copies are present in the *current* filtered view, and each such cluster collapses to a single representative.
+- **Copy-count badge** — duplicated thumbnails (table **and** masonry) carry a small pink pill showing how many identical copies exist (tooltip *"N identical copies"*). It's a plain count, not a multiplier.
+- **Table: expand / collapse** — in the table a duplicate shows as one **head** row with the count pill and a ▸ / ▾ caret; click it (or Enter / Space) to reveal or hide the other copies grouped beneath. Pagination counts a whole cluster as one unit, so a cluster never straddles a page break.
+- **Masonry: cluster modal** — in the gallery a duplicate is a single tile (with the count badge); clicking it opens a modal listing every copy as an editable mini-table, so you can edit — or delete — each copy individually. The modal is titled with the filename and closes with **Close**.
+
+![A duplicate cluster in the table view: one head row carrying the pink copy-count pill and a ▸/▾ caret, expanded to reveal the other byte-identical copy rows grouped beneath it](docs/screenshots/16-duplicates.png)
+
+### Reclaiming disk (config page)
+
+The **Deduplication** fieldset at the bottom of [Module configuration](#module-configuration) shows the current saving and offers manual tools — needed only to process a large existing backlog immediately or to undo, since the automatic passes keep things linked day to day.
+
+- **Status** — a live read-out: *Disk space reclaimed*, *Copies sharing a file*, *Exact-duplicate clusters*. When nothing is collapsed it shows *"Nothing is collapsed right now — run 'Scan and reclaim' below to free space."*
+- **Scan and reclaim (live)** — fingerprints the whole library and hardlinks every byte-identical copy, with a live progress panel: a phase line, a progress bar, a per-cluster log (`• <name> [N copies]: …`) and a running totals line. The Status block updates as it goes.
+- **Re-measure** — a real disk-usage audit: logical size (what FTP / backup sees) vs actual `du`, and the **space saved by hardlinks**, plus a breakdown for page-version files (including why any standalone ones weren't linked).
+- **Revert (un-share all)** — gives every collapsed copy its own independent file again, undoing the saving (the next pass re-collapses them). It confirms first.
+
+![Module config "Deduplication" fieldset: the Status read-out (disk space reclaimed, copies sharing a file, exact-duplicate clusters) above the "Scan and reclaim (live)", "Re-measure" and "Revert (un-share all)" buttons](docs/screenshots/17-dedup-config.png)
+
+![The live progress panel during "Scan and reclaim": a phase line "Reclaiming clusters… X / Y", a progress bar, a totals line, and a monospace log of per-cluster entries](docs/screenshots/18-dedup-progress.png)
+
+> **Caveat.** Backup / deploy tooling that doesn't preserve hardlinks (`rsync` without `-H`, plain `tar` / `cp`, syncing to another mount) re-expands the links over time — it never corrupts anything, and the hourly background pass re-links them on its next run.
 
 ## Export / Import
 
