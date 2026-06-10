@@ -175,7 +175,7 @@ Storage piggy-backs on `$user->meta('imageLibraryPrefs')` alongside the existing
 
 Where a [bookmark](#bookmarks) saves a *filter*, a **collection** saves a *specific, hand-picked set of images* — useful when the set can't be expressed as a filter (e.g. filter to `red +flowers`, then keep only the three you actually want). Collections live in the same tab strip as bookmarks, marked with an icon, and work in the admin **and** the picker — handy for pulling up a curated set while inserting images.
 
-![The bookmark / collection tab strip: filter bookmark tabs followed by icon-marked collection tabs, with the "+ Add collection" button shown while images are selected, plus the save-collection name dialog](docs/screenshots/13-collections.png)
+![The bookmark / collection tab strip ("Show all", a "Flowers" collection, a "Red" collection, "+ Add collection") above the masonry gallery, with several flower tiles ticked via their selection checkboxes](docs/screenshots/13-collections.png)
 
 **Storage, not URL.** A collection stores its image identity keys (`pageId:fieldName:basename`) as data in `$user->meta('imageLibraryPrefs')` under `collections`, each as `{ id, name, keys[] }`. Recall is a short `?coll=<id>` URL — a 100-image collection is a ~12-character link, never a multi-kilobyte query string that would blow past URL limits. The server resolves the id back to the key set and filters the grid to it.
 
@@ -330,11 +330,13 @@ The library fingerprints every managed image by its **exact byte content** and c
 ### Browsing duplicates
 
 - **Duplicates filter** — a *Duplicates* checkbox in the [filter bar](#filtering). It's **contextual**: an image is treated as a duplicate only when ≥2 of its byte-identical copies are present in the *current* filtered view, and each such cluster collapses to a single representative.
-- **Copy-count badge** — duplicated thumbnails (table **and** masonry) carry a small pink pill showing how many identical copies exist (tooltip *"N identical copies"*). It's a plain count, not a multiplier.
+- **Copy-count badge** — duplicated thumbnails (table **and** masonry) carry a small colored pill showing how many identical copies exist (tooltip *"N identical copies"*). It's a plain count, not a multiplier. (The pill takes the admin theme's accent colour, so its exact hue varies.)
 - **Table: expand / collapse** — in the table a duplicate shows as one **head** row with the count pill and a ▸ / ▾ caret; click it (or Enter / Space) to reveal or hide the other copies grouped beneath. Pagination counts a whole cluster as one unit, so a cluster never straddles a page break.
 - **Masonry: cluster modal** — in the gallery a duplicate is a single tile (with the count badge); clicking it opens a modal listing every copy as an editable mini-table, so you can edit — or delete — each copy individually. The modal is titled with the filename and closes with **Close**.
 
-![A duplicate cluster in the table view: one head row carrying the pink copy-count pill and a ▸/▾ caret, expanded to reveal the other byte-identical copy rows grouped beneath it](docs/screenshots/16-duplicates.png)
+![A duplicate cluster in the table view: one head row carrying the colored copy-count pill and a ▸/▾ caret, expanded to reveal the other byte-identical copy rows grouped beneath it](docs/screenshots/16-duplicates.png)
+
+![The masonry cluster modal: a duplicated tile opened to a mini-table of all its copies, each row editable individually, with a Close button](docs/screenshots/19-cluster-modal.png)
 
 ### Reclaiming disk (config page)
 
@@ -421,7 +423,7 @@ A **Choose from library** button is appended to every `InputfieldImage` in the p
 
 **Version-aware.** When the page editor is working in a [PagesVersions](https://processwire.com/) version, the pick lands in that version's files folder (`…/<id>/v<n>/`), not the live page — and is de-duplicated on the spot.
 
-![Page editor with an image field: the native "Choose File" control next to the added "Choose from library" button, and the library opened as a modal picker with selection checkboxes and a "Use selected" bar](docs/screenshots/14-image-field-picker.png)
+![A page editor's image field with its thumbnails, showing the added "Choose from library" button right below the native "Choose File" control](docs/screenshots/14-image-field-picker.png)
 
 ### Rich-text insert
 
@@ -429,7 +431,7 @@ A **Choose from library** button is appended to every `InputfieldImage` in the p
 
 An **Insert from library** button (gallery icon) joins the toolbar of every TinyMCE and CKEditor field, right next to the native image button — in the admin **and** the front-end inline editor (PageFrontEdit). It opens the picker; a single pick hands straight off to ProcessWire's own image dialog (crop / resize / caption / align) pointed at the library file, and the `<img>` is only inserted once you confirm there — nothing is dropped into the page beforehand. Multiple picks insert directly. The embedded `<img>` references the shared library file, so no copy is made.
 
-![A CKEditor / TinyMCE toolbar with the "Insert from library" gallery-icon button next to the native image button, and the library picker open in a modal above the editor](docs/screenshots/15-richtext-insert.png)
+![The TinyMCE and CKEditor toolbars side by side, each carrying the "Insert from library" gallery-icon button next to the native image button](docs/screenshots/15-richtext-insert.png)
 
 ## Performance
 
