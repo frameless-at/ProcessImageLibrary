@@ -3363,16 +3363,12 @@
 				if (!isShared || canManageShared) li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
 				ul.insertBefore(li, addLi);
 			}
+			// Ordered by TYPE, not owner: all bookmarks (personal then team),
+			// then all collections (personal then team). No separator — shared
+			// tabs are distinguished only typographically (ml-bookmark--shared).
 			bookmarks.forEach(function (b, idx) { addBookmarkLi(b, idx, false); });
-			collections.forEach(function (c) { addCollectionLi(c, false); });
-			// Team-wide shared entries follow, set off by a thin separator.
-			if (sharedBookmarks.length || sharedCollections.length) {
-				var sep = document.createElement('li');
-				sep.className = 'ml-bookmarks-sep';
-				sep.setAttribute('aria-hidden', 'true');
-				ul.insertBefore(sep, addLi);
-			}
 			sharedBookmarks.forEach(function (b, idx) { addBookmarkLi(b, idx, true); });
+			collections.forEach(function (c) { addCollectionLi(c, false); });
 			sharedCollections.forEach(function (c) { addCollectionLi(c, true); });
 			syncBookmarkActive();
 		}

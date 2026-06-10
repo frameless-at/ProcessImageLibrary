@@ -5503,103 +5503,63 @@ class ProcessImageLibrary extends Process {
 			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
 			. $allLabel . '</a></li>';
 
+		// Tab strip ordered by TYPE, not by owner: first ALL filter bookmarks
+		// (personal then team), then ALL collections (personal then team). No
+		// separator — shared entries are told apart purely typographically
+		// (.ml-bookmark--shared: italic/lighter), and their × (edit/delete) only
+		// renders for users who may manage the team store.
 		$bookmarkMatched = false;
-		foreach ($bookmarks as $idx => $b) {
-			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
-			$href  = $page->url . $canon;
-			$isActive = ($canon !== '' && $canon === $currentCanon);
-			if ($isActive) $bookmarkMatched = true;
-			$active = $isActive ? ' class="uk-active"' : '';
-			$out .= '<li' . $active . ' data-bookmark-idx="' . (int) $idx . '">'
-				. '<a class="ml-bookmark"'
-				. ' href="' . $san->entities($href) . '"'
-				. ' data-qs="' . $san->entities($canon) . '">'
-				. $san->entities((string) $b['name'])
-				. '</a>'
-				. '<button type="button" class="ml-bookmark-del"'
-				. ' aria-label="' . $delTitle . '"'
-				. ' title="' . $delTitle . '">'
-				. '<i class="fa fa-times" aria-hidden="true"></i>'
-				. '</button>'
-				. '</li>';
-		}
 
-		// Collection tabs (saved image sets) after the filter bookmarks, in the
-		// same strip but icon-marked. Recalled via ?coll=<id>.
-		foreach ($collections as $c) {
-			$cid = (string) ($c['id'] ?? '');
-			if ($cid === '') continue;
-			$qs = '?coll=' . rawurlencode($cid);
-			$active = ($cid === $currentColl) ? ' class="uk-active"' : '';
-			$out .= '<li' . $active . ' data-coll-id="' . $san->entities($cid) . '">'
-				. '<a class="ml-bookmark ml-bookmark--collection"'
-				. ' href="' . $san->entities($page->url . $qs) . '"'
-				. ' data-qs="' . $san->entities($qs) . '">'
-				. '<i class="fa fa-clone" aria-hidden="true"></i> '
-				. $san->entities((string) ($c['name'] ?? ''))
-				. '</a>'
-				// Curate actions are cursor-driven, not buttons: while a selection
-				// exists, clicking a collection tab adds (non-active) or removes
-				// (active) the selection — the cursor signals which. The × below
-				// only deletes the collection (and is hidden during selection).
-				. '<button type="button" class="ml-bookmark-del"'
-				. ' aria-label="' . $collDelTitle . '"'
-				. ' title="' . $collDelTitle . '">'
-				. '<i class="fa fa-times" aria-hidden="true"></i>'
-				. '</button>'
-				. '</li>';
-		}
-
-		// Shared (team-wide) entries follow the personal ones, set off by a thin
-		// separator and styled italic/lighter (.ml-bookmark--shared) — a purely
-		// typographic distinction, no extra icon. Everyone sees and recalls them;
-		// the × (edit/delete) only renders for users who may manage the team store.
-		$hasShared = !empty($sharedBookmarks) || !empty($sharedCollections);
-		if ($hasShared) {
-			$out .= '<li class="ml-bookmarks-sep" aria-hidden="true"></li>';
-		}
-		foreach ($sharedBookmarks as $idx => $b) {
+		$renderBookmark = function (array $b, int $idx, bool $shared) use ($san, $page, $currentCanon, $currentColl, $delTitle, $canManageShared, &$bookmarkMatched): string {
 			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
 			$href  = $page->url . $canon;
 			$isActive = ($canon !== '' && $canon === $currentCanon && $currentColl === '');
 			if ($isActive) $bookmarkMatched = true;
-			$active = $isActive ? ' class="uk-active"' : '';
-			$out .= '<li' . $active . ' data-shared="1" data-bookmark-idx="' . (int) $idx . '">'
-				. '<a class="ml-bookmark ml-bookmark--shared"'
+			$cls = 'ml-bookmark' . ($shared ? ' ml-bookmark--shared' : '');
+			return '<li' . ($isActive ? ' class="uk-active"' : '') . ($shared ? ' data-shared="1"' : '') . ' data-bookmark-idx="' . $idx . '">'
+				. '<a class="' . $cls . '"'
 				. ' href="' . $san->entities($href) . '"'
 				. ' data-qs="' . $san->entities($canon) . '">'
 				. $san->entities((string) $b['name'])
 				. '</a>'
-				. ($canManageShared
+				. ((!$shared || $canManageShared)
 					? '<button type="button" class="ml-bookmark-del"'
-						. ' aria-label="' . $delTitle . '"'
-						. ' title="' . $delTitle . '">'
-						. '<i class="fa fa-times" aria-hidden="true"></i>'
-						. '</button>'
+						. ' aria-label="' . $delTitle . '" title="' . $delTitle . '">'
+						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
 					: '')
 				. '</li>';
-		}
-		foreach ($sharedCollections as $c) {
+		};
+
+		$renderCollection = function (array $c, bool $shared) use ($san, $page, $currentColl, $collDelTitle, $canManageShared): string {
 			$cid = (string) ($c['id'] ?? '');
-			if ($cid === '') continue;
+			if ($cid === '') return '';
 			$qs = '?coll=' . rawurlencode($cid);
-			$active = ($cid === $currentColl) ? ' class="uk-active"' : '';
-			$out .= '<li' . $active . ' data-shared="1" data-coll-id="' . $san->entities($cid) . '">'
-				. '<a class="ml-bookmark ml-bookmark--collection ml-bookmark--shared"'
+			$cls = 'ml-bookmark ml-bookmark--collection' . ($shared ? ' ml-bookmark--shared' : '');
+			// Curate actions are cursor-driven, not buttons: while a selection
+			// exists, clicking a collection tab adds (non-active) or removes
+			// (active) the selection — the cursor signals which. The × only
+			// deletes the collection (and is hidden during selection).
+			return '<li' . ($cid === $currentColl ? ' class="uk-active"' : '') . ($shared ? ' data-shared="1"' : '') . ' data-coll-id="' . $san->entities($cid) . '">'
+				. '<a class="' . $cls . '"'
 				. ' href="' . $san->entities($page->url . $qs) . '"'
 				. ' data-qs="' . $san->entities($qs) . '">'
 				. '<i class="fa fa-clone" aria-hidden="true"></i> '
 				. $san->entities((string) ($c['name'] ?? ''))
 				. '</a>'
-				. ($canManageShared
+				. ((!$shared || $canManageShared)
 					? '<button type="button" class="ml-bookmark-del"'
-						. ' aria-label="' . $collDelTitle . '"'
-						. ' title="' . $collDelTitle . '">'
-						. '<i class="fa fa-times" aria-hidden="true"></i>'
-						. '</button>'
+						. ' aria-label="' . $collDelTitle . '" title="' . $collDelTitle . '">'
+						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
 					: '')
 				. '</li>';
-		}
+		};
+
+		// Bookmarks first (personal, then team) …
+		foreach ($bookmarks as $idx => $b)       $out .= $renderBookmark($b, (int) $idx, false);
+		foreach ($sharedBookmarks as $idx => $b) $out .= $renderBookmark($b, (int) $idx, true);
+		// … then collections (personal, then team).
+		foreach ($collections as $c)       $out .= $renderCollection($c, false);
+		foreach ($sharedCollections as $c) $out .= $renderCollection($c, true);
 
 		// Add button rightmost — opens the name-dialog. Server-side it's hidden
 		// unless a non-saved filter is active; the JS additionally reveals it
