@@ -1119,6 +1119,17 @@ textarea.ml-langtabs-pane {
 .ml-popup-tag-list label:hover {
 	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
 }
+/* "Add a new tag" row beneath the predefined checkboxes (tags mode 3),
+   set off by a thin rule. The input carries the field's autocomplete
+   datalist; Enter / comma turns what's typed into a checked tag chip. */
+.ml-popup-tag-add {
+	margin-top: 0.6rem;
+	padding-top: 0.6rem;
+	border-top: 1px solid var(--pw-border-color, #e5e5e5);
+}
+.ml-popup-tag-add .ml-popup-input {
+	width: 100%;
+}
 
 /* Column visibility — picker lives inside .ml-columns-dialog,
    opened from the "Columns…" button in the pagination row. CSS

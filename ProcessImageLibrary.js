@@ -389,6 +389,9 @@
 			if (subfield === 'tags' && tagsMode === 2) {
 				return buildPopupCheckboxes(td, original);
 			}
+			if (subfield === 'tags' && tagsMode === 3) {
+				return buildPopupTagsAddable(td, original);
+			}
 			if (subfield === 'tags' && tagsMode === 1) {
 				return buildPopupTextInput(original, td.dataset.tagsListId || '');
 			}
@@ -860,6 +863,83 @@
 					var first = wrap.querySelector('input[type="checkbox"]');
 					if (first) first.focus();
 				}
+			};
+		}
+
+		// Tags mode 3 ("predefined + can input their own"): the predefined tags
+		// as a checkbox group (like mode 2), PLUS an input to add brand-new tags
+		// — typed tags appear as checked chips. getValue collects every checked
+		// box, so picks and new tags save together. New tags pass server-side
+		// because the whitelist gate only fires for mode 2.
+		function buildPopupTagsAddable(td, original) {
+			var allowed = [];
+			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
+			catch (e) { allowed = []; }
+
+			var current = original.split(/\s+/).filter(Boolean);
+			var currentSet = Object.create(null);
+			current.forEach(function (t) { currentSet[t] = true; });
+
+			var wrap = document.createElement('div');
+			wrap.className = 'ml-popup-tag-list';
+			var boxes = Object.create(null);   // tag => checkbox (also the dedupe set)
+
+			function addChip(tag, checked) {
+				if (boxes[tag]) { if (checked) boxes[tag].checked = true; return boxes[tag]; }
+				var label = document.createElement('label');
+				var cb = document.createElement('input');
+				cb.type = 'checkbox';
+				cb.className = 'uk-checkbox';
+				cb.value = tag;
+				cb.checked = !!checked;
+				label.appendChild(cb);
+				label.appendChild(document.createTextNode(' ' + tag));
+				wrap.appendChild(label);
+				boxes[tag] = cb;
+				return cb;
+			}
+
+			// Predefined first (checked if already on the image) …
+			allowed.forEach(function (tag) { addChip(tag, !!currentSet[tag]); });
+			// … then any existing tags that aren't in the predefined list.
+			current.forEach(function (tag) { addChip(tag, true); });
+
+			// Add-new row: a text input with the field's autocomplete datalist.
+			var addRow = document.createElement('div');
+			addRow.className = 'ml-popup-tag-add';
+			var input = document.createElement('input');
+			input.type = 'text';
+			input.className = 'ml-popup-input';
+			input.placeholder = labels.tagAddPlaceholder || 'Add tag…';
+			var listId = td.dataset.tagsListId || '';
+			if (listId) input.setAttribute('list', listId);
+			addRow.appendChild(input);
+
+			// Fold whatever is typed into chips (space / comma separated). Used
+			// on Enter/comma and again at save time so a typed-but-not-confirmed
+			// tag isn't lost.
+			function flush() {
+				input.value.split(/[\s,]+/).filter(Boolean).forEach(function (tag) {
+					addChip(tag, true);
+				});
+				input.value = '';
+			}
+			input.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); flush(); input.focus(); }
+			});
+
+			var container = document.createElement('div');
+			container.appendChild(wrap);
+			container.appendChild(addRow);
+
+			return {
+				element: container,
+				getValue: function () {
+					flush();
+					var sel = wrap.querySelectorAll('input[type="checkbox"]:checked');
+					return Array.prototype.map.call(sel, function (cb) { return cb.value; }).join(' ');
+				},
+				focus: function () { input.focus(); }
 			};
 		}
 

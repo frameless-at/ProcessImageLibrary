@@ -1588,7 +1588,7 @@ class ProcessImageLibrary extends Process {
 
 		return $pager
 			. $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
-			. $this->renderTagDatalists($usedTags)
+			. $this->renderTagDatalists($usedTags, $tagsConfig)
 			. $pager;
 	}
 
@@ -1901,18 +1901,36 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Render one <datalist> per image field whose tags are free-form
-	 * (useTags=1). The text input in the editor references it via
-	 * list="ml-tags-used-<field>" for native browser autocomplete.
+	 * Render one <datalist> per image field that needs tag autocomplete: the
+	 * free-form (mode 1) and predefined-plus-own (mode 3) fields. The editor's
+	 * text input references it via list="ml-tags-used-<field>". Suggestions are
+	 * the tags already used in the library, plus — for mode-3 fields — the
+	 * field's predefined tags (so they're offered even before first use).
+	 *
+	 * @param array<string,array<int,string>> $usedTags
+	 * @param array<string,array{mode:int,allowed:array<int,string>}> $tagsConfig
 	 */
-	protected function renderTagDatalists(array $usedTags): string {
-		if (!$usedTags) return '';
+	protected function renderTagDatalists(array $usedTags, array $tagsConfig = []): string {
 		$san = $this->wire('sanitizer');
-		$out = '';
+		$byField = [];   // field => set of suggestion strings
 		foreach ($usedTags as $field => $tags) {
+			foreach ($tags as $t) $byField[$field][$t] = true;
+		}
+		// Mode-3 fields suggest their predefined tags too, even if unused yet.
+		foreach ($tagsConfig as $field => $cfg) {
+			if (($cfg['mode'] ?? 0) === 3) {
+				foreach ($cfg['allowed'] as $t) $byField[$field][$t] = true;
+			}
+		}
+		if (!$byField) return '';
+
+		$out = '';
+		foreach ($byField as $field => $set) {
+			$tags = array_keys($set);
+			sort($tags);
 			$out .= '<datalist id="ml-tags-used-' . $san->entities($field) . '">';
 			foreach ($tags as $t) {
-				$out .= '<option value="' . $san->entities($t) . '">';
+				$out .= '<option value="' . $san->entities((string) $t) . '">';
 			}
 			$out .= '</datalist>';
 		}
@@ -2180,8 +2198,9 @@ class ProcessImageLibrary extends Process {
 		foreach ($cluster as &$r) { $r['dupCount'] = 0; $r['dupHash'] = ''; }
 		unset($r);
 
-		return $this->renderTable($cluster, $customCols, $filters, '', '', $this->getTagsConfig())
-			. $this->renderTagDatalists($this->collectUsedTagsByField($cluster));
+		$tagsConfig = $this->getTagsConfig();
+		return $this->renderTable($cluster, $customCols, $filters, '', '', $tagsConfig)
+			. $this->renderTagDatalists($this->collectUsedTagsByField($cluster), $tagsConfig);
 	}
 
 	/**
@@ -2300,8 +2319,9 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 
-		// useTags=2 (whitelist): reject any token that isn't in the configured
-		// tagsList. Splits on whitespace + commas to match PW's own parsing.
+		// Tag modes: whitelist (2) rejects any token not in the configured
+		// tagsList; predefined-plus-own (3) accepts anything but still
+		// normalises separators. Splits on whitespace + commas to match PW.
 		if ($subfield === 'tags') {
 			$tagsCfg = $this->getTagsConfig()[$fieldName] ?? ['mode' => 0, 'allowed' => []];
 			if ($tagsCfg['mode'] === 2) {
@@ -2314,6 +2334,8 @@ class ProcessImageLibrary extends Process {
 				}
 				// Normalize separator to single space for consistency.
 				$value = implode(' ', $tokens);
+			} elseif ($tagsCfg['mode'] === 3) {
+				$value = implode(' ', $this->splitTags($value));
 			}
 		}
 
@@ -5236,6 +5258,8 @@ class ProcessImageLibrary extends Process {
 				'close'            => $this->_('Close'),
 				// Label next to the checkbox widget for a boolean custom subfield.
 				'enabled'          => $this->_('Enabled'),
+				// Placeholder for the "add a new tag" input on predefined+own fields.
+				'tagAddPlaceholder' => $this->_('Add tag…'),
 				'rename'           => $this->_('New filename'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
@@ -6031,11 +6055,16 @@ class ProcessImageLibrary extends Process {
 						)) . '">—</td>';
 				} else {
 					$tagAttrs = ' data-tags-mode="' . (int) $tagCfg['mode'] . '"';
-					if ($tagCfg['mode'] === 2) {
+					// Predefined set (checkbox group) for whitelist (2) AND
+					// predefined-plus-own (3).
+					if ($tagCfg['mode'] === 2 || $tagCfg['mode'] === 3) {
 						$tagAttrs .= " data-tags-allowed='" . $san->entities(
 							json_encode(array_values($tagCfg['allowed']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
 						) . "'";
-					} elseif ($tagCfg['mode'] === 1) {
+					}
+					// Autocomplete datalist for free-form (1) AND the add-tag
+					// input of predefined-plus-own (3).
+					if ($tagCfg['mode'] === 1 || $tagCfg['mode'] === 3) {
 						$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
 							. $san->entities((string) $row['fieldName']) . '"';
 					}

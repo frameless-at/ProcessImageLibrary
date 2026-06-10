@@ -41,13 +41,16 @@ trait ImageLibraryDiscovery {
 	 *
 	 * Effective mode for our editor (NOT the raw PW useTags value):
 	 *   0 = tags disabled
-	 *   1 = free-form (useTags set but no tagsList content)
-	 *   2 = whitelist (tagsList has parseable content)
+	 *   1 = free-form (text input, any tag)
+	 *   2 = whitelist (predefined tags only — checkbox group)
+	 *   3 = predefined + the user may also add their own
 	 *
-	 * Why we don't trust $field->useTags directly: modern PW stores useTags
-	 * as a bit-mask of feature flags (1=manual, 2=list, 4=…, 8=…), so the
-	 * value can be e.g. 8 when the user enabled a whitelist. Our editor only
-	 * cares whether a list is present, so we key off tagsList content.
+	 * PW stores useTags as a bit-mask (FieldtypeFile constants): useTagsNormal
+	 * (1) = the user may type their own tags, useTagsPredefined (8) = a
+	 * predefined list is offered. The field-config dropdown exposes the four
+	 * meaningful combinations: 0, 1, 8, and 1|8 = 9 ("predefined + can input
+	 * their own"). We read those bits directly so a field set to 9 isn't
+	 * mistaken for a strict whitelist.
 	 *
 	 * @return array<string,array{mode:int,allowed:array<int,string>}>
 	 */
@@ -56,13 +59,16 @@ trait ImageLibraryDiscovery {
 		foreach ($this->wire('fields') as $field) {
 			if (!($field->type instanceof FieldtypeImage)) continue;
 
-			$useTagsRaw = $field->useTags;
+			$useTagsRaw = (int) $field->useTags;
 			$rawList    = (string) $field->tagsList;
 			$allowed    = $this->splitTags($rawList);
 
+			$hasPredefined = ($useTagsRaw & FieldtypeFile::useTagsPredefined) && $allowed;
+			$allowOwn      = (bool) ($useTagsRaw & FieldtypeFile::useTagsNormal);
+
 			$effective = 0;
 			if ($useTagsRaw) {
-				$effective = $allowed ? 2 : 1;
+				$effective = $hasPredefined ? ($allowOwn ? 3 : 2) : 1;
 			}
 
 			$out[$field->name] = ['mode' => $effective, 'allowed' => $allowed];
