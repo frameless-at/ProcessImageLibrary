@@ -2995,26 +2995,35 @@ class ProcessImageLibrary extends Process {
 	protected function findImageReferences(array $items): array {
 		if (!$items) return [];
 
-		$needles = [];
-		$byKey   = [];
+		$specs = [];   // key => ['needle' => string, 'regex' => string]
+		$byKey = [];
 		foreach ($items as $item) {
 			$pid = (int) $item['pageId'];
 			$bn  = (string) $item['basename'];
 			if (!$pid || $bn === '') continue;
-			// Stem only — pwimage typically inserts a sized variation
-			// (e.g. foo.500x300.jpg) rather than the original foo.jpg,
-			// so anchoring on `/pid/stem.` catches the original AND
-			// every WxH / WxH-suffix / hidpi variation in one needle.
-			// The trailing literal `.` guards against stem-prefix
-			// collisions like `foo2.jpg` matching a `foo.jpg` needle.
 			$dot  = strrpos($bn, '.');
 			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
 			if ($stem === '') continue;
 			$key = $pid . ':' . $bn;
-			$needles[$key] = '/' . $pid . '/' . $stem . '.';
-			$byKey[$key]   = [];
+			$byKey[$key] = [];
+			$qs = preg_quote($stem, '#');
+			// pwimage embeds this image's file two different ways, and we must
+			// catch BOTH or a rename/delete silently misses the reference:
+			//   - direct, same page:  /<pid>/<stem>.<variation>.<ext>
+			//   - cross-page insert:  /<anyPid>/<stem>.<variation>-pid<pid>[-...].<ext>
+			//     -- "Insert from library" copies a sized variation onto the
+			//       EDITING page and records the source page as -pid<pid> in the
+			//       filename, so the URL pid is the editing page, NOT this image's.
+			// A loose "/<stem>." needle finds candidates of either form cheaply;
+			// the regex then verifies it's really THIS image (a same-stem image
+			// on another page is rejected).
+			$specs[$key] = [
+				'needle' => '/' . $stem . '.',
+				'regex'  => '#/(?:' . $pid . '/' . $qs . '\.'
+					. '|\d+/' . $qs . '\.[^"\'\s/]*-pid' . $pid . '\b)#i',
+			];
 		}
-		if (!$needles) return [];
+		if (!$specs) return [];
 
 		$pages     = $this->wire('pages');
 		$sanitizer = $this->wire('sanitizer');
@@ -3027,19 +3036,22 @@ class ProcessImageLibrary extends Process {
 		}
 		if (!$textareaFields) return $byKey;
 
-		foreach ($needles as $key => $needle) {
-			$escaped = $sanitizer->selectorValue($needle);
+		foreach ($specs as $key => $spec) {
+			$escaped = $sanitizer->selectorValue($spec['needle']);
 			foreach ($textareaFields as $name) {
-				// %= is PW's substring-LIKE operator. include=all so
-				// hidden / unpublished pages are reached too — embeds
-				// live in admin content regardless of front-end state.
-				$selector = $name . '%=' . $escaped . ', include=all';
+				// %= is PW's substring-LIKE operator. include=all so hidden /
+				// unpublished pages are reached too — embeds live in admin
+				// content regardless of front-end state.
 				try {
-					$ids = $pages->findIDs($selector);
+					$ids = $pages->findIDs($name . '%=' . $escaped . ', include=all');
 				} catch (\Throwable $e) {
 					continue;
 				}
 				foreach ($ids as $refId) {
+					$rp = $pages->get((int) $refId);
+					// Verify the field actually references THIS image (the loose
+					// needle also matches a same-stem image on another page).
+					if (!$rp->id || !$this->fieldValueMatches($rp, $name, $spec['regex'])) continue;
 					$byKey[$key][] = [
 						'refPageId'    => (int) $refId,
 						'refFieldName' => $name,
@@ -3363,6 +3375,26 @@ class ProcessImageLibrary extends Process {
 		if ($new === $old) return false;
 		$page->set($fieldName, $new);
 		return true;
+	}
+
+	/**
+	 * Does one textarea field of $page actually contain a URL matching $regex?
+	 * Checks every language slot for multilang fields. Used to confirm a loose
+	 * "/<stem>." candidate really references the image we're looking for.
+	 */
+	protected function fieldValueMatches(Page $page, string $fieldName, string $regex): bool {
+		$page->of(false);
+		$value = $page->getUnformatted($fieldName);
+		if (is_object($value) && method_exists($value, 'getLanguageValue')) {
+			$languages = $this->wire('languages');
+			if ($languages) {
+				foreach ($languages as $lang) {
+					if (preg_match($regex, (string) $value->getLanguageValue($lang))) return true;
+				}
+				return false;
+			}
+		}
+		return (bool) preg_match($regex, (string) $value);
 	}
 
 	/**
