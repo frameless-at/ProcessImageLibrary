@@ -1094,6 +1094,8 @@
 									selection.add(renamedMap[oldKey]);
 								}
 							});
+							// Keep renamed images in any collection they belong to.
+							migrateCollectionKeys(renamedMap);
 							// Defer the re-render so the green flash plays
 							// before the table swap — matches the single
 							// inline save's flash → breath → action rhythm.
@@ -1163,6 +1165,11 @@
 							if (oldKey !== newKey && selection.has(oldKey)) {
 								selection.delete(oldKey);
 								selection.add(newKey);
+							}
+							// Keep the renamed image in any collection it belongs to.
+							if (oldKey !== newKey) {
+								var rmap = {}; rmap[oldKey] = newKey;
+								migrateCollectionKeys(rmap);
 							}
 							// Defer re-render so the green flash plays
 							// before every basename-bound attr (thumb URL,
@@ -3038,6 +3045,36 @@
 					console.error('[ImageLibrary] save user prefs failed:', err);
 				});
 			}, 400);
+		}
+
+		// A rename changes an image's basename, hence its row key
+		// (pageId:field:basename). Collections store members by that key, so
+		// without this a renamed image silently drops out of every collection it
+		// was in. Re-key the membership in place (personal + shared, if present)
+		// and persist. `map` is { oldKey: newKey }.
+		function migrateCollectionKeys(map) {
+			if (!map || typeof map !== 'object') return;
+			function apply(list) {
+				if (!Array.isArray(list)) return false;
+				var changed = false;
+				list.forEach(function (c) {
+					if (!c || !Array.isArray(c.keys)) return;
+					var seen = Object.create(null), out = [], did = false;
+					c.keys.forEach(function (k) {
+						var nk = Object.prototype.hasOwnProperty.call(map, k) ? map[k] : k;
+						if (nk !== k) did = true;
+						if (!seen[nk]) { seen[nk] = true; out.push(nk); }
+					});
+					if (did) { c.keys = out; changed = true; }
+				});
+				return changed;
+			}
+			if (apply(collections)) saveUserPrefs();
+			// Shared collections only exist on builds that have them.
+			if (typeof sharedCollections !== 'undefined' && apply(sharedCollections)
+				&& typeof saveSharedPrefs === 'function') {
+				saveSharedPrefs();
+			}
 		}
 
 		// -- Thumbnail size slider -------------------------------------
