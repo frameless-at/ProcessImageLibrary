@@ -435,9 +435,12 @@ An **Insert from library** button (gallery icon) joins the toolbar of every Tiny
 
 ![The TinyMCE and CKEditor toolbars side by side, each carrying the "Insert from library" gallery-icon button next to the native image button](docs/screenshots/15-richtext-insert.png)
 
-The same button in the **front-end inline editor** (PageFrontEdit), floating over a live page:
+The same button in the **front-end inline editor** (PageFrontEdit) — TinyMCE (left) and CKEditor (right), floating over a live page:
 
-![A TinyMCE inline-editor toolbar floating over a live front-end page, with the "Insert from library" gallery-icon button in the toolbar](docs/screenshots/22-richtext-frontend.png)
+<table><tr>
+<td><img alt="TinyMCE inline editor floating over a live front-end page, with the Insert from library button in the toolbar" src="docs/screenshots/22-richtext-frontend.png" width="430"></td>
+<td><img alt="CKEditor inline editor floating over a live front-end page, with the Insert from library button in the toolbar" src="docs/screenshots/23-richtext-frontend-cke.png" width="430"></td>
+</tr></table>
 
 A single pick hands off to ProcessWire's own image dialog (crop / resize / caption / align) before the image is inserted:
 
