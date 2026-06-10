@@ -4014,6 +4014,107 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Library-wide tag management PW itself has no tool for: rename a tag (fix a
+	 * typo) or delete it, across the field's predefined list AND every image that
+	 * carries it. POST + CSRF, manager-gated. Params:
+	 *   op    = 'rename' | 'delete'
+	 *   field = image field name
+	 *   tag   = the existing tag
+	 *   newTag= replacement (rename only)
+	 *   apply = '0' → preview only (return affected image count)
+	 *           '1' → apply (retag/untag images, update tagsList)
+	 */
+	public function ___executeTagBulk() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+		if (!$this->canManageShared()) {
+			return $this->jsonError('Not allowed', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+		$field  = $sanitizer->fieldName((string) $input->post('field'));
+		$op     = (string) $input->post('op');
+		$oldTag = trim((string) $input->post('tag'));
+		$apply  = (int) $input->post('apply') === 1;
+
+		if (!in_array($field, $this->discoverImageFields(), true)) {
+			return $this->jsonError('Field is not a managed image field');
+		}
+		if (!in_array($op, ['rename', 'delete'], true) || $oldTag === '') {
+			return $this->jsonError('Invalid request');
+		}
+
+		$newTag = '';
+		if ($op === 'rename') {
+			// Same charset PW enforces for tags: spaces → underscore, then keep
+			// letters / digits / underscore / hyphen.
+			$newTag = preg_replace('/[^A-Za-z0-9_-]/', '', str_replace(' ', '_', trim((string) $input->post('newTag'))));
+			if ($newTag === '') return $this->jsonError('New tag is empty');
+			if (mb_strtolower($newTag) === mb_strtolower($oldTag)) {
+				return $this->jsonError('New tag is unchanged');
+			}
+		}
+
+		$affected = $this->findImagesWithTag($field, $oldTag);
+		$total = 0;
+		foreach ($affected as $bns) $total += count($bns);
+
+		if (!$apply) {
+			return $this->jsonResponse(['ok' => true, 'count' => $total]);
+		}
+
+		// Apply to every affected image via PW's own tag API (case-insensitive,
+		// sanitising). Skip pages the user can't edit.
+		@set_time_limit(180);
+		$pages   = $this->wire('pages');
+		$changed = 0;
+		foreach (array_keys($affected) as $pid) {
+			$page = $pages->get((int) $pid);
+			if (!$page->id || !$page->editable()) continue;
+			$page->of(false);
+			$val = $page->getUnformatted($field);
+			if (!$val) continue;
+			$items = ($val instanceof Pageimage) ? [$val] : $val;   // Pageimages iterable
+			$touched = false;
+			foreach ($items as $img) {
+				if (!$img instanceof Pageimage || !$img->hasTag($oldTag)) continue;
+				$img->removeTag($oldTag);
+				if ($op === 'rename') $img->addTag($newTag);
+				$touched = true;
+				$changed++;
+			}
+			if ($touched) {
+				try { $page->save($field); } catch (\Throwable $e) {
+					$this->wire('log')->error('ImageLibrary: tag bulk save failed for page ' . $pid . ': ' . $e->getMessage());
+				}
+			}
+		}
+
+		$allowed = $this->updateFieldTagList($field, $oldTag, $op === 'rename' ? $newTag : null);
+		$this->wire('cache')->deleteFor($this);   // tags changed → invalidate row cache
+
+		return $this->jsonResponse([
+			'ok'          => true,
+			'op'          => $op,
+			'field'       => $field,
+			'oldTag'      => $oldTag,
+			'newTag'      => $newTag,
+			'count'       => $changed,
+			'tagsAllowed' => array_values($allowed),
+		]);
+	}
+
+	/**
 	 * Canonical bookmark query string: only filter-shaped params
 	 * (q, template, field, tags, no_desc, no_tags, no_custom_*),
 	 * empty values dropped, keys alphabetically sorted. Same shape
@@ -4337,6 +4438,66 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 		return $list;
+	}
+
+	/**
+	 * Rename or delete a tag in a field's predefined list (tagsList). Drops the
+	 * old tag (case-insensitively, incl. any case variants), and for a rename
+	 * appends the new tag if valid + not already present. Returns the updated
+	 * list. The per-image tags are handled separately by the caller.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function updateFieldTagList(string $fieldName, string $oldTag, ?string $newTag): array {
+		$field = $this->wire('fields')->get($fieldName);
+		if (!$field || !($field->type instanceof FieldtypeImage)) return [];
+
+		$oldLc = mb_strtolower($oldTag);
+		$newLc = $newTag !== null ? mb_strtolower($newTag) : '';
+		$out = [];
+		$seen = [];
+		$hasNew = false;
+		foreach ($this->splitTags((string) $field->tagsList) as $t) {
+			if (mb_strtolower($t) === $oldLc) continue;          // drop the old tag
+			$lc = mb_strtolower($t);
+			if (isset($seen[$lc])) continue;
+			$seen[$lc] = true;
+			if ($newLc !== '' && $lc === $newLc) $hasNew = true;
+			$out[] = $t;
+		}
+		if ($newTag !== null && $newTag !== '' && !$hasNew && preg_match('/^[A-Za-z0-9_-]+$/', $newTag)) {
+			$out[] = $newTag;
+		}
+		try {
+			$field->set('tagsList', implode(' ', $out));
+			$this->wire('fields')->save($field);
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: tagsList update failed for ' . $fieldName . ': ' . $e->getMessage());
+		}
+		return $out;
+	}
+
+	/**
+	 * Live images of $fieldName that carry $tag (case-insensitive), grouped
+	 * pageId => [basename, …]. Read from the cached row enumeration, so it's the
+	 * same set the library shows (no version copies). Drives both the affected-
+	 * count preview and the apply pass of the tag rename/delete.
+	 *
+	 * @return array<int,array<int,string>>
+	 */
+	protected function findImagesWithTag(string $fieldName, string $tag): array {
+		$tagLc = mb_strtolower($tag);
+		$out = [];
+		foreach ($this->loadRows() as $r) {
+			if (($r['fieldName'] ?? '') !== $fieldName) continue;
+			foreach (preg_split('/\s+/', (string) ($r['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $t) {
+				if (mb_strtolower($t) === $tagLc) {
+					$out[(int) $r['pageId']][] = (string) $r['basename'];
+					break;
+				}
+			}
+		}
+		return $out;
 	}
 
 	protected function resolvePageimage(Page $page, string $fieldName, string $basename): ?Pageimage {
@@ -5535,6 +5696,8 @@ class ProcessImageLibrary extends Process {
 			'shared'               => $this->getSharedPrefs(),
 			'sharedPrefsUrl'       => $this->wire('page')->url . 'shared-prefs/',
 			'canManageShared'      => $this->canManageShared(),
+			// Library-wide tag rename/delete (predefined tags), manager-gated.
+			'tagBulkUrl'           => $this->wire('page')->url . 'tag-bulk/',
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
@@ -5555,6 +5718,15 @@ class ProcessImageLibrary extends Process {
 				'enabled'          => $this->_('Enabled'),
 				// Placeholder for the "add a new tag" input on predefined+own fields.
 				'tagAddPlaceholder' => $this->_('Add tag…'),
+				// Library-wide tag management (manager-only, in the tag modal).
+				'tagDeleteTitle'    => $this->_('Delete tag'),
+				'tagRenameTitle'    => $this->_('Rename tag'),
+				'tagManageDelete'   => $this->_('Delete the tag “%s” everywhere?'),
+				'tagManageRename'   => $this->_('Rename the tag “%s” to:'),
+				'tagManageAffected' => $this->_('Affects %d image(s).'),
+				'tagManageCounting' => $this->_('Checking…'),
+				'tagDeleted'        => $this->_('Tag deleted from %d image(s)'),
+				'tagRenamed'        => $this->_('Tag renamed on %d image(s)'),
 				'rename'           => $this->_('New filename'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),

@@ -829,6 +829,157 @@
 			};
 		}
 
+		// POST to the tag-bulk endpoint (preview count or apply).
+		function tagBulkFetch(params) {
+			var fd = new FormData();
+			Object.keys(params).forEach(function (k) { fd.append(k, params[k]); });
+			appendCsrf(fd);
+			return fetch(config.tagBulkUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
+				.then(function (r) { return r.json(); });
+		}
+
+		// A small icon button for the manage controls on a predefined-tag chip.
+		function mkTagBtn(cls, icon, title, onClick) {
+			var b = document.createElement('button');
+			b.type = 'button';
+			b.className = 'ml-tag-manage ' + cls;
+			b.title = title;
+			b.setAttribute('aria-label', title);
+			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
+			// preventDefault/stopPropagation so the click doesn't toggle the
+			// neighbouring checkbox or bubble to the cell.
+			b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); onClick(); });
+			return b;
+		}
+
+		// Library-wide rename/delete of a predefined tag — the management PW
+		// itself lacks. Previews the affected image count, then on confirm applies
+		// across the field's predefined list AND every image carrying the tag.
+		function tagManageDialog(op, field, tag, onSuccess) {
+			if (!config.tagBulkUrl || !canManageShared) return;
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-bookmark-dialog ml-tag-manage-dialog';
+
+			var header = document.createElement('header');
+			header.textContent = op === 'delete'
+				? (labels.tagDeleteTitle || 'Delete tag')
+				: (labels.tagRenameTitle || 'Rename tag');
+			dialog.appendChild(header);
+
+			var msg = document.createElement('p');
+			msg.className = 'ml-popup-hint';
+			msg.textContent = (op === 'delete'
+				? (labels.tagManageDelete || 'Delete the tag “%s” everywhere?')
+				: (labels.tagManageRename || 'Rename the tag “%s” to:')).replace('%s', tag);
+			dialog.appendChild(msg);
+
+			var input = null;
+			if (op === 'rename') {
+				input = document.createElement('input');
+				input.type = 'text';
+				input.className = 'uk-input';
+				input.value = tag;
+				input.maxLength = 80;
+				dialog.appendChild(input);
+			}
+
+			var affected = document.createElement('p');
+			affected.className = 'ml-popup-hint ml-tag-affected';
+			affected.textContent = labels.tagManageCounting || 'Checking…';
+			dialog.appendChild(affected);
+
+			var footer = document.createElement('footer');
+			var cancelBtn = document.createElement('button');
+			cancelBtn.type = 'button';
+			cancelBtn.className = 'uk-button uk-button-secondary';
+			cancelBtn.textContent = labels.cancel || 'Cancel';
+			var okBtn = document.createElement('button');
+			okBtn.type = 'button';
+			okBtn.className = 'uk-button uk-button-primary';
+			okBtn.textContent = op === 'delete' ? (labels.deleteOk || 'Delete') : (labels.save || 'Save');
+			footer.appendChild(cancelBtn);
+			footer.appendChild(okBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			function cleanup() { if (dialog.open) dialog.close(); }
+			cancelBtn.addEventListener('click', cleanup);
+
+			// Preview the affected count straight away.
+			tagBulkFetch({ op: op, field: field, tag: tag, apply: 0 }).then(function (d) {
+				if (d && d.ok) {
+					affected.textContent = (labels.tagManageAffected || 'Affects %d image(s).')
+						.replace('%d', d.count);
+				}
+			}).catch(function () {});
+
+			function commit() {
+				var params = { op: op, field: field, tag: tag, apply: 1 };
+				if (op === 'rename') {
+					var nt = (input.value || '').trim();
+					if (!nt) { input.focus(); return; }
+					params.newTag = nt;
+				}
+				okBtn.disabled = true;
+				tagBulkFetch(params).then(function (d) {
+					if (d && d.ok) {
+						announce((op === 'delete'
+							? (labels.tagDeleted || 'Tag deleted from %d image(s)')
+							: (labels.tagRenamed || 'Tag renamed on %d image(s)')).replace('%d', d.count));
+						if (d.tagsAllowed) applyTagsAllowed(d.field, d.tagsAllowed);
+						if (onSuccess) onSuccess(d);
+						cleanup();
+					} else {
+						announce((d && d.error) || labels.error || 'Failed');
+						okBtn.disabled = false;
+					}
+				}).catch(function (err) {
+					console.error('[ImageLibrary] tag manage failed:', err);
+					okBtn.disabled = false;
+				});
+			}
+			okBtn.addEventListener('click', commit);
+			if (input) input.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter') { e.preventDefault(); commit(); }
+			});
+
+			dialog.showModal();
+			if (input) { input.focus(); input.select(); } else okBtn.focus();
+		}
+
+		// One predefined-tag chip: checkbox + label, plus (for managers) rename/
+		// delete controls that act library-wide. Returns the chip <div>; the
+		// checkbox is exposed as chip._cb for the caller's selection map.
+		function buildTagChip(tag, checked, td, predefined) {
+			var chip = document.createElement('div');
+			chip.className = 'ml-tag-chip';
+			var label = document.createElement('label');
+			var cb = document.createElement('input');
+			cb.type = 'checkbox';
+			cb.className = 'uk-checkbox';
+			cb.value = tag;
+			cb.checked = !!checked;
+			var txt = document.createTextNode(' ' + tag);
+			label.appendChild(cb);
+			label.appendChild(txt);
+			chip.appendChild(label);
+			chip._cb = cb;
+
+			var field = td.dataset.field || '';
+			if (predefined && canManageShared && field) {
+				chip.appendChild(mkTagBtn('ml-tag-rename', 'fa-pencil', labels.tagRenameTitle || 'Rename tag', function () {
+					tagManageDialog('rename', field, cb.value, function (res) {
+						if (res && res.newTag) { cb.value = res.newTag; txt.textContent = ' ' + res.newTag; }
+					});
+				}));
+				chip.appendChild(mkTagBtn('ml-tag-delete', 'fa-times', labels.tagDeleteTitle || 'Delete tag', function () {
+					tagManageDialog('delete', field, cb.value, function () { chip.remove(); });
+				}));
+			}
+			return chip;
+		}
+
 		function buildPopupCheckboxes(td, original) {
 			var allowed = [];
 			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
@@ -842,15 +993,7 @@
 			var wrap = document.createElement('div');
 			wrap.className = 'ml-popup-tag-list';
 			allowed.forEach(function (tag) {
-				var label = document.createElement('label');
-				var cb = document.createElement('input');
-				cb.type = 'checkbox';
-				cb.className = 'uk-checkbox';
-				cb.value = tag;
-				cb.checked = !!currentSet[tag];
-				label.appendChild(cb);
-				label.appendChild(document.createTextNode(' ' + tag));
-				wrap.appendChild(label);
+				wrap.appendChild(buildTagChip(tag, !!currentSet[tag], td, true));
 			});
 
 			return {
@@ -884,25 +1027,20 @@
 			wrap.className = 'ml-popup-tag-list';
 			var boxes = Object.create(null);   // tag => checkbox (also the dedupe set)
 
-			function addChip(tag, checked) {
+			// predefined=true gets the manager rename/delete controls; ad-hoc and
+			// freshly-typed tags don't (they aren't in the field list yet).
+			function addChip(tag, checked, predefined) {
 				if (boxes[tag]) { if (checked) boxes[tag].checked = true; return boxes[tag]; }
-				var label = document.createElement('label');
-				var cb = document.createElement('input');
-				cb.type = 'checkbox';
-				cb.className = 'uk-checkbox';
-				cb.value = tag;
-				cb.checked = !!checked;
-				label.appendChild(cb);
-				label.appendChild(document.createTextNode(' ' + tag));
-				wrap.appendChild(label);
-				boxes[tag] = cb;
-				return cb;
+				var chip = buildTagChip(tag, checked, td, !!predefined);
+				wrap.appendChild(chip);
+				boxes[tag] = chip._cb;
+				return chip._cb;
 			}
 
 			// Predefined first (checked if already on the image) …
-			allowed.forEach(function (tag) { addChip(tag, !!currentSet[tag]); });
+			allowed.forEach(function (tag) { addChip(tag, !!currentSet[tag], true); });
 			// … then any existing tags that aren't in the predefined list.
-			current.forEach(function (tag) { addChip(tag, true); });
+			current.forEach(function (tag) { addChip(tag, true, false); });
 
 			// Add-new row: a text input with the field's autocomplete datalist.
 			var addRow = document.createElement('div');
