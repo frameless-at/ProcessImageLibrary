@@ -247,6 +247,44 @@ trait ImageLibraryHashing {
 	}
 
 	/**
+	 * Follow a file rename in the fingerprint + metalock tables: move the row
+	 * from the old basename to the new one, keeping its content_hash intact.
+	 *
+	 * Renaming a file doesn't change its bytes, so the fingerprint is still
+	 * valid — we just re-key it. This must happen on rename because a field-only
+	 * save ($page->save($field), which is what rename does) fires Pages::
+	 * savedField, NOT Pages::saved, so the auto-hash hook never runs to re-key
+	 * it. Without this, the renamed image's row stays under the OLD basename
+	 * while its display row uses the NEW one — they no longer match, so the
+	 * image silently drops out of its duplicate cluster. Both tables are keyed
+	 * (page_id, field_name, basename), so both must follow the rename.
+	 */
+	protected function renameFingerprintRows(int $pageId, string $fieldName, string $oldBasename, string $newBasename): void {
+		if ($oldBasename === '' || $newBasename === '' || $oldBasename === $newBasename) return;
+		$this->ensureHashTable();
+		$this->ensureMetaLockTable();
+		$db = $this->wire('database');
+		foreach ([self::HASH_TABLE, self::METALOCK_TABLE] as $table) {
+			try {
+				// Clear any row already sitting on the new basename (rename guards
+				// against on-disk collisions, but keep the (page,field,basename)
+				// primary key safe), then re-key the old row onto the new name.
+				$del = $db->prepare(
+					'DELETE FROM `' . $table . '` WHERE page_id = ? AND field_name = ? AND basename = ?'
+				);
+				$del->execute([$pageId, $fieldName, $newBasename]);
+				$upd = $db->prepare(
+					'UPDATE `' . $table . '` SET basename = ? WHERE page_id = ? AND field_name = ? AND basename = ?'
+				);
+				$upd->execute([$newBasename, $pageId, $fieldName, $oldBasename]);
+			} catch (\Throwable $e) {
+				$this->wire('log')->error('ImageLibrary: fingerprint rename failed (' . $table . ') for '
+					. $pageId . '/' . $fieldName . ' ' . $oldBasename . ' → ' . $newBasename . ': ' . $e->getMessage());
+			}
+		}
+	}
+
+	/**
 	 * Exact byte hash of a file, or null if unreadable.
 	 */
 	protected function computeContentHash(string $path): ?string {
