@@ -961,7 +961,7 @@
 				}
 				function doDelete() {
 					if (armTimer) { clearTimeout(armTimer); armTimer = null; }
-					tagManageApply('delete', field, cb.value, function () { chip.remove(); });
+					tagManageApply('delete', field, cb.value, null, function () { chip.remove(); });
 				}
 				// Inline rename: the label turns into a text input, the ✎ becomes a
 				// ✓. Enter or ✓ commits, Esc or blur cancels — no second modal.
