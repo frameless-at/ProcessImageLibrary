@@ -6602,6 +6602,26 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Runs automatically when the installed version is older than the file
+	 * version (PW calls it on Modules → Refresh). ___install() does NOT run on
+	 * upgrade, so a site coming from a build that predated the shared-store
+	 * feature never got its permission — without which the "Share with the team"
+	 * checkbox can't appear for non-superusers. Create it here, idempotently.
+	 *
+	 * @param int|string $fromVersion
+	 * @param int|string $toVersion
+	 */
+	public function ___upgrade($fromVersion, $toVersion) {
+		$permissions = $this->wire('permissions');
+		if (!$permissions->get(self::PERMISSION_MANAGE_SHARED)->id) {
+			$p = $permissions->add(self::PERMISSION_MANAGE_SHARED);
+			$p->title = $this->_('Manage shared Image Library bookmarks and collections');
+			$p->save();
+			$this->message("Created permission: " . self::PERMISSION_MANAGE_SHARED);
+		}
+	}
+
+	/**
 	 * Uninstall: remove admin page and clear module cache entries.
 	 */
 	public function ___uninstall() {
