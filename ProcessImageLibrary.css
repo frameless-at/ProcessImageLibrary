@@ -318,11 +318,13 @@
 	content: "\025BE";
 }
 /* Expanded duplicate cluster: tint the revealed copy rows — and the head row
-   while it's open — light grey so the group reads as one block. Applied to the
-   cells (not the <tr>) so it sits above the theme's own row background. */
+   while it's open — so the group reads as one block. Applied to the cells (not
+   the <tr>) so it sits above the theme's own row background. The tint is the
+   theme background nudged ~6% toward the text colour (same color-mix pattern as
+   the hover rows), so it adapts to light / dark instead of a hardcoded grey. */
 .ml-table tbody tr.ml-dup-member:not([hidden]) > td,
 .ml-table tbody tr.ml-dup-head:has(.ml-dup-toggle.ml-dup-open) > td {
-	background: #f0f0f0;
+	background: color-mix(in srgb, var(--pw-main-background, #fff) 94%, var(--pw-text-color, #000) 6%);
 }
 /* Fade-out animation for rows being deleted — JS adds the class
    right before the row is removed from the DOM so the disappear is
