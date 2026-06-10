@@ -537,7 +537,10 @@ class ProcessImageLibrary extends Process {
 			. "\n<script>(function(){var C=$cfg;"
 			. "function reg(){var I=window.InputfieldTinyMCE;if(!I||typeof I.onConfig!=='function')return false;"
 			. "window.ProcessWire=window.ProcessWire||{};ProcessWire.config=ProcessWire.config||{};"
-			. "ProcessWire.config.ImageLibraryInsert=C;"
+			// MERGE, don't overwrite: the CKEditor glue puts iconUrl on this same
+			// shared object, and on a page with BOTH editors a blind reassignment
+			// here would wipe it (racey — the CKE button then renders icon-less).
+			. "var T=ProcessWire.config.ImageLibraryInsert||{};T.pickerUrl=C.pickerUrl;T.pluginUrl=C.pluginUrl;T.label=C.label;ProcessWire.config.ImageLibraryInsert=T;"
 			. "if(I._mlLibReg)return true;I._mlLibReg=true;"
 			. "I.onConfig(function(s){s.external_plugins=s.external_plugins||{};s.external_plugins.mllibrary=C.pluginUrl;"
 			// Place the button right AFTER the native image button (pwimage), to
