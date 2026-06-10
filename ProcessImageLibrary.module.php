@@ -3243,21 +3243,21 @@ class ProcessImageLibrary extends Process {
 		$pages     = $this->wire('pages');
 		$sanitizer = $this->wire('sanitizer');
 
-		// Loose stem-prefix needle finds candidate pages cheaply (catches
-		// the original AND every variation in one query). The trailing
-		// literal '.' guards against stem-prefix collisions (foo. vs foo2.).
-		$needle  = '/' . $pid . '/' . $oldStem . '.';
-		$escaped = $sanitizer->selectorValue($needle);
+		$qOld = preg_quote($oldStem, '#');
+		$qExt = preg_quote($oldExt, '#');
+		// pwimage embeds this image two ways; both rewrite ONLY the stem (via a
+		// lookahead) so any variation — crop, multi-dot, hidpi — is preserved,
+		// and the pinned extension keeps a different-type sibling (foo.png) safe:
+		//   direct:     /<pid>/<stem>.<variation>.<ext>
+		//   cross-page: /<anyPid>/<stem>.<variation>-pid<pid>[-hidpi].<ext>
+		//     — "Insert from library" + crop stores an INDEPENDENT copy on the
+		//       EDITING page (its own folder) and records the source as -pid<pid>.
+		$directRe = '#(/' . $pid . '/)' . $qOld . '(?=\.[^"\'\s/]*' . $qExt . '\b)#i';
+		$crossRe  = '#(/\d+/)' . $qOld . '(?=\.[^"\'\s/]*-pid' . $pid . '\b[^"\'\s/]*' . $qExt . '\b)#i';
 
-		// Precise per-URL pattern: /{pid}/{oldStem}.[{variation}.]{oldExt}
-		// The variation segment is dotless / slashless / quoteless so the
-		// match can never run past the embed's own URL token, and pinning
-		// the old extension keeps different-type siblings safe.
-		$pattern = '#(/' . $pid . '/)'
-			. preg_quote($oldStem, '#')
-			. '(\.(?:[^/"\'\s.]+\.)?'
-			. preg_quote($oldExt, '#')
-			. ')#i';
+		// Loose stem needle finds candidates of EITHER form. A /<pid>/ needle
+		// would miss the cross-page copy, which lives under the editing page's id.
+		$escaped = $sanitizer->selectorValue('/' . $oldStem . '.');
 
 		$refs = [];
 		$seenRefs = [];
@@ -3276,12 +3276,18 @@ class ProcessImageLibrary extends Process {
 				$refPage = ($refId === (int) $ownerPage->id) ? $ownerPage : $pages->get($refId);
 				if (!$refPage->id) continue;
 				try {
-					if ($this->rewriteTextareaField($refPage, $name, $pattern, $newStem)) {
+					if ($this->rewriteTextareaField($refPage, $name, $directRe, $crossRe, $newStem)) {
 						$refPage->save($name);
-						// Rewrite targets the page that actually holds the field
-						// ($refPage, possibly a repeater item); the DISPLAYED ref
-						// resolves to the owning content page so the link is usable.
-						// De-dupe so several repeater items of one owner collapse.
+						// The cross-page copy is an independent file PW regenerates
+						// from the source — once the source is renamed it can't, so
+						// the embed breaks. Rename the copy on the editing page to
+						// the new stem so the rewritten URL resolves (and PW can
+						// regenerate from the now-renamed source too).
+						$this->renameCrossPageCopies($refPage, $oldStem, $newStem, $pid);
+						// Rewrite targets the page that holds the field ($refPage,
+						// possibly a repeater item); the DISPLAYED ref resolves to
+						// the owning content page so the link is usable. De-dupe so
+						// several repeater items of one owner collapse.
 						$ref = $this->usageRefForPage($refPage, $name);
 						$dk  = $ref['pageId'] . ':' . $ref['fieldName'];
 						if (!isset($seenRefs[$dk])) {
@@ -3299,21 +3305,46 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Swap the stem in one textarea field of one page, across every
-	 * language slot, returning true if anything changed (so the caller
-	 * knows whether to save). A preg_replace_callback does the swap so a
-	 * stem containing $ or \ can't corrupt the replacement string.
+	 * Rename the cross-page "Insert from library" copy files this image left on
+	 * another page. Those copies are named "<oldStem>.<variation>-pid<sourcePid>
+	 * …<ext>" in the EDITING page's own files folder — independent of PW's API
+	 * (they're regenerated from the source on render). When the source is
+	 * renamed they'd dangle, so re-stem them here. Only files carrying the exact
+	 * -pid<sourcePid> marker are touched, so an unrelated same-stem image on that
+	 * page is never affected. Filesystem-level, mirroring the dedup engine.
 	 */
-	protected function rewriteTextareaField(Page $page, string $fieldName, string $pattern, string $newStem): bool {
+	protected function renameCrossPageCopies(Page $page, string $oldStem, string $newStem, int $sourcePid): void {
+		$dir = (string) $page->filesPath();
+		if ($dir === '' || !is_dir($dir)) return;
+		$re  = '#^' . preg_quote($oldStem, '#') . '\..*-pid' . $sourcePid . '\b#i';
+		$pfx = $oldStem . '.';
+		foreach (scandir($dir) ?: [] as $bn) {
+			if (strncmp($bn, $pfx, strlen($pfx)) !== 0) continue;   // starts "<oldStem>."
+			if (!preg_match($re, $bn)) continue;                    // …and carries -pid<sourcePid>
+			$newBn = $newStem . substr($bn, strlen($oldStem));
+			if ($newBn !== $bn && !file_exists($dir . $newBn)) {
+				@rename($dir . $bn, $dir . $newBn);
+			}
+		}
+	}
+
+	/**
+	 * Swap the stem in one textarea field of one page (direct + cross-page URL
+	 * forms), across every language slot, returning true if anything changed.
+	 * Both regexes match only up to the stem (lookahead), so the callback just
+	 * replaces the stem — variation/extension are preserved untouched, and a
+	 * stem containing $ or \ can't corrupt the replacement.
+	 */
+	protected function rewriteTextareaField(Page $page, string $fieldName, string $directRe, string $crossRe, string $newStem): bool {
 		$page->of(false);
 		$value = $page->getUnformatted($fieldName);
 
-		$swap = function (string $html) use ($pattern, $newStem): string {
-			$out = preg_replace_callback($pattern, function ($m) use ($newStem) {
-				// $m[1] = "/{pid}/", $m[2] = ".[variation.]ext"
-				return $m[1] . $newStem . $m[2];
-			}, $html);
-			return $out === null ? $html : $out;
+		$swap = function (string $html) use ($directRe, $crossRe, $newStem): string {
+			$cb = function ($m) use ($newStem) { return $m[1] . $newStem; };   // $m[1] = "/<pid>/"
+			$out = preg_replace_callback($directRe, $cb, $html);
+			if ($out === null) $out = $html;
+			$out2 = preg_replace_callback($crossRe, $cb, $out);
+			return $out2 === null ? $out : $out2;
 		};
 
 		// Multilang textarea — a LanguagesPageFieldValue. Rewrite each
