@@ -44,8 +44,8 @@
 			});
 		}
 
-		// TinyMCE's built-in "gallery" icon (crisp + native to TinyMCE). CKEditor
-		// can't reuse it, so it gets its own pixel-aligned PNG (assets/insert-icon.png).
+		// TinyMCE's built-in "gallery" icon. CKEditor can't reuse it, so it gets a
+		// pixel-aligned PNG of the SAME glyph (assets/insert-icon.png) — both match.
 		editor.ui.registry.addButton('mllibrary', {
 			icon: 'gallery',
 			tooltip: cfg().label || 'Insert from library',
