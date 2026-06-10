@@ -3930,7 +3930,10 @@ class ProcessImageLibrary extends Process {
 		//   v7: created + modified stored as DATETIME strings, not
 		//       Unix-int casts (PW's DB schema is DATETIME; v6 cast
 		//       lost everything past the year).
-		return 'rows-v7-' . substr(md5((string) json_encode($keyData)), 0, 16);
+		//   v8: enumeration selector gained check_access=0 (buildSelector) so
+		//       the row set is access-independent — a fresh key discards any
+		//       cache poisoned by an earlier guest/cron-context rebuild.
+		return 'rows-v8-' . substr(md5((string) json_encode($keyData)), 0, 16);
 	}
 
 	/**
@@ -4090,7 +4093,19 @@ class ProcessImageLibrary extends Process {
 	protected function buildSelector(array $eligibleTemplates): string {
 		if (!$eligibleTemplates) return 'id=0';
 		// include=hidden returns published + hidden, excludes unpublished and trash.
-		return 'template=' . implode('|', $eligibleTemplates) . ', include=hidden';
+		//
+		// check_access=0 is essential: findRaw() applies front-end view access by
+		// default, so the SAME selector returns fewer pages when run as a guest
+		// (e.g. an hourly LazyCron maintenance pass triggered by a front-end
+		// visitor) than as the superuser viewing the admin. The flattened row
+		// list is cached GLOBALLY (one key per discovery state, not per user), so
+		// whichever request rebuilds the cache first decides what everyone sees —
+		// a guest-context rebuild would poison it with a truncated set (and make
+		// pruneOrphanedRows delete the "missing" pages' fingerprints, collapsing
+		// the duplicate view). The library is an admin audit tool gated by its own
+		// image-library-access permission; per-page edit rights are still enforced
+		// separately. So enumerate EVERY managed image regardless of viewer access.
+		return 'template=' . implode('|', $eligibleTemplates) . ', include=hidden, check_access=0';
 	}
 
 	/**
