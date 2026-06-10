@@ -5460,6 +5460,9 @@ class ProcessImageLibrary extends Process {
 				// beforehand we confirm afterwards which embeds were fixed.
 				'renameDoneTitle'  => $this->_('Renamed'),
 				'embedsUpdatedHeading' => $this->_('Updated embedded references:'),
+				// Advisory pre-rename warning when the image is still embedded.
+				'renameUsageTitle' => $this->_('Heads up — still embedded in other pages'),
+				'renameAnyway'     => $this->_('Rename anyway'),
 				// Field-dropdown label when a template is active — %s is
 				// the template name. The JS swaps "All image fields" for
 				// this so the user isn't told "all" while non-template
