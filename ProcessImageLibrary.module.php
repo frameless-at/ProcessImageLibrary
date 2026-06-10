@@ -51,6 +51,10 @@ class ProcessImageLibrary extends Process {
 
 	const ADMIN_PAGE_NAME = 'image-library';
 	const PERMISSION_NAME = 'image-library-access';
+	// Gates create/edit/delete of the SHARED (team-wide) bookmarks and
+	// collections. Everyone with PERMISSION_NAME sees and uses them; only
+	// holders of this permission may change them.
+	const PERMISSION_MANAGE_SHARED = 'image-library-manage-shared';
 	const CACHE_PREFIX = 'image-library-';
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
@@ -310,6 +314,48 @@ class ProcessImageLibrary extends Process {
 			'thumbScale'  => $thumbScale,
 			'viewMode'    => $viewMode,
 		];
+	}
+
+	/**
+	 * May the current user create/edit/delete the SHARED (team-wide)
+	 * bookmarks and collections? Superusers always; otherwise the
+	 * PERMISSION_MANAGE_SHARED permission. Everyone with library access
+	 * still SEES and USES the shared entries — this gates writes only.
+	 */
+	protected function canManageShared(): bool {
+		$user = $this->wire('user');
+		return $user->isSuperuser() || $user->hasPermission(self::PERMISSION_MANAGE_SHARED);
+	}
+
+	/**
+	 * The team-wide shared store, read from module config. Same shape as
+	 * the per-user prefs for bookmarks/collections, but visible to every
+	 * user with library access and editable only by canManageShared().
+	 *
+	 * @return array{bookmarks:array<int,array{name:string,qs:string}>,collections:array<int,array{id:string,name:string,keys:array<int,string>}>}
+	 */
+	protected function getSharedPrefs(): array {
+		$cfg = $this->wire('modules')->getConfig($this);
+		$bookmarks = [];
+		$collections = [];
+		if (is_array($cfg)) {
+			if (isset($cfg['sharedBookmarks']) && is_array($cfg['sharedBookmarks'])) {
+				foreach ($cfg['sharedBookmarks'] as $b) {
+					if (!is_array($b)) continue;
+					$name = (string) ($b['name'] ?? '');
+					$qs   = (string) ($b['qs']   ?? '');
+					if ($name === '') continue;
+					$bookmarks[] = ['name' => $name, 'qs' => $qs];
+				}
+			}
+			if (isset($cfg['sharedCollections']) && is_array($cfg['sharedCollections'])) {
+				foreach ($cfg['sharedCollections'] as $c) {
+					$clean = $this->sanitizeCollection($c);
+					if ($clean !== null) $collections[] = $clean;
+				}
+			}
+		}
+		return ['bookmarks' => $bookmarks, 'collections' => $collections];
 	}
 
 	/** The whitelist of persisted result-layout modes (table vs masonry).
@@ -3723,6 +3769,66 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Write the team-wide SHARED bookmarks + collections to module config.
+	 * Same payload shape as executeUserPrefs (bookmarks[], collections[]),
+	 * but gated by canManageShared() and persisted via saveConfig so every
+	 * user with library access reads the result through getSharedPrefs().
+	 * The full list is replaced on each call (the client sends the desired
+	 * end-state), other config keys are preserved.
+	 */
+	public function ___executeSharedPrefs() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+		if (!$this->canManageShared()) {
+			return $this->jsonError('Not allowed', 403);
+		}
+
+		$raw = (string) $this->wire('input')->post('prefs');
+		$data = $raw !== '' ? json_decode($raw, true) : null;
+		if (!is_array($data)) {
+			return $this->jsonError('Invalid payload');
+		}
+
+		$sanitizer = $this->wire('sanitizer');
+		$bookmarks = [];
+		$collections = [];
+		if (isset($data['bookmarks']) && is_array($data['bookmarks'])) {
+			foreach ($data['bookmarks'] as $b) {
+				if (!is_array($b)) continue;
+				$name = $sanitizer->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
+				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
+				if ($name === '') continue;
+				$bookmarks[] = ['name' => $name, 'qs' => $qs];
+				if (count($bookmarks) >= self::COLLECTION_MAX) break;
+			}
+		}
+		if (isset($data['collections']) && is_array($data['collections'])) {
+			foreach ($data['collections'] as $c) {
+				$col = $this->sanitizeCollection($c);
+				if ($col !== null) $collections[] = $col;
+				if (count($collections) >= self::COLLECTION_MAX) break;
+			}
+		}
+
+		$cfg = $this->wire('modules')->getConfig($this);
+		if (!is_array($cfg)) $cfg = [];
+		$cfg['sharedBookmarks']   = $bookmarks;
+		$cfg['sharedCollections'] = $collections;
+		$this->wire('modules')->saveConfig($this, $cfg);
+
+		return $this->jsonResponse(['ok' => true]);
+	}
+
+	/**
 	 * Canonical bookmark query string: only filter-shaped params
 	 * (q, template, field, tags, no_desc, no_tags, no_custom_*),
 	 * empty values dropped, keys alphabetically sorted. Same shape
@@ -4220,6 +4326,11 @@ class ProcessImageLibrary extends Process {
 		$id = preg_replace('/[^a-z0-9]/i', '', $id) ?? '';
 		if ($id === '') return [];
 		foreach ($this->getUserPrefs()['collections'] as $c) {
+			if (($c['id'] ?? '') === $id) return $c['keys'];
+		}
+		// Personal collections win on id-collision; fall through to the
+		// team-wide shared store so ?coll=<id> resolves shared sets too.
+		foreach ($this->getSharedPrefs()['collections'] as $c) {
 			if (($c['id'] ?? '') === $id) return $c['keys'];
 		}
 		return [];
@@ -6361,6 +6472,12 @@ class ProcessImageLibrary extends Process {
 			$p->save();
 			$this->message("Created permission: " . self::PERMISSION_NAME);
 		}
+		if (!$permissions->get(self::PERMISSION_MANAGE_SHARED)->id) {
+			$p = $permissions->add(self::PERMISSION_MANAGE_SHARED);
+			$p->title = $this->_('Manage shared Image Library bookmarks and collections');
+			$p->save();
+			$this->message("Created permission: " . self::PERMISSION_MANAGE_SHARED);
+		}
 
 		// LazyCron powers the hourly maintenance safety net — install it so
 		// auto-reclaim keeps running without any manual trigger.
@@ -6378,6 +6495,10 @@ class ProcessImageLibrary extends Process {
 		$cache = $this->wire('cache');
 		$cache->deleteFor($this, '*');
 		$this->dropHashTable();
+
+		$permissions = $this->wire('permissions');
+		$shared = $permissions->get(self::PERMISSION_MANAGE_SHARED);
+		if ($shared->id) $permissions->delete($shared);
 
 		parent::___uninstall();
 	}
