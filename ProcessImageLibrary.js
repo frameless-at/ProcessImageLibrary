@@ -1301,7 +1301,15 @@
 					});
 					return;
 					};
-					doRename();
+					// Advisory where-used preflight (mirrors delete): if any page
+					// still embeds the file by its current basename, warn before
+					// committing. The rename then auto-rewrites embeds anyway — this
+					// just stops a silent surprise when a rewrite can't reach one
+					// (unusual embed URL, etc.). No embeds → proceeds straight away.
+					var renameItems = batch
+						? selectionItems()
+						: [{ pageId: td.dataset.pageId, fieldName: td.dataset.field, basename: td.dataset.basename }];
+					confirmRename(renameItems, doRename);
 					return;
 				}
 
@@ -2179,6 +2187,53 @@
 		// were updated (with links), so the editor can see what changed.
 		// Only shown when at least one embed was rewritten — a plain
 		// rename just flashes the cell green.
+		// Where-used preflight for rename (advisory, mirrors the delete confirm).
+		// If any item is still embedded by its current basename, show a confirm
+		// dialog listing the pages so the editor knows before committing; with no
+		// embeds it proceeds straight away (no dialog).
+		function confirmRename(items, onConfirm) {
+			fetchUsage(items).then(function (usage) {
+				var hasRefs = items.some(function (it) {
+					return (usage[it.pageId + ':' + it.basename] || []).length > 0;
+				});
+				if (!hasRefs) { onConfirm(); return; }
+
+				var dialog = document.createElement('dialog');
+				dialog.className = 'ml-delete-confirm';
+
+				var header = document.createElement('header');
+				header.textContent = labels.renameUsageTitle
+					|| 'Heads up — still embedded in other pages';
+				dialog.appendChild(header);
+
+				var holder = document.createElement('div');
+				holder.className = 'ml-delete-confirm-usage';
+				dialog.appendChild(holder);
+				renderUsageBlock(holder, items, usage);
+
+				var footer = document.createElement('footer');
+				var cancelBtn = document.createElement('button');
+				cancelBtn.type = 'button';
+				cancelBtn.className = 'uk-button uk-button-secondary';
+				cancelBtn.textContent = labels.cancel || 'Cancel';
+				var okBtn = document.createElement('button');
+				okBtn.type = 'button';
+				okBtn.className = 'uk-button uk-button-primary';
+				okBtn.textContent = labels.renameAnyway || 'Rename anyway';
+				footer.appendChild(cancelBtn);
+				footer.appendChild(okBtn);
+				dialog.appendChild(footer);
+
+				document.body.appendChild(dialog);
+				function cleanup() { if (dialog.open) dialog.close(); dialog.remove(); }
+				cancelBtn.addEventListener('click', cleanup);
+				dialog.addEventListener('close', function () { dialog.remove(); });
+				okBtn.addEventListener('click', function () { cleanup(); onConfirm(); });
+				dialog.showModal();
+				okBtn.focus();
+			});
+		}
+
 		function renameSummaryDialog(oldBasename, newBasename, refs) {
 			var dialog = document.createElement('dialog');
 			dialog.className = 'ml-delete-confirm';
