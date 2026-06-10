@@ -571,7 +571,7 @@ class ProcessImageLibrary extends Process {
 		$cfg = json_encode([
 			'pickerUrl' => $libUrl . '?picker=1&modal=1&pick_mode=insert',
 			'pluginUrl' => $this->assetUrl('assets/insert-cke.js'),
-			'iconUrl'   => $this->assetUrl('assets/insert-icon.svg'),
+			'iconUrl'   => $this->assetUrl('assets/insert-icon.png'),
 			'label'     => $this->_('Insert from library'),
 		], JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
 
@@ -586,6 +586,12 @@ class ProcessImageLibrary extends Process {
 		// patched config whenever it inits (admin on ready, front-end on click).
 		return $this->richtextCommonLoader()
 			. "\n<script>(function(){var C=$cfg;"
+			// Display the @2x (32px) icon PNG at 16px so it's crisp on retina AND
+			// normal screens. Injected once (guarded id); CKE sets the image via
+			// btn.icon, this only pins the render size + centring.
+			. "if(!document.getElementById('ml-cke-icon')){var st=document.createElement('style');st.id='ml-cke-icon';"
+			. "st.textContent='.cke_button__pwimagelibrary_icon{background-size:16px 16px!important;background-position:center!important}';"
+			. "(document.head||document.documentElement).appendChild(st);}"
 			. "function patch(f){if(!f||typeof f!=='object')return;var ep=f.extraPlugins||'';"
 			. "if((','+ep+',').indexOf(',mllibrary,')===-1)f.extraPlugins=ep?ep+',mllibrary':'mllibrary';"
 			. "var tb=f.toolbar;if(Object.prototype.toString.call(tb)==='[object Array]'){var d=false;"

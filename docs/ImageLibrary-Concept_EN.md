@@ -64,7 +64,7 @@ ProcessImageLibrary/
 │   ├── insert-mce.js                 # add-on: TinyMCE "Insert from library" adapter
 │   ├── insert-cke.js                 # add-on: CKEditor 4 "Insert from library" adapter
 │   ├── insert-common.js              # add-on: shared picker / native-dialog logic
-│   └── insert-icon.svg               # add-on: CKEditor toolbar icon
+│   └── insert-icon.png / .svg        # add-on: CKEditor toolbar icon (PNG @2x shipped, SVG source)
 ├── src/
 │   ├── ImageLibraryDiscovery.php     # trait: image-field / template / tags-config introspection
 │   ├── ImageLibraryMultilang.php     # trait: per-language read/write, name⇄id mapping
