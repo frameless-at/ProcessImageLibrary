@@ -288,6 +288,12 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$stats = ($instance instanceof ProcessImageLibrary)
 			? $instance->dedupStats()
 			: ['reclaimedHuman' => '0', 'linkedCount' => 0, 'clusterCount' => 0];
+		// Image-level figures from the SAME source as the library views, so the
+		// Status can't disagree with "Show all" / "Duplicates". Kept separate
+		// from the disk facts in $stats (hardlinked file count incl. thumbnails).
+		$lib = ($instance instanceof ProcessImageLibrary)
+			? $instance->libraryStats()
+			: ['placements' => 0, 'images' => 0, 'duplicateSets' => 0, 'duplicateCopies' => 0];
 
 		// Pass raw URLs (literal &) — InputfieldButton entity-encodes the href
 		// attribute itself; pre-encoding would double it.
@@ -318,22 +324,46 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		// same rows live so the block stays honest after a run without a reload.
 		$linked     = (int) $stats['linkedCount'];
 		$hasReclaim = $linked > 0;
-		$clusters   = (int) $stats['clusterCount'];
 		$hide       = $hasReclaim ? '' : ' hidden';
+
+		$images  = (int) $lib['images'];
+		$dupSets = (int) $lib['duplicateSets'];
+		$dupCopies = (int) $lib['duplicateCopies'];
+		// "133 sets · 672 redundant copies" — or a plain "none" when clean.
+		$dupText = $dupSets > 0
+			? sprintf($this->_('%1$s sets · %2$s redundant copies'), number_format($dupSets), number_format($dupCopies))
+			: $this->_('none');
+
 		$status = $modules->get('InputfieldMarkup');
 		$status->label = $this->_('Status');
 		$status->value =
 			'<div class="ml-dedup-status">'
-			. '<ul class="uk-list uk-list-divider ml-stat-list" style="margin:0' . ($hasReclaim || $clusters ? '' : ';display:none') . '">'
+			// Library (image-level): always shown, and reconciles exactly with the
+			// "Show all" total and the "Duplicates" view in the library itself.
+			. '<div class="ml-stat-group ml-stat-group-library">'
+			. '<div class="ml-stat-group-title uk-text-muted">' . $san->entities($this->_('Library')) . '</div>'
+			. '<ul class="uk-list uk-list-divider ml-lib-stat-list" style="margin:0">'
+			. '<li>' . $san->entities($this->_('Images')) . ': <strong>' . number_format($images) . '</strong> '
+			. '<span class="uk-text-muted ml-stat-note">' . $san->entities($this->_('(distinct — exact duplicates collapsed)')) . '</span></li>'
+			. '<li>' . $san->entities($this->_('Duplicate images')) . ': <strong>' . $san->entities($dupText) . '</strong></li>'
+			. '</ul>'
+			. '</div>'
+			// Disk reclaim (filesystem-level): a much larger, lower-level file
+			// count — NOT a count of duplicate images. Only meaningful once
+			// something is actually collapsed, so it hides until then.
+			. '<div class="ml-stat-group ml-stat-group-disk">'
+			. '<div class="ml-stat-group-title uk-text-muted">' . $san->entities($this->_('Disk reclaim')) . '</div>'
+			. '<ul class="uk-list uk-list-divider ml-stat-list" style="margin:0' . ($hasReclaim ? '' : ';display:none') . '">'
 			. '<li class="ml-stat-row-reclaimed"' . $hide . '>' . $san->entities($this->_('Disk space reclaimed')) . ': <strong class="ml-stat-reclaimed">' . $san->entities((string) $stats['reclaimedHuman']) . '</strong></li>'
-			. '<li class="ml-stat-row-shared"' . $hide . '>' . $san->entities($this->_('Copies sharing a file')) . ': <strong class="ml-stat-shared">' . $linked . '</strong></li>'
-			. '<li class="ml-stat-row-clusters"' . ($clusters ? '' : ' hidden') . '>' . $san->entities($this->_('Exact-duplicate clusters')) . ': <strong class="ml-stat-clusters">' . $clusters . '</strong></li>'
+			. '<li class="ml-stat-row-shared"' . $hide . '>' . $san->entities($this->_('Hardlinked files')) . ': <strong class="ml-stat-shared">' . number_format($linked) . '</strong> '
+			. '<span class="uk-text-muted ml-stat-note">' . $san->entities($this->_('(every shared file — originals, thumbnails and page-version copies)')) . '</span></li>'
 			. '</ul>'
 			. '<p class="ml-stat-empty uk-text-muted uk-margin-remove"' . ($hasReclaim ? ' hidden' : '') . '>'
 			. $san->entities($this->_('Nothing is collapsed right now — run “Scan and reclaim” below to free space.'))
 			. '</p>'
+			. '</div>'
 			. '</div>';
-		$status->notes = $this->_('A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.');
+		$status->notes = $this->_('“Library” counts images the way the table does; “Disk reclaim” counts files on disk (each image has several thumbnail variations, and page versions add copies), so its numbers are legitimately much larger. A scan also runs automatically on every save and hourly in the background — running it here is only needed to reclaim a large existing backlog immediately. Caveat: backup/deploy tooling that does not preserve hardlinks (rsync without -H, plain tar/cp, syncing to another mount) re-expands them over time; the background pass re-links them on its next run.');
 		$fs->add($status);
 
 		// Tools at the BOTTOM: one plain-markup block (no InputfieldButton, so

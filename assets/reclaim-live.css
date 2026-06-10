@@ -14,3 +14,20 @@
 .ml-reclaim-log li {
 	padding: 1px 0;
 }
+
+/* Status read-out: two clearly-separated groups (image-level "Library" vs
+   filesystem-level "Disk reclaim") so the much larger disk file count is
+   never misread as a count of duplicate images. */
+.ml-stat-group + .ml-stat-group {
+	margin-top: 0.75rem;
+}
+.ml-stat-group-title {
+	font-size: 0.78rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	margin-bottom: 0.15rem;
+}
+.ml-stat-note {
+	font-size: 0.85em;
+}

@@ -833,6 +833,46 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Image-level library figures, computed from the SAME live row set the
+	 * table ("Show all") and the Duplicates view use — so these numbers can
+	 * never disagree with what those views show. Distinct from dedupStats(),
+	 * which reports DISK facts (every hardlinked file, incl. thumbnail
+	 * variations and page-version copies — a much larger, lower-level count
+	 * that must not be read as "duplicate images").
+	 *
+	 *   placements      every live image placement (each copy counted once)
+	 *   images          distinct images after collapsing exact duplicates
+	 *                   = the "Show all" total (placements − duplicateCopies)
+	 *   duplicateSets   images that have ≥2 byte-identical live copies
+	 *                   = the "Duplicates" view total
+	 *   duplicateCopies redundant placements (Σ over sets of members−1)
+	 *
+	 * @return array{placements:int,images:int,duplicateSets:int,duplicateCopies:int}
+	 */
+	public function libraryStats(): array {
+		$rows    = $this->loadRows();                 // live placements, no version items
+		$keyHash = $this->loadDuplicateKeyHashes();   // identity => content_hash (dup members only)
+
+		$placements = count($rows);
+		$liveByHash = [];
+		foreach ($rows as $r) {
+			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			if ($h !== null) $liveByHash[$h] = ($liveByHash[$h] ?? 0) + 1;
+		}
+		$duplicateSets = 0;
+		$duplicateCopies = 0;
+		foreach ($liveByHash as $n) {
+			if ($n >= 2) { $duplicateSets++; $duplicateCopies += $n - 1; }
+		}
+		return [
+			'placements'      => $placements,
+			'images'          => $placements - $duplicateCopies,
+			'duplicateSets'   => $duplicateSets,
+			'duplicateCopies' => $duplicateCopies,
+		];
+	}
+
+	/**
 	 * Manual "revert" trigger: un-share every collapsed copy (give each its own
 	 * independent file again) and clear the manifest — the reverse of reclaim.
 	 * Time-budgeted; loops the chunked un-share until done or the budget runs
