@@ -1137,13 +1137,13 @@ textarea.ml-langtabs-pane {
 	flex: 0 0 auto;
 	border: 0;
 	background: none;
-	padding: 2px 4px;
-	font-size: 0.8rem;
+	padding: 2px 5px;
+	font-size: 1.05rem;
 	line-height: 1;
 	color: var(--pw-muted-color, #888);
 	cursor: pointer;
 	opacity: 0;
-	transition: opacity 0.12s ease-out;
+	transition: opacity 0.12s ease-out, color 0.12s ease-out;
 }
 .ml-tag-chip:hover .ml-tag-manage,
 .ml-tag-manage:focus-visible {
@@ -1151,7 +1151,20 @@ textarea.ml-langtabs-pane {
 }
 .ml-tag-rename:hover { color: var(--pw-main-color, #5b8cd6); }
 .ml-tag-delete:hover { color: #c33; }
-/* The affected-count line in the tag manage dialog. */
+/* While inline-renaming, the ✎ has become a ✓ — keep it visible + tinted. */
+.ml-tag-manage.ml-tag-confirm {
+	opacity: 1;
+	color: #2a8a2a;
+}
+/* Inline rename input — replaces the chip's label in place. */
+.ml-tag-edit-input {
+	flex: 1 1 auto;
+	min-width: 0;
+	height: auto;
+	padding: 0.15rem 0.35rem;
+	font-size: 0.95em;
+}
+/* The affected-count line in the tag delete dialog. */
 .ml-tag-affected {
 	font-style: italic;
 }

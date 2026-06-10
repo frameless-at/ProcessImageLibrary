@@ -951,6 +951,37 @@
 		// One predefined-tag chip: checkbox + label, plus (for managers) rename/
 		// delete controls that act library-wide. Returns the chip <div>; the
 		// checkbox is exposed as chip._cb for the caller's selection map.
+		// Apply a tag rename/delete library-wide WITHOUT a confirm dialog (used by
+		// the inline rename). Toasts the affected count the server reports back.
+		function tagManageApply(op, field, tag, newTag, onSuccess) {
+			if (!config.tagBulkUrl || !canManageShared) return;
+			var params = { op: op, field: field, tag: tag, apply: 1 };
+			if (op === 'rename') params.newTag = newTag;
+			tagBulkFetch(params).then(function (d) {
+				if (d && d.ok) {
+					announce((op === 'delete'
+						? (labels.tagDeleted || 'Tag deleted from %d image(s)')
+						: (labels.tagRenamed || 'Tag renamed on %d image(s)')).replace('%d', d.count));
+					if (d.tagsAllowed) applyTagsAllowed(d.field, d.tagsAllowed);
+					if (onSuccess) onSuccess(d);
+				} else {
+					announce((d && d.error) || labels.error || 'Failed');
+				}
+			}).catch(function (err) { console.error('[ImageLibrary] tag apply failed:', err); });
+		}
+
+		// Find an existing chip checkbox in the same list whose tag matches (case-
+		// insensitive), excluding one. Used to merge a rename onto an existing tag.
+		function findChipCheckbox(parent, tag, exceptCb) {
+			if (!parent) return null;
+			var lc = tag.toLowerCase();
+			var found = null;
+			parent.querySelectorAll('.ml-tag-chip input[type="checkbox"]').forEach(function (b) {
+				if (b !== exceptCb && b.value.toLowerCase() === lc) found = b;
+			});
+			return found;
+		}
+
 		function buildTagChip(tag, checked, td, predefined) {
 			var chip = document.createElement('div');
 			chip.className = 'ml-tag-chip';
@@ -968,14 +999,74 @@
 
 			var field = td.dataset.field || '';
 			if (predefined && canManageShared && field) {
-				chip.appendChild(mkTagBtn('ml-tag-rename', 'fa-pencil', labels.tagRenameTitle || 'Rename tag', function () {
-					tagManageDialog('rename', field, cb.value, function (res) {
-						if (res && res.newTag) { cb.value = res.newTag; txt.textContent = ' ' + res.newTag; }
-					});
-				}));
-				chip.appendChild(mkTagBtn('ml-tag-delete', 'fa-times', labels.tagDeleteTitle || 'Delete tag', function () {
+				var input = null;   // the inline-edit input while renaming, else null
+
+				var renBtn = mkTagBtn('ml-tag-rename', 'fa-pencil', labels.tagRenameTitle || 'Rename tag', function () {
+					if (input) commitEdit(); else startEdit();
+				});
+				var delBtn = mkTagBtn('ml-tag-delete', 'fa-times', labels.tagDeleteTitle || 'Delete tag', function () {
 					tagManageDialog('delete', field, cb.value, function () { chip.remove(); });
-				}));
+				});
+				chip.appendChild(renBtn);
+				chip.appendChild(delBtn);
+
+				function setRenIcon(name, title) {
+					var i = renBtn.querySelector('i'); if (i) i.className = 'fa ' + name;
+					renBtn.title = title; renBtn.setAttribute('aria-label', title);
+					renBtn.classList.toggle('ml-tag-confirm', name === 'fa-check');
+				}
+				// Inline rename: the label turns into a text input, the ✎ becomes a
+				// ✓. Enter or ✓ commits, Esc or blur cancels — no second modal.
+				function startEdit() {
+					input = document.createElement('input');
+					input.type = 'text';
+					input.className = 'ml-tag-edit-input uk-input';
+					input.value = cb.value;
+					label.style.display = 'none';
+					chip.insertBefore(input, renBtn);
+					setRenIcon('fa-check', labels.save || 'Save');
+					input.focus();
+					input.select();
+					input.addEventListener('keydown', function (e) {
+						if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
+						else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+					});
+					// Blur cancels — but clicking ✓ blurs the input first, so defer
+					// and let the ✓ click commit (which clears `input`) win.
+					input.addEventListener('blur', function () {
+						setTimeout(function () { if (input) cancelEdit(); }, 150);
+					});
+				}
+				function endEdit() {
+					if (input) { input.remove(); input = null; }
+					label.style.display = '';
+					setRenIcon('fa-pencil', labels.tagRenameTitle || 'Rename tag');
+				}
+				function cancelEdit() { endEdit(); }
+				function commitEdit() {
+					if (!input) return;
+					var nt  = (input.value || '').trim().replace(/\s+/g, '_');
+					var old = cb.value;
+					var parent = chip.parentNode;
+					endEdit();
+					if (nt === '' || nt.toLowerCase() === old.toLowerCase()) return;
+					// Duplicate (same as adding): if the new tag already exists, drop
+					// this chip and check the existing one — the server merges too.
+					var existing = findChipCheckbox(parent, nt, cb);
+					var wasChecked = cb.checked;
+					tagManageApply('rename', field, old, nt, function (res) {
+						var name = (res && res.newTag) || nt;
+						if (existing) {
+							// merged: this image now carries the existing tag iff it
+							// had either tag before.
+							existing.checked = existing.checked || wasChecked;
+							chip.remove();
+						} else {
+							cb.value = name;
+							txt.textContent = ' ' + name;
+						}
+					});
+				}
 			}
 			return chip;
 		}
