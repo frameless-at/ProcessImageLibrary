@@ -3001,37 +3001,55 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 
-		$cache = [];
+		$pageCache = [];
 		foreach ($byKey as $key => $refs) {
 			$out  = [];
 			$seen = [];
 			foreach ($refs as $r) {
 				$pid = $r['refPageId'];
 				$fn  = $r['refFieldName'];
-				$dedup = $pid . ':' . $fn;
+
+				if (!array_key_exists($pid, $pageCache)) {
+					$p = $pages->get($pid);
+					$pageCache[$pid] = $p->id ? $p : null;
+				}
+				if (!$pageCache[$pid]) continue;
+
+				$ref = $this->usageRefForPage($pageCache[$pid], $fn);
+				// De-dupe on the RESOLVED target so multiple repeater items of the
+				// same owner + field collapse to one actionable entry.
+				$dedup = $ref['pageId'] . ':' . $ref['fieldName'];
 				if (isset($seen[$dedup])) continue;
 				$seen[$dedup] = true;
-
-				if (!array_key_exists($pid, $cache)) {
-					$p = $pages->get($pid);
-					$cache[$pid] = $p->id ? [
-						'title' => (string) $p->get('title|name'),
-						'edit'  => $p->editable() ? (string) $p->editUrl() : '',
-					] : null;
-				}
-				if (!$cache[$pid]) continue;
-
-				$out[] = [
-					'pageId'    => $pid,
-					'pageTitle' => $cache[$pid]['title'],
-					'editUrl'   => $cache[$pid]['edit'],
-					'fieldName' => $fn,
-				];
+				$out[] = $ref;
 			}
 			$byKey[$key] = $out;
 		}
 
 		return $byKey;
+	}
+
+	/**
+	 * Resolve a page that embeds an image (in a rich-text field) to an
+	 * ACTIONABLE where-used entry. When the embed lives on a (Matrix)Repeater
+	 * item page — whose name is an internal id like "1705154010-188-1" and whose
+	 * editUrl opens nowhere useful — walk up to the owning content page and link
+	 * there instead, tagging the field with the repeater field for context
+	 * ("blocks › left_col"). Non-repeater pages pass through unchanged.
+	 *
+	 * @return array{pageId:int,pageTitle:string,editUrl:string,fieldName:string}
+	 */
+	protected function usageRefForPage(Page $refPage, string $fieldName): array {
+		$owner  = method_exists($refPage, 'getForPageRoot') ? $refPage->getForPageRoot() : null;
+		$rfield = method_exists($refPage, 'getForField') ? $refPage->getForField() : null;
+		$useOwner = ($owner && $owner->id && $owner->id !== $refPage->id);
+		$target = $useOwner ? $owner : $refPage;
+		return [
+			'pageId'    => (int) $target->id,
+			'pageTitle' => (string) $target->get('title|name'),
+			'editUrl'   => $target->editable() ? (string) $target->editUrl() : '',
+			'fieldName' => ($useOwner && $rfield) ? ($rfield->name . ' › ' . $fieldName) : $fieldName,
+		];
 	}
 
 	/**
@@ -3205,6 +3223,7 @@ class ProcessImageLibrary extends Process {
 			. ')#i';
 
 		$refs = [];
+		$seenRefs = [];
 		foreach ($this->wire('fields') as $field) {
 			if (!($field->type instanceof FieldtypeTextarea)) continue;
 			$name = $field->name;
@@ -3222,12 +3241,16 @@ class ProcessImageLibrary extends Process {
 				try {
 					if ($this->rewriteTextareaField($refPage, $name, $pattern, $newStem)) {
 						$refPage->save($name);
-						$refs[] = [
-							'pageId'    => (int) $refPage->id,
-							'pageTitle' => (string) $refPage->get('title|name'),
-							'fieldName' => $name,
-							'editUrl'   => $refPage->editable() ? (string) $refPage->editUrl() : '',
-						];
+						// Rewrite targets the page that actually holds the field
+						// ($refPage, possibly a repeater item); the DISPLAYED ref
+						// resolves to the owning content page so the link is usable.
+						// De-dupe so several repeater items of one owner collapse.
+						$ref = $this->usageRefForPage($refPage, $name);
+						$dk  = $ref['pageId'] . ':' . $ref['fieldName'];
+						if (!isset($seenRefs[$dk])) {
+							$seenRefs[$dk] = true;
+							$refs[] = $ref;
+						}
 					}
 				} catch (\Throwable $e) {
 					// One un-writable reference must not abort the rename or
