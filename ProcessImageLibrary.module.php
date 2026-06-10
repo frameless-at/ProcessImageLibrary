@@ -557,11 +557,11 @@ class ProcessImageLibrary extends Process {
 
 	/**
 	 * The same idea as tinyMceGlueScript(), for CKEditor 4 (legacy editor still
-	 * used by older sites). CKEditor has no PW onConfig hook, so we use its own
-	 * client API: register the external plugin, then on each editor's
-	 * `configLoaded` (fires before plugins/UI load) add our plugin to
-	 * extraPlugins and the "PWImageLibrary" button to the toolbar (next to the
-	 * native PWImage button). The plugin file behaves like the TinyMCE one:
+	 * used by older sites). CKEditor has no PW onConfig hook, so instead of
+	 * racing an init event we patch its config DATA directly (see the inline
+	 * comment below): register the external plugin and add 'mllibrary' to
+	 * extraPlugins + the "PWImageLibrary" button to the toolbar, next to the
+	 * native PWImage button. The plugin file behaves like the TinyMCE one:
 	 * opens the picker, inserts the image, hands off to PW's image dialog.
 	 */
 	protected function ckEditorGlueScript(): string {
