@@ -846,6 +846,9 @@
 			b.title = title;
 			b.setAttribute('aria-label', title);
 			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
+			// mousedown preventDefault keeps focus on the inline-edit input so a
+			// click on ✓ commits instead of blurring (which would cancel).
+			b.addEventListener('mousedown', function (e) { e.preventDefault(); });
 			// preventDefault/stopPropagation so the click doesn't toggle the
 			// neighbouring checkbox or bubble to the cell.
 			b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); onClick(); });
@@ -1028,14 +1031,15 @@
 					input.focus();
 					input.select();
 					input.addEventListener('keydown', function (e) {
-						if (e.key === 'Enter') { e.preventDefault(); commitEdit(); }
-						else if (e.key === 'Escape') { e.preventDefault(); cancelEdit(); }
+						// stopPropagation so Enter/Esc never reach the tag modal (it
+						// would otherwise Save/close the whole cell editor).
+						if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commitEdit(); }
+						else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
 					});
-					// Blur cancels — but clicking ✓ blurs the input first, so defer
-					// and let the ✓ click commit (which clears `input`) win.
-					input.addEventListener('blur', function () {
-						setTimeout(function () { if (input) cancelEdit(); }, 150);
-					});
+					// Blur cancels. Clicking the ✓ / × buttons no longer blurs the
+					// input (their mousedown preventDefault keeps focus), so a blur
+					// here always means the user clicked truly elsewhere.
+					input.addEventListener('blur', function () { cancelEdit(); });
 				}
 				function endEdit() {
 					if (input) { input.remove(); input = null; }
@@ -1049,7 +1053,9 @@
 					var old = cb.value;
 					var parent = chip.parentNode;
 					endEdit();
-					if (nt === '' || nt.toLowerCase() === old.toLowerCase()) return;
+					// Exact compare (NOT lowercased) so a case-only fix
+					// ("poppy" → "Poppy") counts as a real change.
+					if (nt === '' || nt === old) return;
 					// Duplicate (same as adding): if the new tag already exists, drop
 					// this chip and check the existing one — the server merges too.
 					var existing = findChipCheckbox(parent, nt, cb);

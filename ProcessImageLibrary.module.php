@@ -4060,7 +4060,10 @@ class ProcessImageLibrary extends Process {
 			// letters / digits / underscore / hyphen.
 			$newTag = preg_replace('/[^A-Za-z0-9_-]/', '', str_replace(' ', '_', trim((string) $input->post('newTag'))));
 			if ($newTag === '') return $this->jsonError('New tag is empty');
-			if (mb_strtolower($newTag) === mb_strtolower($oldTag)) {
+			// Exact compare so a case-only fix ("poppy" → "Poppy") is allowed —
+			// PW's tag API is case-insensitive on the key but preserves the stored
+			// case, so removeTag(old) + addTag(new) actually changes the casing.
+			if ($newTag === $oldTag) {
 				return $this->jsonError('New tag is unchanged');
 			}
 		}
