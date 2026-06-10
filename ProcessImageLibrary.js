@@ -855,105 +855,6 @@
 			return b;
 		}
 
-		// Library-wide rename/delete of a predefined tag — the management PW
-		// itself lacks. Previews the affected image count, then on confirm applies
-		// across the field's predefined list AND every image carrying the tag.
-		function tagManageDialog(op, field, tag, onSuccess) {
-			if (!config.tagBulkUrl || !canManageShared) return;
-			var dialog = document.createElement('dialog');
-			dialog.className = 'ml-bookmark-dialog ml-tag-manage-dialog';
-
-			var header = document.createElement('header');
-			header.textContent = op === 'delete'
-				? (labels.tagDeleteTitle || 'Delete tag')
-				: (labels.tagRenameTitle || 'Rename tag');
-			dialog.appendChild(header);
-
-			var msg = document.createElement('p');
-			msg.className = 'ml-popup-hint';
-			msg.textContent = (op === 'delete'
-				? (labels.tagManageDelete || 'Delete the tag “%s” everywhere?')
-				: (labels.tagManageRename || 'Rename the tag “%s” to:')).replace('%s', tag);
-			dialog.appendChild(msg);
-
-			var input = null;
-			if (op === 'rename') {
-				input = document.createElement('input');
-				input.type = 'text';
-				input.className = 'uk-input';
-				input.value = tag;
-				input.maxLength = 80;
-				dialog.appendChild(input);
-			}
-
-			var affected = document.createElement('p');
-			affected.className = 'ml-popup-hint ml-tag-affected';
-			affected.textContent = labels.tagManageCounting || 'Checking…';
-			dialog.appendChild(affected);
-
-			var footer = document.createElement('footer');
-			var cancelBtn = document.createElement('button');
-			cancelBtn.type = 'button';
-			cancelBtn.className = 'uk-button uk-button-secondary';
-			cancelBtn.textContent = labels.cancel || 'Cancel';
-			var okBtn = document.createElement('button');
-			okBtn.type = 'button';
-			okBtn.className = 'uk-button uk-button-primary';
-			okBtn.textContent = op === 'delete' ? (labels.deleteOk || 'Delete') : (labels.save || 'Save');
-			footer.appendChild(cancelBtn);
-			footer.appendChild(okBtn);
-			dialog.appendChild(footer);
-
-			document.body.appendChild(dialog);
-			dialog.addEventListener('close', function () { dialog.remove(); });
-			function cleanup() { if (dialog.open) dialog.close(); }
-			cancelBtn.addEventListener('click', cleanup);
-
-			// Preview the affected count straight away.
-			tagBulkFetch({ op: op, field: field, tag: tag, apply: 0 }).then(function (d) {
-				if (d && d.ok) {
-					affected.textContent = (labels.tagManageAffected || 'Affects %d image(s).')
-						.replace('%d', d.count);
-				}
-			}).catch(function () {});
-
-			function commit() {
-				var params = { op: op, field: field, tag: tag, apply: 1 };
-				if (op === 'rename') {
-					var nt = (input.value || '').trim();
-					if (!nt) { input.focus(); return; }
-					params.newTag = nt;
-				}
-				okBtn.disabled = true;
-				tagBulkFetch(params).then(function (d) {
-					if (d && d.ok) {
-						announce((op === 'delete'
-							? (labels.tagDeleted || 'Tag deleted from %d image(s)')
-							: (labels.tagRenamed || 'Tag renamed on %d image(s)')).replace('%d', d.count));
-						if (d.tagsAllowed) applyTagsAllowed(d.field, d.tagsAllowed);
-						if (onSuccess) onSuccess(d);
-						cleanup();
-					} else {
-						announce((d && d.error) || labels.error || 'Failed');
-						okBtn.disabled = false;
-					}
-				}).catch(function (err) {
-					console.error('[ImageLibrary] tag manage failed:', err);
-					okBtn.disabled = false;
-				});
-			}
-			okBtn.addEventListener('click', commit);
-			if (input) input.addEventListener('keydown', function (e) {
-				if (e.key === 'Enter') { e.preventDefault(); commit(); }
-			});
-
-			dialog.showModal();
-			if (input) { input.focus(); input.select(); } else okBtn.focus();
-		}
-
-		// One predefined-tag chip: checkbox + label, plus (for managers) rename/
-		// delete controls that act library-wide. Returns the chip <div>; the
-		// checkbox is exposed as chip._cb for the caller's selection map.
 		// Apply a tag rename/delete library-wide WITHOUT a confirm dialog (used by
 		// the inline rename). Toasts the affected count the server reports back.
 		function tagManageApply(op, field, tag, newTag, onSuccess) {
@@ -1002,21 +903,65 @@
 
 			var field = td.dataset.field || '';
 			if (predefined && canManageShared && field) {
-				var input = null;   // the inline-edit input while renaming, else null
+				var input = null;        // the inline-edit input while renaming, else null
+				var armed = false;       // delete-confirm armed (one click already)
+				var armTimer = null;
+				var countSpan = null;
 
 				var renBtn = mkTagBtn('ml-tag-rename', 'fa-pencil', labels.tagRenameTitle || 'Rename tag', function () {
-					if (input) commitEdit(); else startEdit();
+					if (input) { commitEdit(); return; }
+					if (armed)  { disarmDelete(); return; }   // doubles as cancel while armed
+					startEdit();
 				});
 				var delBtn = mkTagBtn('ml-tag-delete', 'fa-times', labels.tagDeleteTitle || 'Delete tag', function () {
-					tagManageDialog('delete', field, cb.value, function () { chip.remove(); });
+					if (input) return;                        // not while renaming
+					if (armed) { doDelete(); return; }
+					armDelete();
 				});
 				chip.appendChild(renBtn);
 				chip.appendChild(delBtn);
 
+				function setIcon(btn, name, title) {
+					var i = btn.querySelector('i'); if (i) i.className = 'fa ' + name;
+					btn.title = title; btn.setAttribute('aria-label', title);
+				}
 				function setRenIcon(name, title) {
-					var i = renBtn.querySelector('i'); if (i) i.className = 'fa ' + name;
-					renBtn.title = title; renBtn.setAttribute('aria-label', title);
+					setIcon(renBtn, name, title);
 					renBtn.classList.toggle('ml-tag-confirm', name === 'fa-check');
+				}
+
+				// Inline delete confirm — no second modal. First × click arms it:
+				// the × turns into a red ✓, the ✎ becomes a ✗ cancel, the affected
+				// image count appears inline, and it auto-disarms after a few sec.
+				function armDelete() {
+					armed = true;
+					chip.classList.add('ml-tag-deleting');
+					setIcon(delBtn, 'fa-check', labels.tagConfirmDelete || 'Confirm delete');
+					delBtn.classList.add('ml-tag-confirm-del');
+					setIcon(renBtn, 'fa-times', labels.cancel || 'Cancel');
+					countSpan = document.createElement('span');
+					countSpan.className = 'ml-tag-count';
+					countSpan.textContent = '…';
+					chip.insertBefore(countSpan, renBtn);
+					tagBulkFetch({ op: 'delete', field: field, tag: cb.value, apply: 0 }).then(function (d) {
+						if (countSpan && d && d.ok) {
+							countSpan.textContent = '(' + d.count + ')';
+						}
+					}).catch(function () {});
+					armTimer = setTimeout(disarmDelete, 4000);
+				}
+				function disarmDelete() {
+					armed = false;
+					if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+					chip.classList.remove('ml-tag-deleting');
+					delBtn.classList.remove('ml-tag-confirm-del');
+					setIcon(delBtn, 'fa-times', labels.tagDeleteTitle || 'Delete tag');
+					setIcon(renBtn, 'fa-pencil', labels.tagRenameTitle || 'Rename tag');
+					if (countSpan) { countSpan.remove(); countSpan = null; }
+				}
+				function doDelete() {
+					if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+					tagManageApply('delete', field, cb.value, function () { chip.remove(); });
 				}
 				// Inline rename: the label turns into a text input, the ✎ becomes a
 				// ✓. Enter or ✓ commits, Esc or blur cancels — no second modal.

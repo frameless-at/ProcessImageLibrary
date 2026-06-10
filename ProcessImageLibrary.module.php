@@ -5723,6 +5723,7 @@ class ProcessImageLibrary extends Process {
 				'tagAddPlaceholder' => $this->_('Add tag…'),
 				// Library-wide tag management (manager-only, in the tag modal).
 				'tagDeleteTitle'    => $this->_('Delete tag'),
+				'tagConfirmDelete'  => $this->_('Confirm delete'),
 				'tagRenameTitle'    => $this->_('Rename tag'),
 				'tagManageDelete'   => $this->_('Delete the tag “%s” everywhere?'),
 				'tagManageRename'   => $this->_('Rename the tag “%s” to:'),

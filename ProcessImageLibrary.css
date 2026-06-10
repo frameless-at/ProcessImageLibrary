@@ -1168,6 +1168,25 @@ textarea.ml-langtabs-pane {
 	opacity: 1;
 	color: #2a8a2a;
 }
+/* Inline delete confirm (armed by the first × click): both controls stay
+   visible, the × becomes a red confirm ✓, the tag goes struck-through red, and
+   the affected-image count shows inline — no second modal. */
+.ml-tag-chip.ml-tag-deleting .ml-tag-manage {
+	opacity: 1;
+}
+.ml-tag-chip.ml-tag-deleting > label {
+	color: #c33;
+	text-decoration: line-through;
+}
+.ml-tag-manage.ml-tag-confirm-del {
+	color: #c33;
+}
+.ml-tag-count {
+	flex: 0 0 auto;
+	font-size: 0.85em;
+	color: var(--pw-muted-color, #888);
+	white-space: nowrap;
+}
 /* Inline rename input — replaces the chip's label in place. */
 .ml-tag-edit-input {
 	flex: 1 1 auto;
