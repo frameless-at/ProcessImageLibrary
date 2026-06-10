@@ -1467,6 +1467,52 @@ textarea.ml-langtabs-pane {
 .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].uk-active > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
+/* Shared (team-wide) tabs are read-only for non-managers: no curate cursor —
+   a click just recalls. Managers get the curate cursors back via the
+   ml-can-manage-shared root class (the rules above already cover non-shared
+   tabs for them). */
+.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared] > a {
+	cursor: pointer;
+}
+.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared] > a {
+	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
+}
+.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared].uk-active > a {
+	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
+}
+
+/* Thin separator between the personal tabs and the team-wide shared ones. */
+.ml-bookmarks-sep {
+	align-self: center;
+	width: 1px;
+	height: 1.1rem;
+	margin: 0 0.5rem 0 0.2rem;
+	background: var(--pw-border-color, #ccc);
+	pointer-events: none;
+}
+/* Shared tabs are distinguished typographically — italic + lighter weight,
+   slightly muted — rather than with an extra icon. */
+.ml-bookmark--shared {
+	font-style: italic;
+	font-weight: 400;
+	opacity: 0.85;
+}
+
+/* "Share with the team" toggle in the save dialog. */
+.ml-share-toggle {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	margin-top: 0.6rem;
+	font-size: 0.95em;
+	cursor: pointer;
+}
+.ml-share-toggle input {
+	margin: 0;
+}
+.ml-share-hint {
+	margin-top: 0.2rem;
+}
 
 /* Empty / debug */
 .ml-empty {

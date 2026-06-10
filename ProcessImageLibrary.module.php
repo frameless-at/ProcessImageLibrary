@@ -1362,7 +1362,8 @@ class ProcessImageLibrary extends Process {
 		// Bookmarks stay in the picker too — saved filter sets are the fastest
 		// way into a large library when you're hunting for one image to insert.
 		$prefs = $this->getUserPrefs();
-		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks'], $prefs['collections']);
+		$shared = $this->getSharedPrefs();
+		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks'], $prefs['collections'], $shared['bookmarks'], $shared['collections']);
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= $this->renderPickerBar('top');   // sticky — stays in the viewport
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
@@ -5289,6 +5290,11 @@ class ProcessImageLibrary extends Process {
 			// on any change.
 			'userPrefs'            => $this->getUserPrefs(),
 			'userPrefsUrl'         => $this->wire('page')->url . 'user-prefs/',
+			// Team-wide shared bookmarks + collections (read by everyone,
+			// written only by managers via the shared-prefs endpoint).
+			'shared'               => $this->getSharedPrefs(),
+			'sharedPrefsUrl'       => $this->wire('page')->url . 'shared-prefs/',
+			'canManageShared'      => $this->canManageShared(),
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
@@ -5340,6 +5346,12 @@ class ProcessImageLibrary extends Process {
 				'collectionAdd'     => $this->_('Add collection'),
 				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
 				'collectionRemoved' => $this->_('Removed %d image(s) from the collection'),
+				// Shared (team-wide) bookmarks + collections — the manager-only
+				// "share with team" toggle in the save dialog + its toasts.
+				'shareWithTeam'     => $this->_('Share with the team'),
+				'shareWithTeamHint' => $this->_('Visible to everyone with library access. Only managers can change it.'),
+				'sharedSaved'       => $this->_('Shared with the team'),
+				'sharedDeleted'     => $this->_('Removed from the team'),
 				// Delete confirm + result labels. The JS substitutes %d
 				// for the count; the %d placeholder stays literal in the
 				// translatable strings.
@@ -5425,10 +5437,14 @@ class ProcessImageLibrary extends Process {
 	 * pipeline (replaceFromQs).
 	 *
 	 * @param array<int,array{name:string,qs:string}> $bookmarks
+	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $collections
+	 * @param array<int,array{name:string,qs:string}> $sharedBookmarks
+	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $sharedCollections
 	 */
-	protected function renderBookmarksBar(array $filters, array $bookmarks, array $collections = []): string {
+	protected function renderBookmarksBar(array $filters, array $bookmarks, array $collections = [], array $sharedBookmarks = [], array $sharedCollections = []): string {
 		$san  = $this->wire('sanitizer');
 		$page = $this->wire('page');
+		$canManageShared = $this->canManageShared();
 
 		$currentCanon = $this->canonicalizeBookmarkQs(http_build_query($this->bookmarkFilterPayload($filters)));
 		$currentColl  = (string) ($filters['coll'] ?? '');
@@ -5491,6 +5507,57 @@ class ProcessImageLibrary extends Process {
 				. ' title="' . $collDelTitle . '">'
 				. '<i class="fa fa-times" aria-hidden="true"></i>'
 				. '</button>'
+				. '</li>';
+		}
+
+		// Shared (team-wide) entries follow the personal ones, set off by a thin
+		// separator and styled italic/lighter (.ml-bookmark--shared) — a purely
+		// typographic distinction, no extra icon. Everyone sees and recalls them;
+		// the × (edit/delete) only renders for users who may manage the team store.
+		$hasShared = !empty($sharedBookmarks) || !empty($sharedCollections);
+		if ($hasShared) {
+			$out .= '<li class="ml-bookmarks-sep" aria-hidden="true"></li>';
+		}
+		foreach ($sharedBookmarks as $idx => $b) {
+			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
+			$href  = $page->url . $canon;
+			$isActive = ($canon !== '' && $canon === $currentCanon && $currentColl === '');
+			if ($isActive) $bookmarkMatched = true;
+			$active = $isActive ? ' class="uk-active"' : '';
+			$out .= '<li' . $active . ' data-shared="1" data-bookmark-idx="' . (int) $idx . '">'
+				. '<a class="ml-bookmark ml-bookmark--shared"'
+				. ' href="' . $san->entities($href) . '"'
+				. ' data-qs="' . $san->entities($canon) . '">'
+				. $san->entities((string) $b['name'])
+				. '</a>'
+				. ($canManageShared
+					? '<button type="button" class="ml-bookmark-del"'
+						. ' aria-label="' . $delTitle . '"'
+						. ' title="' . $delTitle . '">'
+						. '<i class="fa fa-times" aria-hidden="true"></i>'
+						. '</button>'
+					: '')
+				. '</li>';
+		}
+		foreach ($sharedCollections as $c) {
+			$cid = (string) ($c['id'] ?? '');
+			if ($cid === '') continue;
+			$qs = '?coll=' . rawurlencode($cid);
+			$active = ($cid === $currentColl) ? ' class="uk-active"' : '';
+			$out .= '<li' . $active . ' data-shared="1" data-coll-id="' . $san->entities($cid) . '">'
+				. '<a class="ml-bookmark ml-bookmark--collection ml-bookmark--shared"'
+				. ' href="' . $san->entities($page->url . $qs) . '"'
+				. ' data-qs="' . $san->entities($qs) . '">'
+				. '<i class="fa fa-clone" aria-hidden="true"></i> '
+				. $san->entities((string) ($c['name'] ?? ''))
+				. '</a>'
+				. ($canManageShared
+					? '<button type="button" class="ml-bookmark-del"'
+						. ' aria-label="' . $collDelTitle . '"'
+						. ' title="' . $collDelTitle . '">'
+						. '<i class="fa fa-times" aria-hidden="true"></i>'
+						. '</button>'
+					: '')
 				. '</li>';
 		}
 
