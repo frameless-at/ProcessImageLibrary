@@ -2366,6 +2366,14 @@ class ProcessImageLibrary extends Process {
 			'ok'    => true,
 			'value' => (string) $stored,
 		];
+		// Mode 3 ("predefined + can input their own"): make any new tag part of
+		// the field's predefined list so it's offered on every other image too.
+		// Hand the updated list back so the client can refresh open cells without
+		// a reload.
+		if ($subfield === 'tags' && ($tagsCfg['mode'] ?? 0) === 3) {
+			$response['tagsAllowed'] = array_values($this->registerFieldTags($fieldName, (string) $stored));
+			$response['field']       = $fieldName;
+		}
 		// Multilang fields: also hand back every language's value so
 		// the client can refresh the cell's data-lang-<id> attrs in
 		// place. Without this the next popup-open reads stale
@@ -3493,6 +3501,10 @@ class ProcessImageLibrary extends Process {
 		$renamed = [];
 		$failed      = [];
 		$tagsCfg     = $this->getTagsConfig();
+		// New tags entered on mode-3 ("predefined + own") fields during this
+		// batch, per field — promoted into each field's predefined list once at
+		// the end so they're offered on every image.
+		$mode3TagTokens = [];   // fieldName => [tag => true]
 		$imageFields = $this->discoverImageFields();
 		// Total used by the (N) placeholder. Matches $counter from
 		// the byPage build above — i.e. the number of items the
@@ -3605,6 +3617,11 @@ class ProcessImageLibrary extends Process {
 							$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $disallowed));
 							continue;
 						}
+					} elseif ($tagCfg['mode'] === 3 && $mode !== 'remove') {
+						// Remember newly-entered tags to promote into the field's
+						// predefined list after the batch (so they're offered on
+						// every image, not just this one).
+						foreach ($tokens as $t) $mode3TagTokens[$fn][$t] = true;
 					}
 					if ($mode === 'add') {
 						// Union with the row's existing tags, dedup.
@@ -3673,6 +3690,16 @@ class ProcessImageLibrary extends Process {
 			$this->wire('cache')->deleteFor($this);
 		}
 
+		// Promote any new mode-3 tags into their fields' predefined lists, so
+		// they're offered on every image. Hand the updated lists back keyed by
+		// field for live client refresh.
+		$tagsAllowed = [];
+		foreach ($mode3TagTokens as $fn => $tokenSet) {
+			$tagsAllowed[$fn] = array_values(
+				$this->registerFieldTags($fn, implode(' ', array_keys($tokenSet)))
+			);
+		}
+
 		// Match-aware UX: report which of the just-saved rows no
 		// longer pass the active filter so the client can fade them.
 		$match = $this->matchTouchedRows($succeededKeys);
@@ -3684,6 +3711,7 @@ class ProcessImageLibrary extends Process {
 			'vanished'  => $match['vanished'],
 			'newTotal'  => $match['newTotal'],
 			'renamed'   => (object) $renamed,
+			'tagsAllowed' => (object) $tagsAllowed,
 		]);
 	}
 
@@ -4067,6 +4095,47 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function splitTags(string $raw): array {
 		return preg_split('/[\s,]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+	}
+
+	/**
+	 * Promote freshly-entered tags into a field's predefined list (mode 3,
+	 * "predefined + can input their own"). A tag a user invents while editing
+	 * one image must become an offered tag for EVERY image of that field — so we
+	 * append any token not already in the field's space-separated tagsList and
+	 * save the field once. Only tokens valid as predefined tags (letters,
+	 * digits, underscore, hyphen — per PW's own tagsList rule) are added.
+	 * Returns the full, updated predefined list so the caller can hand it back
+	 * to the client for live refresh. No-op (returns current list) when nothing
+	 * is new.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function registerFieldTags(string $fieldName, string $tagsValue): array {
+		$field = $this->wire('fields')->get($fieldName);
+		if (!$field || !($field->type instanceof FieldtypeImage)) return [];
+
+		$list = $this->splitTags((string) $field->tagsList);
+		$have = array_flip($list);
+		$added = false;
+		foreach ($this->splitTags($tagsValue) as $t) {
+			if (isset($have[$t])) continue;
+			if (!preg_match('/^[A-Za-z0-9_-]+$/', $t)) continue;   // PW tagsList charset
+			$have[$t] = true;
+			$list[] = $t;
+			$added = true;
+		}
+		if ($added) {
+			try {
+				$field->set('tagsList', implode(' ', $list));
+				$this->wire('fields')->save($field);
+			} catch (\Throwable $e) {
+				// The tag is already stored on the image; failing to promote it
+				// into the field list must not fail the whole save.
+				$this->wire('log')->error('ImageLibrary: tagsList update failed for '
+					. $fieldName . ': ' . $e->getMessage());
+			}
+		}
+		return $list;
 	}
 
 	protected function resolvePageimage(Page $page, string $fieldName, string $basename): ?Pageimage {

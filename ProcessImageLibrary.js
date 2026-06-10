@@ -943,6 +943,28 @@
 			};
 		}
 
+		// After a mode-3 save promotes new tags into a field's predefined list,
+		// reflect the updated list onto open cells + the autocomplete datalist so
+		// the next edit this session offers the new tags without a reload. Field
+		// names are PW-safe (letters/digits/underscore), so no selector escaping.
+		function applyTagsAllowed(field, list) {
+			if (!field || !Array.isArray(list)) return;
+			var json = JSON.stringify(list);
+			document.querySelectorAll('td[data-col="tags"][data-field="' + field + '"]').forEach(function (cell) {
+				if (cell.dataset.tagsMode === '2' || cell.dataset.tagsMode === '3') {
+					cell.dataset.tagsAllowed = json;
+				}
+			});
+			var dl = document.getElementById('ml-tags-used-' + field);
+			if (dl) {
+				var have = Object.create(null);
+				Array.prototype.forEach.call(dl.querySelectorAll('option'), function (o) { have[o.value] = true; });
+				list.forEach(function (t) {
+					if (!have[t]) { var o = document.createElement('option'); o.value = t; dl.appendChild(o); }
+				});
+			}
+		}
+
 		// All cell edits run through one popup. The native <dialog>
 		// gives a roomy editing canvas regardless of subfield type
 		// (textarea, single-line text, whitelisted-tag checkboxes) and
@@ -1492,6 +1514,11 @@
 					td.classList.remove('ml-cell-saving');
 					if (result && result.data && result.data.ok) {
 						setCellText(td, result.data.value);
+						// Mode-3 tag save may have promoted new tags into the
+						// field's predefined list — reflect it on open cells.
+						if (result.data.tagsAllowed) {
+							applyTagsAllowed(result.data.field, result.data.tagsAllowed);
+						}
 						// Typed cells: refresh data-value so reopening the
 						// editor shows the freshly-stored raw value.
 						if (typedInput && result.data.rawValue !== undefined) {
@@ -2479,6 +2506,13 @@
 			if (!d.ok) {
 				showBulkResult(d.error || labels.error || 'Bulk action failed', []);
 				return false;
+			}
+			// Mode-3 batches may have promoted new tags into one or more fields'
+			// predefined lists ({field: [tags…]}) — reflect them on open cells.
+			if (d.tagsAllowed && typeof d.tagsAllowed === 'object') {
+				Object.keys(d.tagsAllowed).forEach(function (f) {
+					applyTagsAllowed(f, d.tagsAllowed[f]);
+				});
 			}
 			var failedCount = (d.failed || []).length;
 			if (failedCount) {
