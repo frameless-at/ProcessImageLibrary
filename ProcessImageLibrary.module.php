@@ -3129,6 +3129,14 @@ class ProcessImageLibrary extends Process {
 			return ['ok' => false, 'basename' => $oldBasename, 'error' => 'Rename failed'];
 		}
 
+		// Re-key the fingerprint (+ metalock) row from the old basename to the
+		// new one, preserving the content_hash. The file's bytes didn't change,
+		// so its hash is still valid — but the rename's field-only save fires
+		// Pages::savedField (not Pages::saved), so the auto-hash hook won't do
+		// this for us. Without it the renamed image's row stays under the old
+		// name and it silently drops out of its duplicate cluster.
+		$this->renameFingerprintRows((int) $page->id, $fieldName, $oldBasename, (string) $img->basename);
+
 		// The file (and its variations) moved to a new on-disk name, but
 		// rich-text embeds reference it by URL and still point at the old
 		// stem. Rewrite them so they survive the rename. A rewrite failure
