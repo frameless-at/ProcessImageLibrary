@@ -413,6 +413,8 @@ Upload a previously exported (and externally edited) JSON or CSV. The import:
 
 Two **optional** integrations that surface the library *outside* its own admin page, so editors can drop an existing library image into a page without re-uploading it. Both are **off by default** — the library is fully usable without them — and toggle independently in the collapsed **Picker add-ons** fieldset under [Module configuration](#module-configuration). Each opens the library in a modal **picker**: the normal table / gallery with selection checkboxes and a *Use selected* bar.
 
+![The library opened as a modal picker (titled "Insert from library"): the bookmark / collection tabs, a filter bar, a "Use selected" button, and the masonry gallery with images selected](docs/screenshots/20-picker-modal.png)
+
 Enabling either toggle makes the module `autoload` so its hooks run on the relevant edit screens; after flipping a toggle, run **Modules → Refresh** once.
 
 ### Image-field picker
@@ -432,6 +434,14 @@ A **Choose from library** button is appended to every `InputfieldImage` in the p
 An **Insert from library** button (gallery icon) joins the toolbar of every TinyMCE and CKEditor field, right next to the native image button — in the admin **and** the front-end inline editor (PageFrontEdit). It opens the picker; a single pick hands straight off to ProcessWire's own image dialog (crop / resize / caption / align) pointed at the library file, and the `<img>` is only inserted once you confirm there — nothing is dropped into the page beforehand. Multiple picks insert directly. The embedded `<img>` references the shared library file, so no copy is made.
 
 ![The TinyMCE and CKEditor toolbars side by side, each carrying the "Insert from library" gallery-icon button next to the native image button](docs/screenshots/15-richtext-insert.png)
+
+The same button in the **front-end inline editor** (PageFrontEdit), floating over a live page:
+
+![A TinyMCE inline-editor toolbar floating over a live front-end page, with the "Insert from library" gallery-icon button in the toolbar](docs/screenshots/22-richtext-frontend.png)
+
+A single pick hands off to ProcessWire's own image dialog (crop / resize / caption / align) before the image is inserted:
+
+![ProcessWire's native image dialog opened on the picked library file: a preview, width/height fields, caption / hidpi options, and Insert image / Select another / Cancel buttons](docs/screenshots/21-richtext-dialog.png)
 
 ## Performance
 
