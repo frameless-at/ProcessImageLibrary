@@ -226,6 +226,27 @@ trait ImageLibraryHashing {
 	}
 
 	/**
+	 * Refresh only the stored filemtime for one fingerprint row, leaving its
+	 * content_hash intact. Called after a hardlink reclaim: linking a copy onto
+	 * the canonical inode changes the copy's on-disk mtime (it adopts the
+	 * canonical's), which would otherwise make the budgeted scan see every
+	 * reclaimed file as "changed" and re-hash it on the next pass — so the scan
+	 * never advances past the reclaimed head and most of the library never gets
+	 * fingerprinted. Writing the new mtime back keeps the (size, mtime) skip
+	 * cache valid so the scan converges. Affects 0 rows if not yet scanned.
+	 */
+	protected function refreshStoredMtime(int $pageId, string $fieldName, string $basename, int $filemtime): void {
+		try {
+			$stmt = $this->wire('database')->prepare(
+				'UPDATE `' . self::HASH_TABLE . '` SET filemtime = ?
+				 WHERE page_id = ? AND field_name = ? AND basename = ?'
+			);
+			$stmt->execute([$filemtime, $pageId, $fieldName, $basename]);
+		} catch (\Throwable $e) {
+		}
+	}
+
+	/**
 	 * Exact byte hash of a file, or null if unreadable.
 	 */
 	protected function computeContentHash(string $path): ?string {
@@ -554,6 +575,10 @@ trait ImageLibraryHashing {
 		foreach ($this->loadImageRowsAll() as $r) {
 			$live[(int) $r['pageId'] . "\0" . (string) $r['fieldName'] . "\0" . (string) $r['basename']] = true;
 		}
+		// Safety: an empty live set means discovery/cache hiccuped, NOT that the
+		// whole library vanished. Pruning against it would wipe every fingerprint
+		// (and silently empty the Duplicates view). Skip this pass instead.
+		if (!$live) return;
 
 		$db = $this->wire('database');
 		try {
@@ -831,6 +856,14 @@ trait ImageLibraryHashing {
 			$size = (int) @filesize($mp);
 			if ($this->hardlinkReplace($canonPath, $mp)) {
 				$res['linked']++; $res['bytes'] += $size;
+				// The copy now shares the canonical inode → its mtime changed.
+				// Write that back so the next budgeted scan skips it instead of
+				// re-hashing the whole reclaimed set (which would stall the scan
+				// short of fingerprinting the rest of the library).
+				$nm = @filemtime($mp);
+				if ($nm !== false) {
+					$this->refreshStoredMtime((int) $m['pageId'], (string) $m['fieldName'], (string) $m['basename'], (int) $nm);
+				}
 			} else {
 				$res['skipped']++;
 			}
