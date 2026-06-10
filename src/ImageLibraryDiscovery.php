@@ -62,6 +62,9 @@ trait ImageLibraryDiscovery {
 			$useTagsRaw = (int) $field->useTags;
 			$rawList    = (string) $field->tagsList;
 			$allowed    = $this->splitTags($rawList);
+			// Predefined tags are shown (and offered) alphabetically, case-
+			// insensitively — independent of the order they were entered.
+			usort($allowed, 'strcasecmp');
 
 			$hasPredefined = ($useTagsRaw & FieldtypeFile::useTagsPredefined) && $allowed;
 			$allowOwn      = (bool) ($useTagsRaw & FieldtypeFile::useTagsNormal);

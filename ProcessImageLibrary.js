@@ -1026,6 +1026,10 @@
 			var allowed = [];
 			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
 			catch (e) { allowed = []; }
+			// Show predefined tags alphabetically (case-insensitive).
+			allowed.sort(function (a, b) {
+				return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+			});
 
 			var currentSet = Object.create(null);
 			original.split(/\s+/).filter(Boolean).forEach(function (t) {
@@ -1060,6 +1064,10 @@
 			var allowed = [];
 			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
 			catch (e) { allowed = []; }
+			// Show predefined tags alphabetically (case-insensitive).
+			allowed.sort(function (a, b) {
+				return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+			});
 
 			var current = original.split(/\s+/).filter(Boolean);
 			var currentSet = Object.create(null);

@@ -1974,7 +1974,7 @@ class ProcessImageLibrary extends Process {
 		$out = '';
 		foreach ($byField as $field => $set) {
 			$tags = array_keys($set);
-			sort($tags);
+			usort($tags, 'strcasecmp');   // alphabetical, case-insensitive
 			$out .= '<datalist id="ml-tags-used-' . $san->entities($field) . '">';
 			foreach ($tags as $t) {
 				$out .= '<option value="' . $san->entities((string) $t) . '">';
@@ -4430,6 +4430,7 @@ class ProcessImageLibrary extends Process {
 			$added = true;
 		}
 		if ($added) {
+			usort($list, 'strcasecmp');   // keep the stored list alphabetical
 			try {
 				$field->set('tagsList', implode(' ', $list));
 				$this->wire('fields')->save($field);
@@ -4440,6 +4441,7 @@ class ProcessImageLibrary extends Process {
 					. $fieldName . ': ' . $e->getMessage());
 			}
 		}
+		usort($list, 'strcasecmp');
 		return $list;
 	}
 
@@ -4471,6 +4473,7 @@ class ProcessImageLibrary extends Process {
 		if ($newTag !== null && $newTag !== '' && !$hasNew && preg_match('/^[A-Za-z0-9_-]+$/', $newTag)) {
 			$out[] = $newTag;
 		}
+		usort($out, 'strcasecmp');   // keep the stored list alphabetical
 		try {
 			$field->set('tagsList', implode(' ', $out));
 			$this->wire('fields')->save($field);
