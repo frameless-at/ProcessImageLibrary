@@ -51,6 +51,10 @@ class ProcessImageLibrary extends Process {
 
 	const ADMIN_PAGE_NAME = 'image-library';
 	const PERMISSION_NAME = 'image-library-access';
+	// Gates create/edit/delete of the SHARED (team-wide) bookmarks and
+	// collections. Everyone with PERMISSION_NAME sees and uses them; only
+	// holders of this permission may change them.
+	const PERMISSION_MANAGE_SHARED = 'image-library-manage-shared';
 	const CACHE_PREFIX = 'image-library-';
 	const PAGE_SIZE_DEFAULT = 50;
 	const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
@@ -310,6 +314,48 @@ class ProcessImageLibrary extends Process {
 			'thumbScale'  => $thumbScale,
 			'viewMode'    => $viewMode,
 		];
+	}
+
+	/**
+	 * May the current user create/edit/delete the SHARED (team-wide)
+	 * bookmarks and collections? Superusers always; otherwise the
+	 * PERMISSION_MANAGE_SHARED permission. Everyone with library access
+	 * still SEES and USES the shared entries — this gates writes only.
+	 */
+	protected function canManageShared(): bool {
+		$user = $this->wire('user');
+		return $user->isSuperuser() || $user->hasPermission(self::PERMISSION_MANAGE_SHARED);
+	}
+
+	/**
+	 * The team-wide shared store, read from module config. Same shape as
+	 * the per-user prefs for bookmarks/collections, but visible to every
+	 * user with library access and editable only by canManageShared().
+	 *
+	 * @return array{bookmarks:array<int,array{name:string,qs:string}>,collections:array<int,array{id:string,name:string,keys:array<int,string>}>}
+	 */
+	protected function getSharedPrefs(): array {
+		$cfg = $this->wire('modules')->getConfig($this);
+		$bookmarks = [];
+		$collections = [];
+		if (is_array($cfg)) {
+			if (isset($cfg['sharedBookmarks']) && is_array($cfg['sharedBookmarks'])) {
+				foreach ($cfg['sharedBookmarks'] as $b) {
+					if (!is_array($b)) continue;
+					$name = (string) ($b['name'] ?? '');
+					$qs   = (string) ($b['qs']   ?? '');
+					if ($name === '') continue;
+					$bookmarks[] = ['name' => $name, 'qs' => $qs];
+				}
+			}
+			if (isset($cfg['sharedCollections']) && is_array($cfg['sharedCollections'])) {
+				foreach ($cfg['sharedCollections'] as $c) {
+					$clean = $this->sanitizeCollection($c);
+					if ($clean !== null) $collections[] = $clean;
+				}
+			}
+		}
+		return ['bookmarks' => $bookmarks, 'collections' => $collections];
 	}
 
 	/** The whitelist of persisted result-layout modes (table vs masonry).
@@ -1356,7 +1402,8 @@ class ProcessImageLibrary extends Process {
 		// Bookmarks stay in the picker too — saved filter sets are the fastest
 		// way into a large library when you're hunting for one image to insert.
 		$prefs = $this->getUserPrefs();
-		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks'], $prefs['collections']);
+		$shared = $this->getSharedPrefs();
+		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks'], $prefs['collections'], $shared['bookmarks'], $shared['collections']);
 		$out .= $this->renderFilterBar($filters, $imageFields, $eligibleTemplates, $customCols, $sort, $dir, $tagFilterPool);
 		$out .= $this->renderPickerBar('top');   // sticky — stays in the viewport
 		$out .= '<div class="ml-results">' . $resultsHtml . '</div>';
@@ -3794,6 +3841,66 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Write the team-wide SHARED bookmarks + collections to module config.
+	 * Same payload shape as executeUserPrefs (bookmarks[], collections[]),
+	 * but gated by canManageShared() and persisted via saveConfig so every
+	 * user with library access reads the result through getSharedPrefs().
+	 * The full list is replaced on each call (the client sends the desired
+	 * end-state), other config keys are preserved.
+	 */
+	public function ___executeSharedPrefs() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+		if (!$this->canManageShared()) {
+			return $this->jsonError('Not allowed', 403);
+		}
+
+		$raw = (string) $this->wire('input')->post('prefs');
+		$data = $raw !== '' ? json_decode($raw, true) : null;
+		if (!is_array($data)) {
+			return $this->jsonError('Invalid payload');
+		}
+
+		$sanitizer = $this->wire('sanitizer');
+		$bookmarks = [];
+		$collections = [];
+		if (isset($data['bookmarks']) && is_array($data['bookmarks'])) {
+			foreach ($data['bookmarks'] as $b) {
+				if (!is_array($b)) continue;
+				$name = $sanitizer->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
+				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
+				if ($name === '') continue;
+				$bookmarks[] = ['name' => $name, 'qs' => $qs];
+				if (count($bookmarks) >= self::COLLECTION_MAX) break;
+			}
+		}
+		if (isset($data['collections']) && is_array($data['collections'])) {
+			foreach ($data['collections'] as $c) {
+				$col = $this->sanitizeCollection($c);
+				if ($col !== null) $collections[] = $col;
+				if (count($collections) >= self::COLLECTION_MAX) break;
+			}
+		}
+
+		$cfg = $this->wire('modules')->getConfig($this);
+		if (!is_array($cfg)) $cfg = [];
+		$cfg['sharedBookmarks']   = $bookmarks;
+		$cfg['sharedCollections'] = $collections;
+		$this->wire('modules')->saveConfig($this, $cfg);
+
+		return $this->jsonResponse(['ok' => true]);
+	}
+
+	/**
 	 * Canonical bookmark query string: only filter-shaped params
 	 * (q, template, field, tags, no_desc, no_tags, no_custom_*),
 	 * empty values dropped, keys alphabetically sorted. Same shape
@@ -4306,6 +4413,11 @@ class ProcessImageLibrary extends Process {
 		$id = preg_replace('/[^a-z0-9]/i', '', $id) ?? '';
 		if ($id === '') return [];
 		foreach ($this->getUserPrefs()['collections'] as $c) {
+			if (($c['id'] ?? '') === $id) return $c['keys'];
+		}
+		// Personal collections win on id-collision; fall through to the
+		// team-wide shared store so ?coll=<id> resolves shared sets too.
+		foreach ($this->getSharedPrefs()['collections'] as $c) {
 			if (($c['id'] ?? '') === $id) return $c['keys'];
 		}
 		return [];
@@ -5264,6 +5376,11 @@ class ProcessImageLibrary extends Process {
 			// on any change.
 			'userPrefs'            => $this->getUserPrefs(),
 			'userPrefsUrl'         => $this->wire('page')->url . 'user-prefs/',
+			// Team-wide shared bookmarks + collections (read by everyone,
+			// written only by managers via the shared-prefs endpoint).
+			'shared'               => $this->getSharedPrefs(),
+			'sharedPrefsUrl'       => $this->wire('page')->url . 'shared-prefs/',
+			'canManageShared'      => $this->canManageShared(),
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
@@ -5315,6 +5432,12 @@ class ProcessImageLibrary extends Process {
 				'collectionAdd'     => $this->_('Add collection'),
 				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
 				'collectionRemoved' => $this->_('Removed %d image(s) from the collection'),
+				// Shared (team-wide) bookmarks + collections — the manager-only
+				// "share with team" toggle in the save dialog + its toasts.
+				'shareWithTeam'     => $this->_('Share with the team'),
+				'shareWithTeamHint' => $this->_('Visible to everyone with library access. Only managers can change it.'),
+				'sharedSaved'       => $this->_('Shared with the team'),
+				'sharedDeleted'     => $this->_('Removed from the team'),
 				// Delete confirm + result labels. The JS substitutes %d
 				// for the count; the %d placeholder stays literal in the
 				// translatable strings.
@@ -5400,10 +5523,14 @@ class ProcessImageLibrary extends Process {
 	 * pipeline (replaceFromQs).
 	 *
 	 * @param array<int,array{name:string,qs:string}> $bookmarks
+	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $collections
+	 * @param array<int,array{name:string,qs:string}> $sharedBookmarks
+	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $sharedCollections
 	 */
-	protected function renderBookmarksBar(array $filters, array $bookmarks, array $collections = []): string {
+	protected function renderBookmarksBar(array $filters, array $bookmarks, array $collections = [], array $sharedBookmarks = [], array $sharedCollections = []): string {
 		$san  = $this->wire('sanitizer');
 		$page = $this->wire('page');
+		$canManageShared = $this->canManageShared();
 
 		$currentCanon = $this->canonicalizeBookmarkQs(http_build_query($this->bookmarkFilterPayload($filters)));
 		$currentColl  = (string) ($filters['coll'] ?? '');
@@ -5422,52 +5549,63 @@ class ProcessImageLibrary extends Process {
 			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
 			. $allLabel . '</a></li>';
 
+		// Tab strip ordered by TYPE, not by owner: first ALL filter bookmarks
+		// (personal then team), then ALL collections (personal then team). No
+		// separator — shared entries are told apart purely typographically
+		// (.ml-bookmark--shared: italic/lighter), and their × (edit/delete) only
+		// renders for users who may manage the team store.
 		$bookmarkMatched = false;
-		foreach ($bookmarks as $idx => $b) {
+
+		$renderBookmark = function (array $b, int $idx, bool $shared) use ($san, $page, $currentCanon, $currentColl, $delTitle, $canManageShared, &$bookmarkMatched): string {
 			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
 			$href  = $page->url . $canon;
-			$isActive = ($canon !== '' && $canon === $currentCanon);
+			$isActive = ($canon !== '' && $canon === $currentCanon && $currentColl === '');
 			if ($isActive) $bookmarkMatched = true;
-			$active = $isActive ? ' class="uk-active"' : '';
-			$out .= '<li' . $active . ' data-bookmark-idx="' . (int) $idx . '">'
-				. '<a class="ml-bookmark"'
+			$cls = 'ml-bookmark' . ($shared ? ' ml-bookmark--shared' : '');
+			return '<li' . ($isActive ? ' class="uk-active"' : '') . ($shared ? ' data-shared="1"' : '') . ' data-bookmark-idx="' . $idx . '">'
+				. '<a class="' . $cls . '"'
 				. ' href="' . $san->entities($href) . '"'
 				. ' data-qs="' . $san->entities($canon) . '">'
 				. $san->entities((string) $b['name'])
 				. '</a>'
-				. '<button type="button" class="ml-bookmark-del"'
-				. ' aria-label="' . $delTitle . '"'
-				. ' title="' . $delTitle . '">'
-				. '<i class="fa fa-times" aria-hidden="true"></i>'
-				. '</button>'
+				. ((!$shared || $canManageShared)
+					? '<button type="button" class="ml-bookmark-del"'
+						. ' aria-label="' . $delTitle . '" title="' . $delTitle . '">'
+						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
+					: '')
 				. '</li>';
-		}
+		};
 
-		// Collection tabs (saved image sets) after the filter bookmarks, in the
-		// same strip but icon-marked. Recalled via ?coll=<id>.
-		foreach ($collections as $c) {
+		$renderCollection = function (array $c, bool $shared) use ($san, $page, $currentColl, $collDelTitle, $canManageShared): string {
 			$cid = (string) ($c['id'] ?? '');
-			if ($cid === '') continue;
+			if ($cid === '') return '';
 			$qs = '?coll=' . rawurlencode($cid);
-			$active = ($cid === $currentColl) ? ' class="uk-active"' : '';
-			$out .= '<li' . $active . ' data-coll-id="' . $san->entities($cid) . '">'
-				. '<a class="ml-bookmark ml-bookmark--collection"'
+			$cls = 'ml-bookmark ml-bookmark--collection' . ($shared ? ' ml-bookmark--shared' : '');
+			// Curate actions are cursor-driven, not buttons: while a selection
+			// exists, clicking a collection tab adds (non-active) or removes
+			// (active) the selection — the cursor signals which. The × only
+			// deletes the collection (and is hidden during selection).
+			return '<li' . ($cid === $currentColl ? ' class="uk-active"' : '') . ($shared ? ' data-shared="1"' : '') . ' data-coll-id="' . $san->entities($cid) . '">'
+				. '<a class="' . $cls . '"'
 				. ' href="' . $san->entities($page->url . $qs) . '"'
 				. ' data-qs="' . $san->entities($qs) . '">'
 				. '<i class="fa fa-clone" aria-hidden="true"></i> '
 				. $san->entities((string) ($c['name'] ?? ''))
 				. '</a>'
-				// Curate actions are cursor-driven, not buttons: while a selection
-				// exists, clicking a collection tab adds (non-active) or removes
-				// (active) the selection — the cursor signals which. The × below
-				// only deletes the collection (and is hidden during selection).
-				. '<button type="button" class="ml-bookmark-del"'
-				. ' aria-label="' . $collDelTitle . '"'
-				. ' title="' . $collDelTitle . '">'
-				. '<i class="fa fa-times" aria-hidden="true"></i>'
-				. '</button>'
+				. ((!$shared || $canManageShared)
+					? '<button type="button" class="ml-bookmark-del"'
+						. ' aria-label="' . $collDelTitle . '" title="' . $collDelTitle . '">'
+						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
+					: '')
 				. '</li>';
-		}
+		};
+
+		// Bookmarks first (personal, then team) …
+		foreach ($bookmarks as $idx => $b)       $out .= $renderBookmark($b, (int) $idx, false);
+		foreach ($sharedBookmarks as $idx => $b) $out .= $renderBookmark($b, (int) $idx, true);
+		// … then collections (personal, then team).
+		foreach ($collections as $c)       $out .= $renderCollection($c, false);
+		foreach ($sharedCollections as $c) $out .= $renderCollection($c, true);
 
 		// Add button rightmost — opens the name-dialog. Server-side it's hidden
 		// unless a non-saved filter is active; the JS additionally reveals it
@@ -6447,6 +6585,12 @@ class ProcessImageLibrary extends Process {
 			$p->save();
 			$this->message("Created permission: " . self::PERMISSION_NAME);
 		}
+		if (!$permissions->get(self::PERMISSION_MANAGE_SHARED)->id) {
+			$p = $permissions->add(self::PERMISSION_MANAGE_SHARED);
+			$p->title = $this->_('Manage shared Image Library bookmarks and collections');
+			$p->save();
+			$this->message("Created permission: " . self::PERMISSION_MANAGE_SHARED);
+		}
 
 		// LazyCron powers the hourly maintenance safety net — install it so
 		// auto-reclaim keeps running without any manual trigger.
@@ -6464,6 +6608,10 @@ class ProcessImageLibrary extends Process {
 		$cache = $this->wire('cache');
 		$cache->deleteFor($this, '*');
 		$this->dropHashTable();
+
+		$permissions = $this->wire('permissions');
+		$shared = $permissions->get(self::PERMISSION_MANAGE_SHARED);
+		if ($shared->id) $permissions->delete($shared);
 
 		parent::___uninstall();
 	}

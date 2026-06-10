@@ -1,7 +1,7 @@
 {
   "name": "ProcessImageLibrary",
   "title": "Image Library",
-  "version": "0.55.0",
+  "version": "0.56.0",
   "summary": "Audit and edit every image's metadata across your whole ProcessWire site from one filterable table — inline and in bulk, without opening a single page.",
   "author": "frameless Media",
   "href": "https://github.com/frameless-at/ProcessImageLibrary",
@@ -12,7 +12,8 @@
   ],
   "permission": "image-library-access",
   "permissions": {
-    "image-library-access": "Access the Image Library admin page"
+    "image-library-access": "Access the Image Library admin page",
+    "image-library-manage-shared": "Manage shared Image Library bookmarks and collections"
   },
   "page": {
     "name": "image-library",

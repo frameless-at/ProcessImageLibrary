@@ -3013,7 +3013,52 @@
 			? userPrefs.collections.slice()
 			: [];
 
+		// Team-wide shared store — same shape as the personal bookmarks /
+		// collections, but read by everyone and written only by managers
+		// (canManageShared) through a separate endpoint. Rendered after the
+		// personal tabs, italic/lighter (no extra icon).
+		var shared = (config.shared && typeof config.shared === 'object') ? config.shared : {};
+		var sharedBookmarks = Array.isArray(shared.bookmarks) ? shared.bookmarks.slice() : [];
+		var sharedCollections = Array.isArray(shared.collections) ? shared.collections.slice() : [];
+		var canManageShared = !!config.canManageShared;
+		// Lets the CSS gate curate affordances on shared tabs (read-only for
+		// everyone else) without re-checking the flag per rule.
+		if (root) root.classList.toggle('ml-can-manage-shared', canManageShared);
+
 		var savePrefsTimer = null;
+		var saveSharedTimer = null;
+		// Debounced POST of the full shared store. No-op for non-managers
+		// (the endpoint enforces this too) so a stray call can't 403-spam.
+		function saveSharedPrefs() {
+			if (!config.sharedPrefsUrl || !canManageShared) return;
+			clearTimeout(saveSharedTimer);
+			saveSharedTimer = setTimeout(function () {
+				var fd = new FormData();
+				fd.append('prefs', JSON.stringify({
+					bookmarks: sharedBookmarks,
+					collections: sharedCollections
+				}));
+				appendCsrf(fd);
+				fetch(config.sharedPrefsUrl, {
+					method: 'POST',
+					body: fd,
+					credentials: 'same-origin'
+				}).catch(function (err) {
+					console.error('[ImageLibrary] save shared prefs failed:', err);
+				});
+			}, 400);
+		}
+
+		// Locate a collection by id across BOTH stores; tells the caller which
+		// store it lives in so writes route to the right persist fn.
+		function findCollection(id) {
+			var c = collections.filter(function (x) { return x && x.id === id; })[0];
+			if (c) return { coll: c, shared: false };
+			c = sharedCollections.filter(function (x) { return x && x.id === id; })[0];
+			if (c) return { coll: c, shared: true };
+			return null;
+		}
+
 		// Current result layout ('table' | 'masonry'). The server is the
 		// source of truth (it persists ?view= toggles), but saveUserPrefs
 		// does a full overwrite of the prefs blob, so we carry the current
@@ -3319,36 +3364,49 @@
 				del.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
 				return del;
 			}
-			bookmarks.forEach(function (b, idx) {
+			// One bookmark / collection <li>. isShared flips on the italic/lighter
+			// class + data-shared marker, and hides the × for users who can't
+			// manage the team store. Indices are per-store (personal vs shared),
+			// matching the delete handler's per-store splice.
+			function addBookmarkLi(b, idx, isShared) {
 				var li = document.createElement('li');
 				li.dataset.bookmarkIdx = String(idx);
+				if (isShared) li.dataset.shared = '1';
 				var a = document.createElement('a');
-				a.className = 'ml-bookmark';
+				a.className = 'ml-bookmark' + (isShared ? ' ml-bookmark--shared' : '');
 				a.href = location.pathname + (b.qs || '');
 				a.dataset.qs = b.qs || '';
 				a.textContent = b.name;
 				li.appendChild(a);
-				li.appendChild(makeDelBtn(labels.bookmarkDelete || 'Delete bookmark'));
+				if (!isShared || canManageShared) li.appendChild(makeDelBtn(labels.bookmarkDelete || 'Delete bookmark'));
 				ul.insertBefore(li, addLi);
-			});
-			// Collection tabs after the filter bookmarks, icon-marked. data-qs
-			// is the short ?coll=<id> recall link — the same AJAX swap pipeline
-			// applies it (server resolves the id → image keys).
-			collections.forEach(function (c) {
+			}
+			// Collection tabs are icon-marked (fa-clone). data-qs is the short
+			// ?coll=<id> recall link — the same AJAX swap pipeline applies it
+			// (server resolves the id → image keys, personal then shared).
+			function addCollectionLi(c, isShared) {
 				if (!c || !c.id) return;
 				var li = document.createElement('li');
 				li.dataset.collId = c.id;
+				if (isShared) li.dataset.shared = '1';
 				var a = document.createElement('a');
-				a.className = 'ml-bookmark ml-bookmark--collection';
+				a.className = 'ml-bookmark ml-bookmark--collection' + (isShared ? ' ml-bookmark--shared' : '');
 				var qs = '?coll=' + encodeURIComponent(c.id);
 				a.href = location.pathname + qs;
 				a.dataset.qs = qs;
 				a.innerHTML = '<i class="fa fa-clone" aria-hidden="true"></i> ';
 				a.appendChild(document.createTextNode(c.name || ''));
 				li.appendChild(a);
-				li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
+				if (!isShared || canManageShared) li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
 				ul.insertBefore(li, addLi);
-			});
+			}
+			// Ordered by TYPE, not owner: all bookmarks (personal then team),
+			// then all collections (personal then team). No separator — shared
+			// tabs are distinguished only typographically (ml-bookmark--shared).
+			bookmarks.forEach(function (b, idx) { addBookmarkLi(b, idx, false); });
+			sharedBookmarks.forEach(function (b, idx) { addBookmarkLi(b, idx, true); });
+			collections.forEach(function (c) { addCollectionLi(c, false); });
+			sharedCollections.forEach(function (c) { addCollectionLi(c, true); });
 			syncBookmarkActive();
 		}
 
@@ -3392,6 +3450,23 @@
 			input.maxLength = 80;
 			dialog.appendChild(input);
 
+			// Managers can save straight into the team-wide shared store via a
+			// single checkbox — no separate dialog, no extra icon in the bar.
+			var shareToggle = null;
+			if (canManageShared) {
+				var shareLabel = document.createElement('label');
+				shareLabel.className = 'ml-share-toggle';
+				shareToggle = document.createElement('input');
+				shareToggle.type = 'checkbox';
+				shareLabel.appendChild(shareToggle);
+				shareLabel.appendChild(document.createTextNode(' ' + (labels.shareWithTeam || 'Share with the team')));
+				dialog.appendChild(shareLabel);
+				var shareHint = document.createElement('p');
+				shareHint.className = 'ml-popup-hint ml-share-hint';
+				shareHint.textContent = labels.shareWithTeamHint || '';
+				dialog.appendChild(shareHint);
+			}
+
 			var footer = document.createElement('footer');
 			var cancelBtn = document.createElement('button');
 			cancelBtn.type = 'button';
@@ -3413,20 +3488,25 @@
 			function commit() {
 				var name = input.value.trim();
 				if (!name) { input.focus(); return; }
+				var toShared = !!(shareToggle && shareToggle.checked);
 				if (isCollection) {
-					collections.push({ id: newCollectionId(), name: name, keys: selKeys });
+					var c = { id: newCollectionId(), name: name, keys: selKeys };
+					(toShared ? sharedCollections : collections).push(c);
 				} else {
-					bookmarks.push({ name: name, qs: current });
+					var b = { name: name, qs: current };
+					(toShared ? sharedBookmarks : bookmarks).push(b);
 				}
 				cleanup();
 				rerenderBookmarksList();
-				saveUserPrefs();
+				if (toShared) saveSharedPrefs(); else saveUserPrefs();
 				// A new collection consumes the selection → uncheck the boxes as
 				// confirmation (also flips the bar back out of collection mode).
 				if (isCollection) clearSelectionConfirm();
-				announce(isCollection
-					? (labels.collectionSaved || 'Collection saved')
-					: (labels.bookmarkSaved || 'Bookmark saved'));
+				announce(toShared
+					? (labels.sharedSaved || 'Shared with the team')
+					: (isCollection
+						? (labels.collectionSaved || 'Collection saved')
+						: (labels.bookmarkSaved || 'Bookmark saved')));
 			}
 			saveBtn.addEventListener('click', commit);
 			input.addEventListener('keydown', function (e) {
@@ -3466,12 +3546,14 @@
 		// viewing). Merge + de-dupe; confirm by clearing the selection.
 		function addSelectionToCollection(collId) {
 			var selKeys = Array.from(selection);
-			var coll = collections.filter(function (c) { return c && c.id === collId; })[0];
-			if (!coll || !selKeys.length) return;
+			var found = findCollection(collId);
+			if (!found || !selKeys.length) return;
+			if (found.shared && !canManageShared) return;   // read-only for non-managers
+			var coll = found.coll;
 			var before = coll.keys.length;
 			coll.keys = Array.from(new Set(coll.keys.concat(selKeys)));
 			var added = coll.keys.length - before;
-			saveUserPrefs();
+			if (found.shared) saveSharedPrefs(); else saveUserPrefs();
 			clearSelectionConfirm();
 			announce((labels.collectionUpdated || 'Added %d image(s) to the collection')
 				.replace('%d', String(added)));
@@ -3482,8 +3564,10 @@
 		// the debounced save), bumps the count, clears the selection.
 		function removeSelectionFromCollection(collId) {
 			var selKeys = Array.from(selection);
-			var coll = collections.filter(function (c) { return c && c.id === collId; })[0];
-			if (!coll || !selKeys.length) return;
+			var found = findCollection(collId);
+			if (!found || !selKeys.length) return;
+			if (found.shared && !canManageShared) return;   // read-only for non-managers
+			var coll = found.coll;
 			var dropSet = {};
 			selKeys.forEach(function (k) { dropSet[k] = true; });
 			var was = coll.keys.length;
@@ -3498,7 +3582,7 @@
 					if (row) row.remove();
 				}
 			});
-			saveUserPrefs();
+			if (found.shared) saveSharedPrefs(); else saveUserPrefs();
 			clearSelectionConfirm();
 			bumpPaginationTotal(-removed);
 			announce((labels.collectionRemoved || 'Removed %d image(s) from the collection')
@@ -3519,14 +3603,24 @@
 				e.stopPropagation();
 				var li = del.closest('li');
 				if (!li) return;
+				// Shared (team-wide) entries route their write to the shared store;
+				// the × only exists for managers, but guard the write anyway.
+				var isShared = li.dataset.shared === '1';
+				if (isShared && !canManageShared) return;
 				// Collection delete (li carries data-coll-id) vs filter-bookmark
 				// delete (li carries data-bookmark-idx).
 				if (li.dataset.collId) {
 					var cid = li.dataset.collId;
-					collections = collections.filter(function (c) { return c && c.id !== cid; });
+					if (isShared) {
+						sharedCollections = sharedCollections.filter(function (c) { return c && c.id !== cid; });
+					} else {
+						collections = collections.filter(function (c) { return c && c.id !== cid; });
+					}
 					rerenderBookmarksList();
-					saveUserPrefs();
-					announce(labels.collectionDeleted || 'Collection deleted');
+					if (isShared) saveSharedPrefs(); else saveUserPrefs();
+					announce(isShared
+						? (labels.sharedDeleted || 'Removed from the team')
+						: (labels.collectionDeleted || 'Collection deleted'));
 					// If we're currently viewing the deleted collection, drop ?coll
 					// from the URL and reload (keep any other filters that were on).
 					if (currentColl() === cid) {
@@ -3537,12 +3631,15 @@
 					}
 					return;
 				}
+				var arr = isShared ? sharedBookmarks : bookmarks;
 				var idx = parseInt(li.dataset.bookmarkIdx, 10);
-				if (isNaN(idx) || idx < 0 || idx >= bookmarks.length) return;
-				bookmarks.splice(idx, 1);
+				if (isNaN(idx) || idx < 0 || idx >= arr.length) return;
+				arr.splice(idx, 1);
 				rerenderBookmarksList();
-				saveUserPrefs();
-				announce(labels.bookmarkDeleted || 'Bookmark deleted');
+				if (isShared) saveSharedPrefs(); else saveUserPrefs();
+				announce(isShared
+					? (labels.sharedDeleted || 'Removed from the team')
+					: (labels.bookmarkDeleted || 'Bookmark deleted'));
 				return;
 			}
 			var tab = e.target.closest('a.ml-bookmark');
@@ -3556,7 +3653,10 @@
 				var tLi = tab.closest('li');
 				var tCid = tLi && tLi.dataset.collId;
 				var hasSelNow = (typeof selection !== 'undefined') && selection.size > 0;
-				if (tCid && hasSelNow) {
+				// Shared collections are read-only for non-managers: skip curate and
+				// fall through to normal recall so the click still does something.
+				var curatable = !(tLi && tLi.dataset.shared === '1') || canManageShared;
+				if (tCid && hasSelNow && curatable) {
 					if (tLi.classList.contains('uk-active')) removeSelectionFromCollection(tCid);
 					else addSelectionToCollection(tCid);
 					return;
