@@ -1413,28 +1413,12 @@ textarea.ml-langtabs-pane {
 	max-width: 100%;
 }
 
-/* "Used in" column. The count badge is a compact, clickable pill; a muted
-   dash marks images embedded nowhere. */
-.ml-cell-usedin {
-	text-align: center;
-}
-.ml-usage-badge {
-	display: inline-block;
-	min-width: 1.6rem;
-	padding: 0.05rem 0.45rem;
-	border: 0;
-	border-radius: 999px;
-	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 55%, var(--pw-text-color, #000) 12%);
-	color: var(--pw-text-color, inherit);
-	font-size: 0.85em;
-	font-weight: 600;
-	line-height: 1.5;
+/* "Used in" column. The count is a plain link (it inherits the admin
+   theme's anchor colour, like the Page cell); a muted dash marks images
+   embedded nowhere. No bespoke control. */
+.ml-usage-link {
+	font-weight: 500;
 	cursor: pointer;
-}
-.ml-usage-badge:hover,
-.ml-usage-badge:focus-visible {
-	background: var(--pw-primary, #3480e3);
-	color: #fff;
 }
 .ml-usage-none {
 	color: var(--pw-muted-color, #999);

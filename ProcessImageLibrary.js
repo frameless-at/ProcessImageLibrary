@@ -2473,13 +2473,13 @@
 		// Delegated on .ml-results so it survives the innerHTML swaps on
 		// filter / sort / pagination.
 		results && results.addEventListener('click', function (e) {
-			var badge = e.target.closest && e.target.closest('.ml-usage-badge');
-			if (!badge) return;
+			var link = e.target.closest && e.target.closest('.ml-usage-link');
+			if (!link) return;
 			e.preventDefault();
 			openUsageDialog(
-				badge.getAttribute('data-page-id'),
-				badge.getAttribute('data-field'),
-				badge.getAttribute('data-basename')
+				link.getAttribute('data-page-id'),
+				link.getAttribute('data-field'),
+				link.getAttribute('data-basename')
 			);
 		});
 

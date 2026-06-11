@@ -6695,13 +6695,13 @@ class ProcessImageLibrary extends Process {
 			$usageCount = (int) ($row['usageCount'] ?? 0);
 			$out .= '<td class="ml-cell-nowrap ml-cell-usedin" data-col="usedIn">';
 			if ($usageCount > 0) {
-				$out .= '<button type="button" class="ml-usage-badge"'
+				$out .= '<a href="#" class="ml-usage-link"'
 					. ' data-page-id="' . (int) $row['pageId'] . '"'
 					. ' data-field="' . $san->entities((string) $row['fieldName']) . '"'
 					. ' data-basename="' . $san->entities((string) $row['basename']) . '"'
 					. ' title="' . $san->entities(sprintf(
 						$this->_('Embedded on %d page(s) — click to list'), $usageCount
-					)) . '">' . $usageCount . '</button>';
+					)) . '">' . $usageCount . '</a>';
 			} else {
 				$out .= '<span class="ml-usage-none" aria-hidden="true">–</span>';
 			}
