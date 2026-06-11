@@ -2403,38 +2403,38 @@
 			return document.createTextNode(label);
 		}
 
-		// "Used in" column → modal listing every page that embeds this image in
-		// a rich-text field. Content-based: the server aggregates across the
-		// image's whole dedup cluster (usage-detail endpoint), so the list
-		// matches the badge count regardless of which placement was clicked.
+		// "Used in" column → dialog listing every page (and the fields on it)
+		// that embeds this image in rich-text. Content-based: the server
+		// aggregates across the image's whole dedup cluster (usage-detail
+		// endpoint), so the list matches the badge count regardless of which
+		// placement was clicked. Same chrome as the other dialogs: header
+		// title, scrollable body, Close button in a bottom footer.
 		function openUsageDialog(pageId, field, basename) {
 			var dialog = document.createElement('dialog');
-			dialog.className = 'ml-usage-modal';
+			dialog.className = 'ml-usage-dialog';
 
-			var bar = document.createElement('header');
-			bar.className = 'ml-image-modal-bar';
-			var title = document.createElement('span');
-			title.className = 'ml-image-modal-title';
-			title.textContent = labels.usedInTitle || 'Embedded on these pages';
-			var closeBtn = document.createElement('button');
-			closeBtn.type = 'button';
-			closeBtn.className = 'ml-image-modal-close uk-button uk-button-secondary';
-			closeBtn.textContent = labels.close || 'Close';
-			bar.appendChild(title);
-			bar.appendChild(closeBtn);
+			var header = document.createElement('header');
+			header.textContent = labels.usedInTitle || 'Embedded on these pages & fields';
+			dialog.appendChild(header);
 
 			var body = document.createElement('div');
-			body.className = 'ml-usage-modal-body';
+			body.className = 'ml-usage-dialog-body';
 			body.textContent = labels.usedInLoading || 'Loading…';
-
-			dialog.appendChild(bar);
 			dialog.appendChild(body);
-			(results || document.body).appendChild(dialog);
 
+			var footer = document.createElement('footer');
+			var closeBtn = document.createElement('button');
+			closeBtn.type = 'button';
+			closeBtn.className = 'uk-button uk-button-primary';
+			closeBtn.textContent = labels.close || 'Close';
+			footer.appendChild(closeBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
 			closeBtn.addEventListener('click', function () { if (dialog.open) dialog.close(); });
-			dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
 			dialog.addEventListener('close', function () { dialog.remove(); });
 			dialog.showModal();
+			closeBtn.focus();
 
 			if (!config.usageDetailUrl) { body.textContent = labels.usedInEmpty || ''; return; }
 			var fd = new FormData();
@@ -2454,13 +2454,14 @@
 				var pages = (d && d.ok && d.pages) || [];
 				if (!pages.length) {
 					var p = document.createElement('p');
-					p.className = 'ml-usage-modal-empty';
+					p.className = 'ml-usage-dialog-empty';
 					p.textContent = labels.usedInEmpty || 'Not embedded in any rich-text field.';
 					body.appendChild(p);
 					return;
 				}
+				// Reuse the existing where-used list styling (delete/rename dialogs).
 				var ul = document.createElement('ul');
-				ul.className = 'ml-usage-modal-list';
+				ul.className = 'ml-delete-confirm-usage-list';
 				pages.forEach(function (r) {
 					var li = document.createElement('li');
 					li.appendChild(buildUsageRef(r));

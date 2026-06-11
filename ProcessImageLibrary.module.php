@@ -5944,7 +5944,7 @@ class ProcessImageLibrary extends Process {
 				'usageFieldFmt'    => $this->_('“%1$s” · %2$s'),
 				'usageCountFmt'    => $this->_('used in %d page(s)'),
 				// "Used in" column click-through dialog.
-				'usedInTitle'      => $this->_('Embedded on these pages'),
+				'usedInTitle'      => $this->_('Embedded on these pages & fields'),
 				'usedInEmpty'      => $this->_('Not embedded in any rich-text field.'),
 				'usedInLoading'    => $this->_('Loading…'),
 				// Post-rename summary dialog. A rename rewrites every

@@ -347,7 +347,8 @@
 .ml-columns-dialog,
 .ml-bulk-result-dialog,
 .ml-delete-confirm,
-.ml-bookmark-dialog {
+.ml-bookmark-dialog,
+.ml-usage-dialog {
 	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 4px;
 	padding: 1.25rem;
@@ -364,14 +365,15 @@
 .ml-bookmark-dialog::backdrop,
 .ml-image-modal::backdrop,
 .ml-cluster-modal::backdrop,
-.ml-usage-modal::backdrop {
+.ml-usage-dialog::backdrop {
 	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
 }
 .ml-popup-editor > header,
 .ml-columns-dialog > header,
 .ml-bulk-result-dialog > header,
 .ml-delete-confirm > header,
-.ml-bookmark-dialog > header {
+.ml-bookmark-dialog > header,
+.ml-usage-dialog > header {
 	font-weight: 600;
 	font-size: 1.05em;
 	margin: 0 0 0.75rem;
@@ -382,7 +384,8 @@
 .ml-columns-dialog > footer,
 .ml-bulk-result-dialog > footer,
 .ml-delete-confirm > footer,
-.ml-bookmark-dialog > footer {
+.ml-bookmark-dialog > footer,
+.ml-usage-dialog > footer {
 	display: flex;
 	justify-content: flex-end;
 	gap: 0.5rem;
@@ -397,6 +400,7 @@
 .ml-delete-confirm     { width: min(480px, 92vw); }
 .ml-columns-dialog     { width: min(420px, 92vw); }
 .ml-bookmark-dialog    { width: min(420px, 92vw); }
+.ml-usage-dialog       { width: min(480px, 92vw); }
 
 /* Delete-confirm content bits (preview list + warning line) — the
    structural chrome is inherited from the shared block above. */
@@ -1430,33 +1434,12 @@ textarea.ml-langtabs-pane {
 	color: var(--pw-muted-color, #999);
 }
 
-/* Where-used list modal opened from the badge: same chrome as the cluster
-   modal, sized to a short page list. */
-.ml-usage-modal {
-	width: min(520px, 92vw);
-	max-height: 80vh;
-	padding: 0;
-	border: 1px solid var(--pw-border-color, #ccc);
-	border-radius: 4px;
-	overflow: hidden;
-	display: flex;
-	flex-direction: column;
-	background: var(--pw-blocks-background, #fff);
-}
-.ml-usage-modal-body {
-	flex: 1 1 auto;
-	overflow-y: auto;
-	padding: 0.5rem 1rem 1rem;
-}
-.ml-usage-modal-list {
+/* "Used in" dialog — all chrome (border, padding, header, footer, width,
+   backdrop) is inherited from the shared dialog block above; the page/field
+   list reuses .ml-delete-confirm-usage-list. Only the empty-state line is
+   unique here. */
+.ml-usage-dialog-empty {
 	margin: 0;
-	padding-left: 1.1rem;
-}
-.ml-usage-modal-list li {
-	margin: 0.2rem 0;
-}
-.ml-usage-modal-empty {
-	margin: 0.5rem 0 0;
 	color: var(--pw-muted-color, #777);
 }
 
