@@ -857,10 +857,16 @@ textarea.ml-cell-input {
 	outline-offset: -2px;
 }
 
-/* Variations cell renders just a count — right-align like other
-   numeric cells for quick at-a-glance scanning. */
+/* Pure-integer count columns (Variations, Used in) are centre-aligned —
+   header and cells — so single-digit counts read consistently down the
+   column instead of drifting to an edge. */
+.ml-cell-variations,
+.ml-cell-usedin,
+.ml-table thead th[data-col="variations"],
+.ml-table thead th[data-col="usedIn"] {
+	text-align: center;
+}
 .ml-cell-variations {
-	text-align: right;
 	color: var(--pw-muted-color, #555);
 }
 

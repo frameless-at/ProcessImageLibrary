@@ -455,6 +455,11 @@ class ProcessImageLibrary extends Process {
 		// strings; ISO-shaped, so string sort = chronological sort.
 		'created'     => 'string',
 		'modified'    => 'string',
+		// Integer count columns. Not present in the cached findRaw rows —
+		// hydrated onto the full filtered set just-in-time before the sort
+		// (see renderResultsHtml), the same way custom-subfield sorts are.
+		'variationsCount' => 'int',
+		'usageCount'      => 'int',
 	];
 
 	const DEFAULT_SORT = 'pageTitle';
@@ -1606,6 +1611,21 @@ class ProcessImageLibrary extends Process {
 		// case here so the full row set carries the column.
 		if (strncmp($sort, 'custom:', 7) === 0 && $this->hasAnyCustomFields()) {
 			$rows = $this->bulkHydrateCustomFields($rows);
+		}
+		// Integer-count sorts (Used in / Variations): these values aren't in the
+		// cached findRaw rows, so populate them on the FULL filtered set before
+		// sorting — only when that sort is active, so normal browsing pays
+		// nothing. usageCount is an in-memory index pass; variationsCount needs
+		// a per-image filesystem scan, hence strictly opt-in via this sort.
+		if ($sort === 'usageCount') {
+			$counts = $this->usagePageCountsForRows($rows);
+			foreach ($rows as &$r) {
+				$key = (int) $r['pageId'] . "\0" . (string) $r['fieldName'] . "\0" . (string) $r['basename'];
+				$r['usageCount'] = $counts[$key] ?? 0;
+			}
+			unset($r);
+		} elseif ($sort === 'variationsCount') {
+			$this->hydrateVariationCounts($rows);
 		}
 		$this->applySort($rows, $sort, $dir);
 
@@ -5066,6 +5086,38 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Populate $row['variationsCount'] on every given row by scanning each
+	 * image's variation files. Used to sort the table by the Variations
+	 * column: the count isn't in the cached rows, and unlike hydrateSlice
+	 * (which only does the visible slice) a sort needs it on the full set.
+	 * Pages are batch-loaded once; the per-image getVariations() filesystem
+	 * scan is the cost, so this only runs when that sort is actually chosen.
+	 *
+	 * @param array<int,array<string,mixed>> $rows by reference
+	 */
+	protected function hydrateVariationCounts(array &$rows): void {
+		if (!$rows) return;
+		$idSet = [];
+		foreach ($rows as $r) {
+			if (!empty($r['pageId'])) $idSet[(int) $r['pageId']] = true;
+		}
+		$pagesById = [];
+		foreach ($this->wire('pages')->getById(array_keys($idSet)) as $p) {
+			$pagesById[$p->id] = $p;
+		}
+		foreach ($rows as &$r) {
+			$r['variationsCount'] = 0;
+			$page = $pagesById[(int) $r['pageId']] ?? null;
+			if (!$page || !$page->id) continue;
+			$img = $this->resolvePageimage($page, (string) $r['fieldName'], (string) $r['basename']);
+			if (!$img) continue;
+			$vars = $img->getVariations();
+			$r['variationsCount'] = $vars ? $vars->count() : 0;
+		}
+		unset($r);
+	}
+
+	/**
 	 * Apply PHP-level row filters that PW's findRaw selector can't (or shouldn't)
 	 * express. Template narrowing is already done at the selector level in
 	 * loadRows; here we handle the per-image-row filters.
@@ -6399,8 +6451,8 @@ class ProcessImageLibrary extends Process {
 			['size',        $this->_('Size'),        'filesize'],
 			['created',     $this->_('Uploaded'),    'created'],
 			['modified',    $this->_('Modified'),    'modified'],
-			['variations',  $this->_('Variations'),  null],
-			['usedIn',      $this->_('Used in'),     null],
+			['variations',  $this->_('Variations'),  'variationsCount'],
+			['usedIn',      $this->_('Used in'),     'usageCount'],
 		];
 		if (!$showTagsCol) {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
