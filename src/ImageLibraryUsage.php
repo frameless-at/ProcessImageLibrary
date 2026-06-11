@@ -500,10 +500,12 @@ trait ImageLibraryUsage {
 
 	/**
 	 * Resolve a set of cluster keys to the distinct content pages that embed
-	 * the image, newest-page-id first. Each raw (refPage, field) is run
-	 * through usageRefForPage so repeater/matrix item pages fold up to their
-	 * owning content page; the result is de-duplicated to one entry per
-	 * owner page (the column answers "which pages", not "which fields").
+	 * the image — one entry per page, listing EVERY field the image appears in
+	 * on that page (comma-joined into fieldName). Each raw (refPage, field) is
+	 * run through usageRefForPage so repeater/matrix item pages fold up to
+	 * their owning content page; entries for the same owner page are merged so
+	 * an image used in two textareas of one page reads "Page · body, summary"
+	 * rather than showing the page twice or naming only the first field.
 	 *
 	 * @param array<int,string> $keys           imageClusterKeys()
 	 * @param array<string,array<int,array{0:int,1:string}>> $usageByImage  loadUsageByImage()
@@ -511,9 +513,8 @@ trait ImageLibraryUsage {
 	 * @return array<int,array{pageId:int,pageTitle:string,editUrl:string,fieldName:string}>
 	 */
 	protected function resolveUsagePages(array $keys, array $usageByImage, array &$pageCache): array {
-		$pages = $this->wire('pages');
-		$out   = [];
-		$seen  = [];
+		$pages  = $this->wire('pages');
+		$byPage = [];   // ownerPageId => ['pageId','pageTitle','editUrl','fields'=>set]
 		foreach ($keys as $key) {
 			foreach ($usageByImage[$key] ?? [] as [$refPid, $field]) {
 				if (!array_key_exists($refPid, $pageCache)) {
@@ -523,10 +524,28 @@ trait ImageLibraryUsage {
 				$rp = $pageCache[$refPid];
 				if (!$rp) continue;
 				$ref = $this->usageRefForPage($rp, $field);
-				if (isset($seen[$ref['pageId']])) continue;   // one entry per owner page
-				$seen[$ref['pageId']] = true;
-				$out[] = $ref;
+				$pid = $ref['pageId'];
+				if (!isset($byPage[$pid])) {
+					$byPage[$pid] = [
+						'pageId'    => $pid,
+						'pageTitle' => $ref['pageTitle'],
+						'editUrl'   => $ref['editUrl'],
+						'fields'    => [],
+					];
+				}
+				$byPage[$pid]['fields'][$ref['fieldName']] = true;   // de-dupe fields per page
 			}
+		}
+		$out = [];
+		foreach ($byPage as $entry) {
+			$fields = array_keys($entry['fields']);
+			sort($fields, SORT_NATURAL | SORT_FLAG_CASE);   // stable, readable order
+			$out[] = [
+				'pageId'    => $entry['pageId'],
+				'pageTitle' => $entry['pageTitle'],
+				'editUrl'   => $entry['editUrl'],
+				'fieldName' => implode(', ', $fields),
+			];
 		}
 		return $out;
 	}
