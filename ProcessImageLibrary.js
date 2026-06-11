@@ -2403,6 +2403,86 @@
 			return document.createTextNode(label);
 		}
 
+		// "Used in" column → modal listing every page that embeds this image in
+		// a rich-text field. Content-based: the server aggregates across the
+		// image's whole dedup cluster (usage-detail endpoint), so the list
+		// matches the badge count regardless of which placement was clicked.
+		function openUsageDialog(pageId, field, basename) {
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-usage-modal';
+
+			var bar = document.createElement('header');
+			bar.className = 'ml-image-modal-bar';
+			var title = document.createElement('span');
+			title.className = 'ml-image-modal-title';
+			title.textContent = labels.usedInTitle || 'Embedded on these pages';
+			var closeBtn = document.createElement('button');
+			closeBtn.type = 'button';
+			closeBtn.className = 'ml-image-modal-close uk-button uk-button-secondary';
+			closeBtn.textContent = labels.close || 'Close';
+			bar.appendChild(title);
+			bar.appendChild(closeBtn);
+
+			var body = document.createElement('div');
+			body.className = 'ml-usage-modal-body';
+			body.textContent = labels.usedInLoading || 'Loading…';
+
+			dialog.appendChild(bar);
+			dialog.appendChild(body);
+			(results || document.body).appendChild(dialog);
+
+			closeBtn.addEventListener('click', function () { if (dialog.open) dialog.close(); });
+			dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			dialog.showModal();
+
+			if (!config.usageDetailUrl) { body.textContent = labels.usedInEmpty || ''; return; }
+			var fd = new FormData();
+			fd.append('pageId', pageId);
+			fd.append('field', field || '');
+			fd.append('basename', basename);
+			appendCsrf(fd);
+			fetch(config.usageDetailUrl, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' },
+				body: fd
+			}).then(function (r) {
+				return r.json().catch(function () { return null; });
+			}).then(function (d) {
+				body.textContent = '';
+				var pages = (d && d.ok && d.pages) || [];
+				if (!pages.length) {
+					var p = document.createElement('p');
+					p.className = 'ml-usage-modal-empty';
+					p.textContent = labels.usedInEmpty || 'Not embedded in any rich-text field.';
+					body.appendChild(p);
+					return;
+				}
+				var ul = document.createElement('ul');
+				ul.className = 'ml-usage-modal-list';
+				pages.forEach(function (r) {
+					var li = document.createElement('li');
+					li.appendChild(buildUsageRef(r));
+					ul.appendChild(li);
+				});
+				body.appendChild(ul);
+			}).catch(function () { body.textContent = labels.usedInEmpty || ''; });
+		}
+
+		// Delegated on .ml-results so it survives the innerHTML swaps on
+		// filter / sort / pagination.
+		results && results.addEventListener('click', function (e) {
+			var badge = e.target.closest && e.target.closest('.ml-usage-badge');
+			if (!badge) return;
+			e.preventDefault();
+			openUsageDialog(
+				badge.getAttribute('data-page-id'),
+				badge.getAttribute('data-field'),
+				badge.getAttribute('data-basename')
+			);
+		});
+
 		// Post-rename summary. The rename already happened and every
 		// rich-text embed of the file was rewritten server-side; this
 		// dialog confirms the new filename and lists the references that

@@ -413,6 +413,168 @@ trait ImageLibraryUsage {
 		}
 	}
 
+	// ------------------------------------------------------------------
+	// Content-based lookup — the "Used in" column.
+	//
+	// The column answers ONE question: "on which pages is THIS image
+	// embedded in a rich-text field?" — content-based, so every dedup
+	// placement of the same image gives the same answer. An embed only
+	// ever references one physical copy, but the user thinks of it as one
+	// image; we therefore aggregate usage across the whole byte-identical
+	// cluster (via the dedup hash store) so whichever placement you look
+	// at, you see the full set of embedding pages. Where-it-lives-in-image-
+	// fields is the dedup feature's job; this is purely textarea embeds.
+	// ------------------------------------------------------------------
+
+	/** Stem (basename minus final extension), the key form the index uses. */
+	protected function basenameStem(string $basename): string {
+		$dot = strrpos($basename, '.');
+		return $dot === false ? $basename : substr($basename, 0, $dot);
+	}
+
+	/**
+	 * The whole usage index as an in-memory map, loaded once per request.
+	 * Keyed by source image, each entry the raw referencing (page, field)
+	 * pairs. Small table (only embedded images), so one read is cheap and
+	 * lets the slice hydration resolve every row without per-row queries.
+	 *
+	 * @return array<string,array<int,array{0:int,1:string}>>  "imgPid\0stem" => [[refPid, field], …]
+	 */
+	protected function loadUsageByImage(): array {
+		static $cache = null;
+		if ($cache !== null) return $cache;
+		$this->ensureUsageTable();
+		$out = [];
+		try {
+			$stmt = $this->wire('database')->query(
+				'SELECT img_page_id, img_stem, ref_page_id, field_name FROM `' . self::USAGE_TABLE . '`'
+			);
+			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
+				$out[(int) $r['img_page_id'] . "\0" . (string) $r['img_stem']][]
+					= [(int) $r['ref_page_id'], (string) $r['field_name']];
+			}
+		} catch (\Throwable $e) {
+		}
+		return $cache = $out;
+	}
+
+	/**
+	 * Invert loadDuplicateKeyHashes() into "content_hash => [imgPid\0stem, …]",
+	 * the member keys of every byte-identical cluster. Built purely in memory
+	 * from the dup-key map (which already lists every duplicate member), so the
+	 * batch needs no per-row cluster query.
+	 *
+	 * @param array<string,string> $dupKeyHashes  "pid\0field\0basename" => content_hash
+	 * @return array<string,array<int,string>>
+	 */
+	protected function clusterMembersByHash(array $dupKeyHashes): array {
+		$out = [];
+		foreach ($dupKeyHashes as $identity => $hash) {
+			$parts = explode("\0", $identity);   // pid, field, basename
+			if (count($parts) !== 3) continue;
+			$out[$hash][(int) $parts[0] . "\0" . $this->basenameStem($parts[2])] = true;
+		}
+		foreach ($out as $h => $set) $out[$h] = array_keys($set);
+		return $out;
+	}
+
+	/**
+	 * The set of index keys ("imgPid\0stem") that make up one image's
+	 * byte-identical cluster — itself plus every dedup twin — so usage is
+	 * aggregated content-wide. An image with no duplicates (or not yet hashed)
+	 * resolves to just itself.
+	 *
+	 * @param array<string,string> $dupKeyHashes    loadDuplicateKeyHashes()
+	 * @param array<string,array<int,string>> $membersByHash  clusterMembersByHash()
+	 * @return array<int,string>  list of "imgPid\0stem" keys
+	 */
+	protected function imageClusterKeys(int $pageId, string $fieldName, string $basename, array $dupKeyHashes, array $membersByHash): array {
+		$self = $pageId . "\0" . $this->basenameStem($basename);
+		$hash = $dupKeyHashes[$pageId . "\0" . $fieldName . "\0" . $basename] ?? null;
+		if ($hash === null || empty($membersByHash[$hash])) return [$self];
+
+		$keys = [$self => true];
+		foreach ($membersByHash[$hash] as $k) $keys[$k] = true;
+		return array_keys($keys);
+	}
+
+	/**
+	 * Resolve a set of cluster keys to the distinct content pages that embed
+	 * the image, newest-page-id first. Each raw (refPage, field) is run
+	 * through usageRefForPage so repeater/matrix item pages fold up to their
+	 * owning content page; the result is de-duplicated to one entry per
+	 * owner page (the column answers "which pages", not "which fields").
+	 *
+	 * @param array<int,string> $keys           imageClusterKeys()
+	 * @param array<string,array<int,array{0:int,1:string}>> $usageByImage  loadUsageByImage()
+	 * @param array<int,Page|null> $pageCache    shared across a batch, by reference
+	 * @return array<int,array{pageId:int,pageTitle:string,editUrl:string,fieldName:string}>
+	 */
+	protected function resolveUsagePages(array $keys, array $usageByImage, array &$pageCache): array {
+		$pages = $this->wire('pages');
+		$out   = [];
+		$seen  = [];
+		foreach ($keys as $key) {
+			foreach ($usageByImage[$key] ?? [] as [$refPid, $field]) {
+				if (!array_key_exists($refPid, $pageCache)) {
+					$p = $pages->get($refPid);
+					$pageCache[$refPid] = $p->id ? $p : null;
+				}
+				$rp = $pageCache[$refPid];
+				if (!$rp) continue;
+				$ref = $this->usageRefForPage($rp, $field);
+				if (isset($seen[$ref['pageId']])) continue;   // one entry per owner page
+				$seen[$ref['pageId']] = true;
+				$out[] = $ref;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Content-based where-used for a single image: the distinct pages that
+	 * embed it in rich-text. Drives the column's click-through dialog.
+	 *
+	 * @return array<int,array{pageId:int,pageTitle:string,editUrl:string,fieldName:string}>
+	 */
+	public function usagePagesForImage(int $pageId, string $fieldName, string $basename): array {
+		if ($pageId < 1 || $basename === '') return [];
+		$dupKeyHashes  = $this->loadDuplicateKeyHashes();
+		$membersByHash = $this->clusterMembersByHash($dupKeyHashes);
+		$keys  = $this->imageClusterKeys($pageId, $fieldName, $basename, $dupKeyHashes, $membersByHash);
+		$cache = [];
+		return $this->resolveUsagePages($keys, $this->loadUsageByImage(), $cache);
+	}
+
+	/**
+	 * Batch usage page-counts for a slice of rows — one in-memory pass, no
+	 * per-row queries. Returns rowKey ("pageId\0fieldName\0basename") => count
+	 * of distinct embedding pages, omitting rows with zero (so the caller can
+	 * render a dash). Used by hydrateSlice for the visible rows only.
+	 *
+	 * @param array<int,array<string,mixed>> $rows
+	 * @return array<string,int>
+	 */
+	public function usagePageCountsForRows(array $rows): array {
+		if (!$rows) return [];
+		$usageByImage = $this->loadUsageByImage();
+		if (!$usageByImage) return [];   // nothing embedded anywhere → all zero
+		$dupKeyHashes  = $this->loadDuplicateKeyHashes();
+		$membersByHash = $this->clusterMembersByHash($dupKeyHashes);
+		$pageCache     = [];
+		$out = [];
+		foreach ($rows as $row) {
+			$pid = (int) ($row['pageId'] ?? 0);
+			$fn  = (string) ($row['fieldName'] ?? '');
+			$bn  = (string) ($row['basename'] ?? '');
+			if (!$pid || $bn === '') continue;
+			$keys  = $this->imageClusterKeys($pid, $fn, $bn, $dupKeyHashes, $membersByHash);
+			$pages = $this->resolveUsagePages($keys, $usageByImage, $pageCache);
+			if ($pages) $out[$pid . "\0" . $fn . "\0" . $bn] = count($pages);
+		}
+		return $out;
+	}
+
 	/**
 	 * Coarse diagnostics for the index — total reference rows and how many
 	 * distinct library images they cover. Cheap aggregate; handy for a

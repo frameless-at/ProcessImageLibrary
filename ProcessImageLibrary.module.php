@@ -418,8 +418,24 @@ class ProcessImageLibrary extends Process {
 
 	protected function getDefaultHiddenColumns(): array {
 		$val = $this->get('defaultHiddenColumns');
-		if (!is_array($val)) return [];
-		return array_values(array_filter(array_map('strval', $val)));
+		$cfg = is_array($val) ? array_filter(array_map('strval', $val)) : [];
+		// 'usedIn' (the where-used column) is intrinsically hidden by default —
+		// it's an opt-in audit column, and keeping it off costs nothing on every
+		// render. The user's own toggle still wins once they enable it (saved
+		// column visibility takes precedence over this default everywhere).
+		$cfg[] = 'usedIn';
+		return array_values(array_unique($cfg));
+	}
+
+	/**
+	 * Is the (default-hidden) "Used in" column actually enabled for this user?
+	 * Gates the per-render usage lookup so a table whose column is off pays
+	 * nothing. User pref wins; otherwise it follows the hidden-by-default.
+	 */
+	protected function usedInColumnVisible(): bool {
+		$visible = $this->getUserPrefs()['columns']['visible'] ?? [];
+		if (array_key_exists('usedIn', $visible)) return (bool) $visible['usedIn'];
+		return !in_array('usedIn', $this->getDefaultHiddenColumns(), true);
 	}
 
 	/**
@@ -1484,6 +1500,7 @@ class ProcessImageLibrary extends Process {
 			'created'     => $this->_('Uploaded'),
 			'modified'    => $this->_('Modified'),
 			'variations'  => $this->_('Variations'),
+			'usedIn'      => $this->_('Used in'),
 		];
 		foreach ($customCols as $name) {
 			$cols['custom:' . $name] = $name;
@@ -3006,6 +3023,40 @@ class ProcessImageLibrary extends Process {
 
 		$usage = $this->findImageReferences($clean);
 		return $this->jsonResponse(['ok' => true, 'usage' => $usage]);
+	}
+
+	/**
+	 * Content-based where-used for ONE image — backs the "Used in" column's
+	 * click-through. Unlike ___executeUsage (a live per-placement scan used by
+	 * the delete/rename preflight), this reads the prebuilt usage index and
+	 * aggregates across the image's whole dedup cluster, so the answer matches
+	 * the column's badge count regardless of which placement was clicked.
+	 *
+	 * Returns { ok, pages: [ { pageId, pageTitle, editUrl, fieldName }, … ] }.
+	 */
+	public function ___executeUsageDetail() {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input    = $this->wire('input');
+		$pageId   = (int) $input->post('pageId');
+		$field    = $this->wire('sanitizer')->fieldName((string) $input->post('field'));
+		$basename = basename((string) $input->post('basename'));
+		if (!$pageId || $basename === '') {
+			return $this->jsonError('Missing required parameter');
+		}
+
+		$pages = $this->usagePagesForImage($pageId, $field, $basename);
+		return $this->jsonResponse(['ok' => true, 'pages' => $pages]);
 	}
 
 	/**
@@ -5585,6 +5636,20 @@ class ProcessImageLibrary extends Process {
 		}
 		unset($row);
 
+		// Where-used counts for the visible slice — one in-memory pass over the
+		// usage index + dedup cluster map (no per-row queries). Only rows whose
+		// image is embedded somewhere get a count; the rest render the dash.
+		// Skipped entirely when the (default-hidden) column is off, so a table
+		// nobody toggled it on for pays nothing.
+		$usageCounts = $this->usedInColumnVisible() ? $this->usagePageCountsForRows($slice) : [];
+		if ($usageCounts) {
+			foreach ($slice as &$row) {
+				$key = (int) $row['pageId'] . "\0" . (string) $row['fieldName'] . "\0" . (string) $row['basename'];
+				if (isset($usageCounts[$key])) $row['usageCount'] = (int) $usageCounts[$key];
+			}
+			unset($row);
+		}
+
 		return $slice;
 	}
 
@@ -5696,6 +5761,7 @@ class ProcessImageLibrary extends Process {
 			'replaceUrl' => $this->wire('page')->url . 'replace/',
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
 			'usageUrl'   => $this->wire('page')->url . 'usage/',
+			'usageDetailUrl' => $this->wire('page')->url . 'usage-detail/',
 			'widgetUrl'  => $this->wire('page')->url . 'widget/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
@@ -5825,6 +5891,10 @@ class ProcessImageLibrary extends Process {
 				'usageScanning'    => $this->_('Checking references…'),
 				'usageFieldFmt'    => $this->_('“%1$s” · %2$s'),
 				'usageCountFmt'    => $this->_('used in %d page(s)'),
+				// "Used in" column click-through dialog.
+				'usedInTitle'      => $this->_('Embedded on these pages'),
+				'usedInEmpty'      => $this->_('Not embedded in any rich-text field.'),
+				'usedInLoading'    => $this->_('Loading…'),
 				// Post-rename summary dialog. A rename rewrites every
 				// rich-text embed automatically, so instead of warning
 				// beforehand we confirm afterwards which embeds were fixed.
@@ -6330,6 +6400,7 @@ class ProcessImageLibrary extends Process {
 			['created',     $this->_('Uploaded'),    'created'],
 			['modified',    $this->_('Modified'),    'modified'],
 			['variations',  $this->_('Variations'),  null],
+			['usedIn',      $this->_('Used in'),     null],
 		];
 		if (!$showTagsCol) {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
@@ -6617,6 +6688,24 @@ class ProcessImageLibrary extends Process {
 				. $san->entities($this->formatTimestamp($row['modified'] ?? '')) . '</td>';
 			$out .= '<td class="ml-cell-nowrap ml-cell-variations" data-col="variations">'
 				. (int) ($row['variationsCount'] ?? 0) . '</td>';
+
+			// Where-used: how many pages embed this image in a rich-text field
+			// (content-based, hydrated for the visible slice only). A count
+			// badge opens the page list; a dash means "embedded nowhere".
+			$usageCount = (int) ($row['usageCount'] ?? 0);
+			$out .= '<td class="ml-cell-nowrap ml-cell-usedin" data-col="usedIn">';
+			if ($usageCount > 0) {
+				$out .= '<button type="button" class="ml-usage-badge"'
+					. ' data-page-id="' . (int) $row['pageId'] . '"'
+					. ' data-field="' . $san->entities((string) $row['fieldName']) . '"'
+					. ' data-basename="' . $san->entities((string) $row['basename']) . '"'
+					. ' title="' . $san->entities(sprintf(
+						$this->_('Embedded on %d page(s) — click to list'), $usageCount
+					)) . '">' . $usageCount . '</button>';
+			} else {
+				$out .= '<span class="ml-usage-none" aria-hidden="true">–</span>';
+			}
+			$out .= '</td>';
 
 			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
