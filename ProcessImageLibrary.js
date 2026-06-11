@@ -2414,7 +2414,10 @@
 			dialog.className = 'ml-usage-dialog';
 
 			var header = document.createElement('header');
-			header.textContent = labels.usedInTitle || 'Embedded on these pages & fields';
+			// The label travels through the JS-config JSON; show a literal "&"
+			// rather than an escaped "&amp;".
+			header.textContent = (labels.usedInTitle || 'Embedded on these pages & fields')
+				.replace(/&amp;/g, '&');
 			dialog.appendChild(header);
 
 			var body = document.createElement('div');

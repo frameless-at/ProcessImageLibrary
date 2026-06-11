@@ -483,7 +483,6 @@
 	font-weight: 600;
 }
 .ml-delete-confirm-usage-list a {
-	color: inherit;
 	text-decoration: underline;
 }
 /* Drop-target highlight: the single row currently under the file
