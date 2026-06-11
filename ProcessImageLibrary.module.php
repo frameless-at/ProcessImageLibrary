@@ -1635,7 +1635,7 @@ class ProcessImageLibrary extends Process {
 
 		return $pager
 			. $this->renderTable($slice, $customCols, $filters, $sort, $dir, $tagsConfig)
-			. $this->renderTagDatalists($usedTags)
+			. $this->renderTagDatalists($usedTags, $tagsConfig)
 			. $pager;
 	}
 
@@ -1948,18 +1948,36 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Render one <datalist> per image field whose tags are free-form
-	 * (useTags=1). The text input in the editor references it via
-	 * list="ml-tags-used-<field>" for native browser autocomplete.
+	 * Render one <datalist> per image field that needs tag autocomplete: the
+	 * free-form (mode 1) and predefined-plus-own (mode 3) fields. The editor's
+	 * text input references it via list="ml-tags-used-<field>". Suggestions are
+	 * the tags already used in the library, plus — for mode-3 fields — the
+	 * field's predefined tags (so they're offered even before first use).
+	 *
+	 * @param array<string,array<int,string>> $usedTags
+	 * @param array<string,array{mode:int,allowed:array<int,string>}> $tagsConfig
 	 */
-	protected function renderTagDatalists(array $usedTags): string {
-		if (!$usedTags) return '';
+	protected function renderTagDatalists(array $usedTags, array $tagsConfig = []): string {
 		$san = $this->wire('sanitizer');
-		$out = '';
+		$byField = [];   // field => set of suggestion strings
 		foreach ($usedTags as $field => $tags) {
+			foreach ($tags as $t) $byField[$field][$t] = true;
+		}
+		// Mode-3 fields suggest their predefined tags too, even if unused yet.
+		foreach ($tagsConfig as $field => $cfg) {
+			if (($cfg['mode'] ?? 0) === 3) {
+				foreach ($cfg['allowed'] as $t) $byField[$field][$t] = true;
+			}
+		}
+		if (!$byField) return '';
+
+		$out = '';
+		foreach ($byField as $field => $set) {
+			$tags = array_keys($set);
+			usort($tags, 'strcasecmp');   // alphabetical, case-insensitive
 			$out .= '<datalist id="ml-tags-used-' . $san->entities($field) . '">';
 			foreach ($tags as $t) {
-				$out .= '<option value="' . $san->entities($t) . '">';
+				$out .= '<option value="' . $san->entities((string) $t) . '">';
 			}
 			$out .= '</datalist>';
 		}
@@ -2227,8 +2245,9 @@ class ProcessImageLibrary extends Process {
 		foreach ($cluster as &$r) { $r['dupCount'] = 0; $r['dupHash'] = ''; }
 		unset($r);
 
-		return $this->renderTable($cluster, $customCols, $filters, '', '', $this->getTagsConfig())
-			. $this->renderTagDatalists($this->collectUsedTagsByField($cluster));
+		$tagsConfig = $this->getTagsConfig();
+		return $this->renderTable($cluster, $customCols, $filters, '', '', $tagsConfig)
+			. $this->renderTagDatalists($this->collectUsedTagsByField($cluster), $tagsConfig);
 	}
 
 	/**
@@ -2347,8 +2366,9 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 
-		// useTags=2 (whitelist): reject any token that isn't in the configured
-		// tagsList. Splits on whitespace + commas to match PW's own parsing.
+		// Tag modes: whitelist (2) rejects any token not in the configured
+		// tagsList; predefined-plus-own (3) accepts anything but still
+		// normalises separators. Splits on whitespace + commas to match PW.
 		if ($subfield === 'tags') {
 			$tagsCfg = $this->getTagsConfig()[$fieldName] ?? ['mode' => 0, 'allowed' => []];
 			if ($tagsCfg['mode'] === 2) {
@@ -2361,6 +2381,8 @@ class ProcessImageLibrary extends Process {
 				}
 				// Normalize separator to single space for consistency.
 				$value = implode(' ', $tokens);
+			} elseif ($tagsCfg['mode'] === 3) {
+				$value = implode(' ', $this->splitTags($value));
 			}
 		}
 
@@ -2391,6 +2413,14 @@ class ProcessImageLibrary extends Process {
 			'ok'    => true,
 			'value' => (string) $stored,
 		];
+		// Mode 3 ("predefined + can input their own"): make any new tag part of
+		// the field's predefined list so it's offered on every other image too.
+		// Hand the updated list back so the client can refresh open cells without
+		// a reload.
+		if ($subfield === 'tags' && ($tagsCfg['mode'] ?? 0) === 3) {
+			$response['tagsAllowed'] = array_values($this->registerFieldTags($fieldName, (string) $stored));
+			$response['field']       = $fieldName;
+		}
 		// Multilang fields: also hand back every language's value so
 		// the client can refresh the cell's data-lang-<id> attrs in
 		// place. Without this the next popup-open reads stale
@@ -3612,6 +3642,10 @@ class ProcessImageLibrary extends Process {
 		$renamed = [];
 		$failed      = [];
 		$tagsCfg     = $this->getTagsConfig();
+		// New tags entered on mode-3 ("predefined + own") fields during this
+		// batch, per field — promoted into each field's predefined list once at
+		// the end so they're offered on every image.
+		$mode3TagTokens = [];   // fieldName => [tag => true]
 		$imageFields = $this->discoverImageFields();
 		// Total used by the (N) placeholder. Matches $counter from
 		// the byPage build above — i.e. the number of items the
@@ -3724,6 +3758,11 @@ class ProcessImageLibrary extends Process {
 							$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $disallowed));
 							continue;
 						}
+					} elseif ($tagCfg['mode'] === 3 && $mode !== 'remove') {
+						// Remember newly-entered tags to promote into the field's
+						// predefined list after the batch (so they're offered on
+						// every image, not just this one).
+						foreach ($tokens as $t) $mode3TagTokens[$fn][$t] = true;
 					}
 					if ($mode === 'add') {
 						// Union with the row's existing tags, dedup.
@@ -3792,6 +3831,16 @@ class ProcessImageLibrary extends Process {
 			$this->wire('cache')->deleteFor($this);
 		}
 
+		// Promote any new mode-3 tags into their fields' predefined lists, so
+		// they're offered on every image. Hand the updated lists back keyed by
+		// field for live client refresh.
+		$tagsAllowed = [];
+		foreach ($mode3TagTokens as $fn => $tokenSet) {
+			$tagsAllowed[$fn] = array_values(
+				$this->registerFieldTags($fn, implode(' ', array_keys($tokenSet)))
+			);
+		}
+
 		// Match-aware UX: report which of the just-saved rows no
 		// longer pass the active filter so the client can fade them.
 		$match = $this->matchTouchedRows($succeededKeys);
@@ -3803,6 +3852,7 @@ class ProcessImageLibrary extends Process {
 			'vanished'  => $match['vanished'],
 			'newTotal'  => $match['newTotal'],
 			'renamed'   => (object) $renamed,
+			'tagsAllowed' => (object) $tagsAllowed,
 		]);
 	}
 
@@ -3961,6 +4011,110 @@ class ProcessImageLibrary extends Process {
 		$this->wire('modules')->saveConfig($this, $cfg);
 
 		return $this->jsonResponse(['ok' => true]);
+	}
+
+	/**
+	 * Library-wide tag management PW itself has no tool for: rename a tag (fix a
+	 * typo) or delete it, across the field's predefined list AND every image that
+	 * carries it. POST + CSRF, manager-gated. Params:
+	 *   op    = 'rename' | 'delete'
+	 *   field = image field name
+	 *   tag   = the existing tag
+	 *   newTag= replacement (rename only)
+	 *   apply = '0' → preview only (return affected image count)
+	 *           '1' → apply (retag/untag images, update tagsList)
+	 */
+	public function ___executeTagBulk() {
+		$config = $this->wire('config');
+		$config->ajax = true;
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+		if (!$this->canManageShared()) {
+			return $this->jsonError('Not allowed', 403);
+		}
+
+		$input     = $this->wire('input');
+		$sanitizer = $this->wire('sanitizer');
+		$field  = $sanitizer->fieldName((string) $input->post('field'));
+		$op     = (string) $input->post('op');
+		$oldTag = trim((string) $input->post('tag'));
+		$apply  = (int) $input->post('apply') === 1;
+
+		if (!in_array($field, $this->discoverImageFields(), true)) {
+			return $this->jsonError('Field is not a managed image field');
+		}
+		if (!in_array($op, ['rename', 'delete'], true) || $oldTag === '') {
+			return $this->jsonError('Invalid request');
+		}
+
+		$newTag = '';
+		if ($op === 'rename') {
+			// Same charset PW enforces for tags: spaces → underscore, then keep
+			// letters / digits / underscore / hyphen.
+			$newTag = preg_replace('/[^A-Za-z0-9_-]/', '', str_replace(' ', '_', trim((string) $input->post('newTag'))));
+			if ($newTag === '') return $this->jsonError('New tag is empty');
+			// Exact compare so a case-only fix ("poppy" → "Poppy") is allowed —
+			// PW's tag API is case-insensitive on the key but preserves the stored
+			// case, so removeTag(old) + addTag(new) actually changes the casing.
+			if ($newTag === $oldTag) {
+				return $this->jsonError('New tag is unchanged');
+			}
+		}
+
+		$affected = $this->findImagesWithTag($field, $oldTag);
+		$total = 0;
+		foreach ($affected as $bns) $total += count($bns);
+
+		if (!$apply) {
+			return $this->jsonResponse(['ok' => true, 'count' => $total]);
+		}
+
+		// Apply to every affected image via PW's own tag API (case-insensitive,
+		// sanitising). Skip pages the user can't edit.
+		@set_time_limit(180);
+		$pages   = $this->wire('pages');
+		$changed = 0;
+		foreach (array_keys($affected) as $pid) {
+			$page = $pages->get((int) $pid);
+			if (!$page->id || !$page->editable()) continue;
+			$page->of(false);
+			$val = $page->getUnformatted($field);
+			if (!$val) continue;
+			$items = ($val instanceof Pageimage) ? [$val] : $val;   // Pageimages iterable
+			$touched = false;
+			foreach ($items as $img) {
+				if (!$img instanceof Pageimage || !$img->hasTag($oldTag)) continue;
+				$img->removeTag($oldTag);
+				if ($op === 'rename') $img->addTag($newTag);
+				$touched = true;
+				$changed++;
+			}
+			if ($touched) {
+				try { $page->save($field); } catch (\Throwable $e) {
+					$this->wire('log')->error('ImageLibrary: tag bulk save failed for page ' . $pid . ': ' . $e->getMessage());
+				}
+			}
+		}
+
+		$allowed = $this->updateFieldTagList($field, $oldTag, $op === 'rename' ? $newTag : null);
+		$this->wire('cache')->deleteFor($this);   // tags changed → invalidate row cache
+
+		return $this->jsonResponse([
+			'ok'          => true,
+			'op'          => $op,
+			'field'       => $field,
+			'oldTag'      => $oldTag,
+			'newTag'      => $newTag,
+			'count'       => $changed,
+			'tagsAllowed' => array_values($allowed),
+		]);
 	}
 
 	/**
@@ -4246,6 +4400,110 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function splitTags(string $raw): array {
 		return preg_split('/[\s,]+/', $raw, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+	}
+
+	/**
+	 * Promote freshly-entered tags into a field's predefined list (mode 3,
+	 * "predefined + can input their own"). A tag a user invents while editing
+	 * one image must become an offered tag for EVERY image of that field — so we
+	 * append any token not already in the field's space-separated tagsList and
+	 * save the field once. Only tokens valid as predefined tags (letters,
+	 * digits, underscore, hyphen — per PW's own tagsList rule) are added.
+	 * Returns the full, updated predefined list so the caller can hand it back
+	 * to the client for live refresh. No-op (returns current list) when nothing
+	 * is new.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function registerFieldTags(string $fieldName, string $tagsValue): array {
+		$field = $this->wire('fields')->get($fieldName);
+		if (!$field || !($field->type instanceof FieldtypeImage)) return [];
+
+		$list = $this->splitTags((string) $field->tagsList);
+		$have = array_flip($list);
+		$added = false;
+		foreach ($this->splitTags($tagsValue) as $t) {
+			if (isset($have[$t])) continue;
+			if (!preg_match('/^[A-Za-z0-9_-]+$/', $t)) continue;   // PW tagsList charset
+			$have[$t] = true;
+			$list[] = $t;
+			$added = true;
+		}
+		if ($added) {
+			usort($list, 'strcasecmp');   // keep the stored list alphabetical
+			try {
+				$field->set('tagsList', implode(' ', $list));
+				$this->wire('fields')->save($field);
+			} catch (\Throwable $e) {
+				// The tag is already stored on the image; failing to promote it
+				// into the field list must not fail the whole save.
+				$this->wire('log')->error('ImageLibrary: tagsList update failed for '
+					. $fieldName . ': ' . $e->getMessage());
+			}
+		}
+		usort($list, 'strcasecmp');
+		return $list;
+	}
+
+	/**
+	 * Rename or delete a tag in a field's predefined list (tagsList). Drops the
+	 * old tag (case-insensitively, incl. any case variants), and for a rename
+	 * appends the new tag if valid + not already present. Returns the updated
+	 * list. The per-image tags are handled separately by the caller.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function updateFieldTagList(string $fieldName, string $oldTag, ?string $newTag): array {
+		$field = $this->wire('fields')->get($fieldName);
+		if (!$field || !($field->type instanceof FieldtypeImage)) return [];
+
+		$oldLc = mb_strtolower($oldTag);
+		$newLc = $newTag !== null ? mb_strtolower($newTag) : '';
+		$out = [];
+		$seen = [];
+		$hasNew = false;
+		foreach ($this->splitTags((string) $field->tagsList) as $t) {
+			if (mb_strtolower($t) === $oldLc) continue;          // drop the old tag
+			$lc = mb_strtolower($t);
+			if (isset($seen[$lc])) continue;
+			$seen[$lc] = true;
+			if ($newLc !== '' && $lc === $newLc) $hasNew = true;
+			$out[] = $t;
+		}
+		if ($newTag !== null && $newTag !== '' && !$hasNew && preg_match('/^[A-Za-z0-9_-]+$/', $newTag)) {
+			$out[] = $newTag;
+		}
+		usort($out, 'strcasecmp');   // keep the stored list alphabetical
+		try {
+			$field->set('tagsList', implode(' ', $out));
+			$this->wire('fields')->save($field);
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: tagsList update failed for ' . $fieldName . ': ' . $e->getMessage());
+		}
+		return $out;
+	}
+
+	/**
+	 * Live images of $fieldName that carry $tag (case-insensitive), grouped
+	 * pageId => [basename, …]. Read from the cached row enumeration, so it's the
+	 * same set the library shows (no version copies). Drives both the affected-
+	 * count preview and the apply pass of the tag rename/delete.
+	 *
+	 * @return array<int,array<int,string>>
+	 */
+	protected function findImagesWithTag(string $fieldName, string $tag): array {
+		$tagLc = mb_strtolower($tag);
+		$out = [];
+		foreach ($this->loadRows() as $r) {
+			if (($r['fieldName'] ?? '') !== $fieldName) continue;
+			foreach (preg_split('/\s+/', (string) ($r['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $t) {
+				if (mb_strtolower($t) === $tagLc) {
+					$out[(int) $r['pageId']][] = (string) $r['basename'];
+					break;
+				}
+			}
+		}
+		return $out;
 	}
 
 	protected function resolvePageimage(Page $page, string $fieldName, string $basename): ?Pageimage {
@@ -5444,6 +5702,8 @@ class ProcessImageLibrary extends Process {
 			'shared'               => $this->getSharedPrefs(),
 			'sharedPrefsUrl'       => $this->wire('page')->url . 'shared-prefs/',
 			'canManageShared'      => $this->canManageShared(),
+			// Library-wide tag rename/delete (predefined tags), manager-gated.
+			'tagBulkUrl'           => $this->wire('page')->url . 'tag-bulk/',
 			'csrf' => [
 				'name'  => $session->CSRF->getTokenName(),
 				'value' => $session->CSRF->getTokenValue(),
@@ -5462,6 +5722,18 @@ class ProcessImageLibrary extends Process {
 				'close'            => $this->_('Close'),
 				// Label next to the checkbox widget for a boolean custom subfield.
 				'enabled'          => $this->_('Enabled'),
+				// Placeholder for the "add a new tag" input on predefined+own fields.
+				'tagAddPlaceholder' => $this->_('Add tag…'),
+				// Library-wide tag management (manager-only, in the tag modal).
+				'tagDeleteTitle'    => $this->_('Delete tag'),
+				'tagConfirmDelete'  => $this->_('Confirm delete'),
+				'tagRenameTitle'    => $this->_('Rename tag'),
+				'tagManageDelete'   => $this->_('Delete the tag “%s” everywhere?'),
+				'tagManageRename'   => $this->_('Rename the tag “%s” to:'),
+				'tagManageAffected' => $this->_('Affects %d image(s).'),
+				'tagManageCounting' => $this->_('Checking…'),
+				'tagDeleted'        => $this->_('Tag deleted from %d image(s)'),
+				'tagRenamed'        => $this->_('Tag renamed on %d image(s)'),
 				'rename'           => $this->_('New filename'),
 				'placeholderHint'  => $this->_('Placeholders: (n) counter, (n2)…(n5) padded, (N) total, (t) page title, (d) date, (p) page name, (f) field name.'),
 				'imageEditorTitle' => $this->_('Edit image: %s'),
@@ -6281,11 +6553,16 @@ class ProcessImageLibrary extends Process {
 						)) . '">—</td>';
 				} else {
 					$tagAttrs = ' data-tags-mode="' . (int) $tagCfg['mode'] . '"';
-					if ($tagCfg['mode'] === 2) {
+					// Predefined set (checkbox group) for whitelist (2) AND
+					// predefined-plus-own (3).
+					if ($tagCfg['mode'] === 2 || $tagCfg['mode'] === 3) {
 						$tagAttrs .= " data-tags-allowed='" . $san->entities(
 							json_encode(array_values($tagCfg['allowed']), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
 						) . "'";
-					} elseif ($tagCfg['mode'] === 1) {
+					}
+					// Autocomplete datalist for free-form (1) AND the add-tag
+					// input of predefined-plus-own (3).
+					if ($tagCfg['mode'] === 1 || $tagCfg['mode'] === 3) {
 						$tagAttrs .= ' data-tags-list-id="ml-tags-used-'
 							. $san->entities((string) $row['fieldName']) . '"';
 					}

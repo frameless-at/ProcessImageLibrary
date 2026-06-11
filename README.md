@@ -25,6 +25,7 @@ A ProcessWire admin module that puts every image across every page and every ima
   - [Pagination row](#pagination-row)
 - [Inline editing](#inline-editing)
   - [Editing as paintbrush (bulk)](#editing-as-paintbrush-bulk)
+  - [Managing the tag vocabulary](#managing-the-tag-vocabulary)
 - [Renaming files](#renaming-files)
   - [Placeholders](#placeholders)
   - [Single rename](#single-rename)
@@ -50,7 +51,7 @@ A ProcessWire admin module that puts every image across every page and every ima
 
 - **Single view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates — including images that live inside Repeater / RepeaterMatrix fields, resolved up to their owner page. Rows are `(page, field, basename)` tuples.
 - **Table or masonry gallery** — toggle between the data table and a thumbnail gallery that packs tiles into **height-balanced columns** (shortest-column masonry) for fast visual scanning; click a tile to open the per-image editor, or use the hover-revealed checkbox to select it. A size slider scales thumbnails (table) / tiles (gallery) live. Both choices persist per user via `$user->meta`.
-- **Inline editing** for description, tags and any custom subfields (PW 3.0.142+ field-on-image templates). Click a cell, type, hit save — that's it. Multilang installs get per-language tabs in the editor.
+- **Inline editing** for description, tags and any custom subfields (PW 3.0.142+ field-on-image templates). Click a cell, type, hit save — that's it. Multilang installs get per-language tabs in the editor. For predefined-tag fields the tag editor also **manages the vocabulary**: add new tags, or rename / delete a tag library-wide straight from the chip, with the table updating live.
 - **Bulk edits as paintbrush** — tick a few rows, then edit any cell on a selected row to broadcast the change to all selected rows. Works for description, tags, customs, and filenames (with placeholder syntax for numbering).
 - **Replace image in place** — drag a file onto the row or click the upload icon. The basename + every URL stay intact, variations regenerate, metadata is preserved. Extension match enforced so format conversions can't sneak in.
 - **Delete (single + batch)** — trash icon on the row hides behind a confirm dialog. Selection-as-paintbrush works here too: with N rows ticked, clicking the trash on any selected row deletes the whole selection.
@@ -93,6 +94,7 @@ Two-tier model:
 
 - **`image-library-access`** — gates the admin page itself. Without it the page is invisible.
 - **`page-edit` on the target page** — checked per cell, per AJAX endpoint. Editors only ever modify pages they could already edit through the standard Page-Edit UI. The library doesn't elevate access; it just gives editors a faster surface for the same operations.
+- **`image-library-manage-shared`** *(optional)* — gates the site-wide actions that go beyond a single page: managing shared (team) bookmarks and collections, and renaming / deleting tags across the whole library (see **[Managing the tag vocabulary](#managing-the-tag-vocabulary)**). Superusers always have it; grant it to trusted editors as needed. The permission is created automatically on install / upgrade.
 
 ## Module configuration
 
@@ -226,6 +228,7 @@ Click any cell with a hover highlight. A modal popup opens with the widget appro
 - **Description** — textarea
 - **Tags (free-form)** — text input with native `<datalist>` autocomplete pulled from tags actually in use on rows of that field
 - **Tags (whitelist, `useTags=2`)** — checkbox grid limited to the configured `tagsList`
+- **Tags (predefined + own, `useTags=9`)** — the `tagsList` checkbox grid **plus** an "Add tag…" input below it; a typed tag becomes a checked chip and, on save, is promoted into the field's predefined list so it's offered everywhere afterwards
 - **Custom text / textarea** — text input or textarea matching the subfield's PW Inputfield type
 - **Custom checkbox** — single checkbox; cell shows `✓` / `—`
 - **Custom datetime** — native `<input type="date">` or `datetime-local` depending on whether the field's `dateOutputFormat` carries a time component
@@ -251,6 +254,17 @@ When one or more rows are ticked via the selection checkboxes, editing any cell 
 ![Bulk-edit popup with Add / Replace radios visible because multiple rows are selected](docs/screenshots/08-bulk-edit.png)
 
 After save you get a result modal listing per-row failures (e.g. tag-whitelist violations, missing edit-permission on individual pages). The successful rows are saved per-page in batches so each page sees at most one `$page->save($field)` call regardless of how many of its images were affected.
+
+### Managing the tag vocabulary
+
+For predefined-tag fields (`useTags=2` or `9`), the tag editor doubles as a vocabulary manager: each predefined tag chip carries hover-revealed **rename** (pencil) and **delete** (×) controls that act **library-wide**, not just on the image you opened.
+
+- **Rename** — click the pencil, edit the tag in place, press Enter (or click the ✓). The change applies to **every image** carrying that tag across the whole site (published + hidden pages), and the field's predefined `tagsList` is updated too. Case-only fixes count as a real change (`rose` → `Rose`), since PW keys tags case-insensitively but preserves the stored spelling.
+- **Merge** — rename a tag onto one that already exists and the two fold together: every image keeps a single, de-duplicated tag.
+- **Delete** — click the ×; a brief inline confirm (no second modal) arms for a few seconds, click again to remove the tag from every image and from the predefined list.
+- **Live table refresh** — after a rename or delete, the visible table rows update in place, so the new spelling (or the removal) shows everywhere immediately, not only after a reload.
+
+These controls are gated by the **`image-library-manage-shared`** permission (superusers always have it), since they rewrite metadata site-wide. Inline edits to a *single* image's tags need only normal page-edit rights, as before.
 
 ## Renaming files
 

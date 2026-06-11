@@ -389,6 +389,9 @@
 			if (subfield === 'tags' && tagsMode === 2) {
 				return buildPopupCheckboxes(td, original);
 			}
+			if (subfield === 'tags' && tagsMode === 3) {
+				return buildPopupTagsAddable(td, original);
+			}
 			if (subfield === 'tags' && tagsMode === 1) {
 				return buildPopupTextInput(original, td.dataset.tagsListId || '');
 			}
@@ -826,10 +829,241 @@
 			};
 		}
 
+		// POST to the tag-bulk endpoint (preview count or apply).
+		function tagBulkFetch(params) {
+			var fd = new FormData();
+			Object.keys(params).forEach(function (k) { fd.append(k, params[k]); });
+			appendCsrf(fd);
+			return fetch(config.tagBulkUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
+				.then(function (r) { return r.json(); });
+		}
+
+		// A small icon button for the manage controls on a predefined-tag chip.
+		function mkTagBtn(cls, icon, title, onClick) {
+			var b = document.createElement('button');
+			b.type = 'button';
+			b.className = 'ml-tag-manage ' + cls;
+			b.title = title;
+			b.setAttribute('aria-label', title);
+			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
+			// mousedown preventDefault keeps focus on the inline-edit input so a
+			// click on ✓ commits instead of blurring (which would cancel).
+			b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+			// preventDefault/stopPropagation so the click doesn't toggle the
+			// neighbouring checkbox or bubble to the cell.
+			b.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); onClick(); });
+			return b;
+		}
+
+		// Apply a tag rename/delete library-wide WITHOUT a confirm dialog (used by
+		// the inline rename). Toasts the affected count the server reports back.
+		function tagManageApply(op, field, tag, newTag, onSuccess) {
+			if (!config.tagBulkUrl || !canManageShared) return;
+			var params = { op: op, field: field, tag: tag, apply: 1 };
+			if (op === 'rename') params.newTag = newTag;
+			tagBulkFetch(params).then(function (d) {
+				if (d && d.ok) {
+					announce((op === 'delete'
+						? (labels.tagDeleted || 'Tag deleted from %d image(s)')
+						: (labels.tagRenamed || 'Tag renamed on %d image(s)')).replace('%d', d.count));
+					if (d.tagsAllowed) applyTagsAllowed(d.field, d.tagsAllowed);
+					// Rename/delete already propagated to every image server-side;
+					// mirror it onto the visible table rows so the change shows
+					// everywhere live, not just after a reload.
+					refreshTableTagCells(field, op, tag, newTag);
+					if (onSuccess) onSuccess(d);
+				} else {
+					announce((d && d.error) || labels.error || 'Failed');
+				}
+			}).catch(function (err) { console.error('[ImageLibrary] tag apply failed:', err); });
+		}
+
+		// Live-update the displayed tag cells in the table after a library-wide
+		// rename/delete. Tag cells are plain space-separated text tokens
+		// (td.textContent); rewrite the matching token in place — case-insensitive
+		// match like PW's tag keys — and de-dupe so a rename that merges onto an
+		// existing tag doesn't leave the token twice. The cell whose modal
+		// triggered this is swept too: the rename is committed on the server
+		// regardless of whether that modal is later saved or cancelled, so the new
+		// spelling is correct either way.
+		function refreshTableTagCells(field, op, oldTag, newTag) {
+			var oldLc = String(oldTag).toLowerCase();
+			document.querySelectorAll('td[data-col="tags"][data-field="' + field + '"]').forEach(function (cell) {
+				var cur = (cell.textContent || '').trim();
+				if (!cur) return;
+				var changed = false, out = [], seen = {};
+				cur.split(/\s+/).forEach(function (t) {
+					var rep = t;
+					if (t.toLowerCase() === oldLc) {
+						changed = true;
+						if (op !== 'rename' || !newTag) return;   // delete → drop token
+						rep = newTag;
+					}
+					var k = rep.toLowerCase();
+					if (seen[k]) { changed = true; return; }      // merge duplicate
+					seen[k] = true;
+					out.push(rep);
+				});
+				if (changed) setCellText(cell, out.join(' '));
+			});
+		}
+
+		// Find an existing chip checkbox in the same list whose tag matches (case-
+		// insensitive), excluding one. Used to merge a rename onto an existing tag.
+		function findChipCheckbox(parent, tag, exceptCb) {
+			if (!parent) return null;
+			var lc = tag.toLowerCase();
+			var found = null;
+			parent.querySelectorAll('.ml-tag-chip input[type="checkbox"]').forEach(function (b) {
+				if (b !== exceptCb && b.value.toLowerCase() === lc) found = b;
+			});
+			return found;
+		}
+
+		function buildTagChip(tag, checked, td, predefined) {
+			var chip = document.createElement('div');
+			chip.className = 'ml-tag-chip';
+			var label = document.createElement('label');
+			var cb = document.createElement('input');
+			cb.type = 'checkbox';
+			cb.className = 'uk-checkbox';
+			cb.value = tag;
+			cb.checked = !!checked;
+			var txt = document.createTextNode(' ' + tag);
+			label.appendChild(cb);
+			label.appendChild(txt);
+			chip.appendChild(label);
+			chip._cb = cb;
+
+			var field = td.dataset.field || '';
+			if (predefined && canManageShared && field) {
+				var input = null;        // the inline-edit input while renaming, else null
+				var armed = false;       // delete-confirm armed (one click already)
+				var armTimer = null;
+				var countSpan = null;
+
+				var renBtn = mkTagBtn('ml-tag-rename', 'fa-pencil', labels.tagRenameTitle || 'Rename tag', function () {
+					if (input) { commitEdit(); return; }
+					if (armed)  { disarmDelete(); return; }   // doubles as cancel while armed
+					startEdit();
+				});
+				var delBtn = mkTagBtn('ml-tag-delete', 'fa-times', labels.tagDeleteTitle || 'Delete tag', function () {
+					if (input) return;                        // not while renaming
+					if (armed) { doDelete(); return; }
+					armDelete();
+				});
+				chip.appendChild(renBtn);
+				chip.appendChild(delBtn);
+
+				function setIcon(btn, name, title) {
+					var i = btn.querySelector('i'); if (i) i.className = 'fa ' + name;
+					btn.title = title; btn.setAttribute('aria-label', title);
+				}
+				function setRenIcon(name, title) {
+					setIcon(renBtn, name, title);
+					renBtn.classList.toggle('ml-tag-confirm', name === 'fa-check');
+				}
+
+				// Inline delete confirm — no second modal. First × click arms it:
+				// the × turns into a red ✓, the ✎ becomes a ✗ cancel, the affected
+				// image count appears inline, and it auto-disarms after a few sec.
+				function armDelete() {
+					armed = true;
+					chip.classList.add('ml-tag-deleting');
+					setIcon(delBtn, 'fa-check', labels.tagConfirmDelete || 'Confirm delete');
+					delBtn.classList.add('ml-tag-confirm-del');
+					setIcon(renBtn, 'fa-times', labels.cancel || 'Cancel');
+					countSpan = document.createElement('span');
+					countSpan.className = 'ml-tag-count';
+					countSpan.textContent = '…';
+					chip.insertBefore(countSpan, renBtn);
+					tagBulkFetch({ op: 'delete', field: field, tag: cb.value, apply: 0 }).then(function (d) {
+						if (countSpan && d && d.ok) {
+							countSpan.textContent = '(' + d.count + ')';
+						}
+					}).catch(function () {});
+					armTimer = setTimeout(disarmDelete, 4000);
+				}
+				function disarmDelete() {
+					armed = false;
+					if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+					chip.classList.remove('ml-tag-deleting');
+					delBtn.classList.remove('ml-tag-confirm-del');
+					setIcon(delBtn, 'fa-times', labels.tagDeleteTitle || 'Delete tag');
+					setIcon(renBtn, 'fa-pencil', labels.tagRenameTitle || 'Rename tag');
+					if (countSpan) { countSpan.remove(); countSpan = null; }
+				}
+				function doDelete() {
+					if (armTimer) { clearTimeout(armTimer); armTimer = null; }
+					tagManageApply('delete', field, cb.value, null, function () { chip.remove(); });
+				}
+				// Inline rename: the label turns into a text input, the ✎ becomes a
+				// ✓. Enter or ✓ commits, Esc or blur cancels — no second modal.
+				function startEdit() {
+					input = document.createElement('input');
+					input.type = 'text';
+					input.className = 'ml-tag-edit-input uk-input';
+					input.value = cb.value;
+					label.style.display = 'none';
+					chip.insertBefore(input, renBtn);
+					setRenIcon('fa-check', labels.save || 'Save');
+					input.focus();
+					input.select();
+					input.addEventListener('keydown', function (e) {
+						// stopPropagation so Enter/Esc never reach the tag modal (it
+						// would otherwise Save/close the whole cell editor).
+						if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); commitEdit(); }
+						else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelEdit(); }
+					});
+					// Blur cancels. Clicking the ✓ / × buttons no longer blurs the
+					// input (their mousedown preventDefault keeps focus), so a blur
+					// here always means the user clicked truly elsewhere.
+					input.addEventListener('blur', function () { cancelEdit(); });
+				}
+				function endEdit() {
+					if (input) { input.remove(); input = null; }
+					label.style.display = '';
+					setRenIcon('fa-pencil', labels.tagRenameTitle || 'Rename tag');
+				}
+				function cancelEdit() { endEdit(); }
+				function commitEdit() {
+					if (!input) return;
+					var nt  = (input.value || '').trim().replace(/\s+/g, '_');
+					var old = cb.value;
+					var parent = chip.parentNode;
+					endEdit();
+					// Exact compare (NOT lowercased) so a case-only fix
+					// ("poppy" → "Poppy") counts as a real change.
+					if (nt === '' || nt === old) return;
+					// Duplicate (same as adding): if the new tag already exists, drop
+					// this chip and check the existing one — the server merges too.
+					var existing = findChipCheckbox(parent, nt, cb);
+					var wasChecked = cb.checked;
+					tagManageApply('rename', field, old, nt, function (res) {
+						var name = (res && res.newTag) || nt;
+						if (existing) {
+							// merged: this image now carries the existing tag iff it
+							// had either tag before.
+							existing.checked = existing.checked || wasChecked;
+							chip.remove();
+						} else {
+							cb.value = name;
+							txt.textContent = ' ' + name;
+						}
+					});
+				}
+			}
+			return chip;
+		}
+
 		function buildPopupCheckboxes(td, original) {
 			var allowed = [];
 			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
 			catch (e) { allowed = []; }
+			// Show predefined tags alphabetically (case-insensitive).
+			allowed.sort(function (a, b) {
+				return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+			});
 
 			var currentSet = Object.create(null);
 			original.split(/\s+/).filter(Boolean).forEach(function (t) {
@@ -839,15 +1073,7 @@
 			var wrap = document.createElement('div');
 			wrap.className = 'ml-popup-tag-list';
 			allowed.forEach(function (tag) {
-				var label = document.createElement('label');
-				var cb = document.createElement('input');
-				cb.type = 'checkbox';
-				cb.className = 'uk-checkbox';
-				cb.value = tag;
-				cb.checked = !!currentSet[tag];
-				label.appendChild(cb);
-				label.appendChild(document.createTextNode(' ' + tag));
-				wrap.appendChild(label);
+				wrap.appendChild(buildTagChip(tag, !!currentSet[tag], td, true));
 			});
 
 			return {
@@ -861,6 +1087,104 @@
 					if (first) first.focus();
 				}
 			};
+		}
+
+		// Tags mode 3 ("predefined + can input their own"): the predefined tags
+		// as a checkbox group (like mode 2), PLUS an input to add brand-new tags
+		// — typed tags appear as checked chips. getValue collects every checked
+		// box, so picks and new tags save together. New tags pass server-side
+		// because the whitelist gate only fires for mode 2.
+		function buildPopupTagsAddable(td, original) {
+			var allowed = [];
+			try { allowed = JSON.parse(td.dataset.tagsAllowed || '[]'); }
+			catch (e) { allowed = []; }
+			// Show predefined tags alphabetically (case-insensitive).
+			allowed.sort(function (a, b) {
+				return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+			});
+
+			var current = original.split(/\s+/).filter(Boolean);
+			var currentSet = Object.create(null);
+			current.forEach(function (t) { currentSet[t] = true; });
+
+			var wrap = document.createElement('div');
+			wrap.className = 'ml-popup-tag-list';
+			var boxes = Object.create(null);   // tag => checkbox (also the dedupe set)
+
+			// predefined=true gets the manager rename/delete controls; ad-hoc and
+			// freshly-typed tags don't (they aren't in the field list yet).
+			function addChip(tag, checked, predefined) {
+				if (boxes[tag]) { if (checked) boxes[tag].checked = true; return boxes[tag]; }
+				var chip = buildTagChip(tag, checked, td, !!predefined);
+				wrap.appendChild(chip);
+				boxes[tag] = chip._cb;
+				return chip._cb;
+			}
+
+			// Predefined first (checked if already on the image) …
+			allowed.forEach(function (tag) { addChip(tag, !!currentSet[tag], true); });
+			// … then any existing tags that aren't in the predefined list.
+			current.forEach(function (tag) { addChip(tag, true, false); });
+
+			// Add-new row: a text input with the field's autocomplete datalist.
+			var addRow = document.createElement('div');
+			addRow.className = 'ml-popup-tag-add';
+			var input = document.createElement('input');
+			input.type = 'text';
+			input.className = 'ml-popup-input';
+			input.placeholder = labels.tagAddPlaceholder || 'Add tag…';
+			var listId = td.dataset.tagsListId || '';
+			if (listId) input.setAttribute('list', listId);
+			addRow.appendChild(input);
+
+			// Fold whatever is typed into chips (space / comma separated). Used
+			// on Enter/comma and again at save time so a typed-but-not-confirmed
+			// tag isn't lost.
+			function flush() {
+				input.value.split(/[\s,]+/).filter(Boolean).forEach(function (tag) {
+					addChip(tag, true);
+				});
+				input.value = '';
+			}
+			input.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); flush(); input.focus(); }
+			});
+
+			var container = document.createElement('div');
+			container.appendChild(wrap);
+			container.appendChild(addRow);
+
+			return {
+				element: container,
+				getValue: function () {
+					flush();
+					var sel = wrap.querySelectorAll('input[type="checkbox"]:checked');
+					return Array.prototype.map.call(sel, function (cb) { return cb.value; }).join(' ');
+				},
+				focus: function () { input.focus(); }
+			};
+		}
+
+		// After a mode-3 save promotes new tags into a field's predefined list,
+		// reflect the updated list onto open cells + the autocomplete datalist so
+		// the next edit this session offers the new tags without a reload. Field
+		// names are PW-safe (letters/digits/underscore), so no selector escaping.
+		function applyTagsAllowed(field, list) {
+			if (!field || !Array.isArray(list)) return;
+			var json = JSON.stringify(list);
+			document.querySelectorAll('td[data-col="tags"][data-field="' + field + '"]').forEach(function (cell) {
+				if (cell.dataset.tagsMode === '2' || cell.dataset.tagsMode === '3') {
+					cell.dataset.tagsAllowed = json;
+				}
+			});
+			var dl = document.getElementById('ml-tags-used-' + field);
+			if (dl) {
+				var have = Object.create(null);
+				Array.prototype.forEach.call(dl.querySelectorAll('option'), function (o) { have[o.value] = true; });
+				list.forEach(function (t) {
+					if (!have[t]) { var o = document.createElement('option'); o.value = t; dl.appendChild(o); }
+				});
+			}
 		}
 
 		// All cell edits run through one popup. The native <dialog>
@@ -1427,6 +1751,11 @@
 					td.classList.remove('ml-cell-saving');
 					if (result && result.data && result.data.ok) {
 						setCellText(td, result.data.value);
+						// Mode-3 tag save may have promoted new tags into the
+						// field's predefined list — reflect it on open cells.
+						if (result.data.tagsAllowed) {
+							applyTagsAllowed(result.data.field, result.data.tagsAllowed);
+						}
 						// Typed cells: refresh data-value so reopening the
 						// editor shows the freshly-stored raw value.
 						if (typedInput && result.data.rawValue !== undefined) {
@@ -2461,6 +2790,13 @@
 			if (!d.ok) {
 				showBulkResult(d.error || labels.error || 'Bulk action failed', []);
 				return false;
+			}
+			// Mode-3 batches may have promoted new tags into one or more fields'
+			// predefined lists ({field: [tags…]}) — reflect them on open cells.
+			if (d.tagsAllowed && typeof d.tagsAllowed === 'object') {
+				Object.keys(d.tagsAllowed).forEach(function (f) {
+					applyTagsAllowed(f, d.tagsAllowed[f]);
+				});
 			}
 			var failedCount = (d.failed || []).length;
 			if (failedCount) {
