@@ -2,7 +2,7 @@
   "name": "ProcessImageLibrary",
   "title": "Image Library",
   "version": "0.58.0",
-  "summary": "Audit and edit every image's metadata across your whole ProcessWire site from one filterable table — inline and in bulk, without opening a single page.",
+  "summary": "A drop-in visuals manager for ProcessWire: install it on any existing site — zero setup, it auto-discovers every image field — then manage every image from one filterable table. Keep one canonical copy and reuse it anywhere (insert into rich-text or any image field, no re-upload), edit metadata inline and in bulk, manage tags, rename / replace / delete safely, automatically de-duplicate, and see where each image is used.",
   "author": "frameless Media",
   "href": "https://github.com/frameless-at/ProcessImageLibrary",
   "icon": "image",

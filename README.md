@@ -1,6 +1,6 @@
 # Image Library
 
-A ProcessWire admin module that puts every image across every page and every image field into one filterable, inline-editable table. Built for editorial teams that need to audit and update image metadata in bulk — description, tags, custom subfields, multilang values, filenames — without navigating to each page individually.
+A drop-in **visuals manager** for the ProcessWire admin: install it on any existing site — zero setup, it auto-discovers every image field — and it puts every image across every page and field into one filterable, inline-editable table. Built for editorial teams: keep one canonical copy and reuse it anywhere (insert into rich-text or any image field, no re-upload), edit metadata in bulk (description, tags, custom subfields, multilang values, filenames), manage the tag vocabulary, rename / replace / delete files safely (rich-text embeds follow), de-duplicate byte-identical copies, and see where each image is used — all without navigating to each page individually.
 
 ![Overview screenshot of the Image Library admin page showing bookmark tabs and the collapsed filter bar at the top, a table of images with thumbnails / filename / page / tags / description / size / dimensions / uploaded columns, and a toolbar with the thumbnail-size slider plus the table / gallery view toggle](docs/screenshots/01-overview.png)
 
