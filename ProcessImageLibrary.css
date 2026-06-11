@@ -615,6 +615,10 @@ textarea.ml-cell-input {
 	text-align: center;
 	vertical-align: middle !important;
 	cursor: default;
+	/* Drop only the left padding so the checkbox sits flush with the table
+	   edge. !important to beat the AdminDataTable theme's td/th padding,
+	   same as vertical-align above. */
+	padding-left: 0 !important;
 }
 .ml-cell-select input[type="checkbox"] {
 	cursor: pointer;
