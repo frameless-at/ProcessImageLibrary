@@ -2428,7 +2428,7 @@
 			var footer = document.createElement('footer');
 			var closeBtn = document.createElement('button');
 			closeBtn.type = 'button';
-			closeBtn.className = 'uk-button uk-button-primary';
+			closeBtn.className = 'uk-button uk-button-secondary';
 			closeBtn.textContent = labels.close || 'Close';
 			footer.appendChild(closeBtn);
 			dialog.appendChild(footer);
