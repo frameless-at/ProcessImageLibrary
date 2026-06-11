@@ -1201,7 +1201,7 @@ textarea.ml-langtabs-pane {
    input carries the field's autocomplete datalist; Enter / comma turns what's
    typed into a checked tag chip. */
 .ml-popup-tag-add {
-	margin-top: 0.6rem;
+	margin-top: 1rem;
 }
 .ml-popup-tag-add .ml-popup-input {
 	width: 100%;
