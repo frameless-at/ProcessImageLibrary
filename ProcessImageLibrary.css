@@ -893,6 +893,28 @@ textarea.ml-cell-input {
 		height: 100vh;
 		border-radius: 0;
 	}
+	/* Tag chooser on phones: one column so long names + the rename/delete
+	   controls fit without overlapping, taller rows + bigger buttons for
+	   touch. The label is the full-width tap target for toggling. */
+	.ml-popup-tag-list {
+		grid-template-columns: 1fr;
+		gap: 0.1rem;
+	}
+	.ml-popup-tag-list .ml-tag-chip {
+		min-height: 2.4rem;
+	}
+	.ml-tag-manage {
+		min-width: 2.2rem;
+		height: 2.2rem;
+		font-size: 1.3rem;
+	}
+}
+/* Touch devices have no hover, so the rename/delete controls can't be
+   hover-revealed — keep them visible there. */
+@media (hover: none) {
+	.ml-tag-manage {
+		opacity: 1;
+	}
 }
 
 /* Popup editor for textarea-typed subfields (description, custom
