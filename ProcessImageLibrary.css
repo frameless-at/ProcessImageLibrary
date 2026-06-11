@@ -1229,13 +1229,6 @@ textarea.ml-langtabs-pane {
 		font-size: 1.4rem;
 	}
 }
-/* On touch devices there is no hover, so the per-chip rename/delete
-   controls can never be revealed by hover — keep them always visible. */
-@media (hover: none) {
-	.ml-tag-manage {
-		opacity: 1;
-	}
-}
 
 /* Column visibility — picker lives inside .ml-columns-dialog,
    opened from the "Columns…" button in the pagination row. CSS
