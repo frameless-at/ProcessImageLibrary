@@ -1338,14 +1338,17 @@ textarea.ml-langtabs-pane {
 	background: color-mix(in srgb, var(--pw-main-background, #f0f0f0) 60%, var(--pw-text-color, #000) 8%);
 	color: var(--pw-text-color, #333);
 }
-/* Column picker: reveal the reorder arrows on row hover / focus (cleaner
-   resting state — matches the collections manager). */
+/* Column picker: reveal the reorder arrows on row hover (cleaner resting
+   state — matches the collections manager). Keyboard reveal is keyed on the
+   BUTTON's :focus-visible, not the row's :focus-within — otherwise the
+   dialog's auto-focused checkbox would reveal the first row on open, and a
+   mouse-clicked arrow would stay stuck visible (focus lingers on it). */
 .ml-columns-list .ml-col-move {
 	opacity: 0;
 	transition: opacity 0.12s ease-out;
 }
 .ml-columns-list li:hover .ml-col-move,
-.ml-columns-list li:focus-within .ml-col-move {
+.ml-columns-list .ml-col-move:focus-visible {
 	opacity: 1;
 }
 
@@ -1402,7 +1405,7 @@ textarea.ml-langtabs-pane {
 	transition: opacity 0.12s ease-out;
 }
 .ml-coll-row:hover .ml-coll-btns,
-.ml-coll-row:focus-within .ml-coll-btns { opacity: 1; }
+.ml-coll-row:has(.ml-coll-move:focus-visible) .ml-coll-btns { opacity: 1; }
 /* Drop indicators set during dragover. */
 .ml-coll-row.ml-drop-before { box-shadow: inset 0 2px 0 0 var(--pw-primary, #3480e3); }
 .ml-coll-row.ml-drop-after  { box-shadow: inset 0 -2px 0 0 var(--pw-primary, #3480e3); }
