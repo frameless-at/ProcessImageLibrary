@@ -264,6 +264,8 @@ For predefined-tag fields (`useTags=2` or `9`), the tag editor doubles as a voca
 - **Delete** — click the ×; a brief inline confirm (no second modal) arms for a few seconds, click again to remove the tag from every image and from the predefined list.
 - **Live table refresh** — after a rename or delete, the visible table rows update in place, so the new spelling (or the removal) shows everywhere immediately, not only after a reload.
 
+![Tag editor modal: predefined tags as a checkbox grid, the hovered "Peony" chip revealing the rename (pencil) and delete (×) controls, and the "Add tag…" input below](docs/screenshots/24-tag-manage.png)
+
 These controls are gated by the **`image-library-manage-shared`** permission (superusers always have it), since they rewrite metadata site-wide. Inline edits to a *single* image's tags need only normal page-edit rights, as before.
 
 ## Renaming files
