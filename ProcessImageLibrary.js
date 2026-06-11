@@ -2575,7 +2575,7 @@
 			var footer = document.createElement('footer');
 			var okBtn = document.createElement('button');
 			okBtn.type = 'button';
-			okBtn.className = 'uk-button uk-button-primary';
+			okBtn.className = 'uk-button uk-button-secondary';
 			okBtn.textContent = labels.close || 'Close';
 			footer.appendChild(okBtn);
 			dialog.appendChild(footer);
