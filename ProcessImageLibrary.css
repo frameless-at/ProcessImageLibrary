@@ -1435,9 +1435,63 @@ textarea.ml-langtabs-pane {
 	font-style: italic;
 	padding: 0.25rem 0.3rem;
 }
-/* "Manage" link in the bookmarks/collections tab strip. */
-.ml-collections-manage > a { color: var(--pw-muted-color, #888); }
+/* "Manage collections" — icon-only, pushed to the far right of the tab strip
+   so it lines up with the columns icon / filter fieldset edge below. */
+.ml-collections-manage {
+	margin-left: auto;   /* flex strip → flush-right */
+}
+.ml-collections-manage > a {
+	margin-right: 0;     /* override the tab strip's 30px del-button gutter */
+	color: var(--pw-muted-color, #888);
+}
 .ml-collections-manage > a:hover { color: var(--pw-text-color, inherit); }
+
+/* Nested collections in the tab strip: only the top level shows as a tab;
+   descendants live in a hover flyout (indent per relative depth set inline).
+   The caret marks a tab that has a flyout. */
+.ml-coll-has-children { position: relative; }
+.ml-coll-tab-caret {
+	font-size: 0.85em;
+	opacity: 0.6;
+	margin-left: 0.1rem;
+}
+.ml-coll-flyout {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	z-index: 60;
+	min-width: max(180px, 100%);
+	margin: 0;
+	padding: 0.25rem 0;
+	list-style: none;
+	background: var(--pw-blocks-background, #fff);
+	border: 1px solid var(--pw-border-color, #ccc);
+	border-radius: 4px;
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+	display: none;
+}
+/* The flyout is a DOM child of the tab, so hovering it keeps the tab :hover —
+   no gap to fall through. */
+.ml-coll-has-children:hover > .ml-coll-flyout,
+.ml-coll-flyout:hover { display: block; }
+.ml-coll-flyout-item { position: relative; }
+.ml-coll-flyout-item > a.ml-bookmark {
+	display: block;
+	padding-top: 0.2rem;
+	padding-bottom: 0.2rem;
+	padding-right: 1.6rem;   /* room for the × */
+	white-space: nowrap;
+	margin: 0;
+}
+.ml-coll-flyout-item > a:hover,
+.ml-coll-flyout-item.uk-active > a {
+	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+}
+/* The × is hover-revealed on the flyout row (the strip's own rule only
+   targets direct-child tabs). */
+.ml-coll-flyout-item .ml-bookmark-del { right: 0.4rem; }
+.ml-coll-flyout-item:hover .ml-bookmark-del,
+.ml-coll-flyout-item .ml-bookmark-del:focus-visible { opacity: 1; }
 
 /* Visually-hidden live region — kept in the DOM and announced by
    screen readers, invisible to sighted users. Same idiom as

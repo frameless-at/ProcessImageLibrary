@@ -6121,6 +6121,10 @@ class ProcessImageLibrary extends Process {
 		$renderCollection = function (array $c, bool $shared) use ($san, $page, $currentColl, $collDelTitle, $canManageShared): string {
 			$cid = (string) ($c['id'] ?? '');
 			if ($cid === '') return '';
+			// Only top-level collections get a tab here. Nested ones live in the
+			// parent tab's hover flyout, which the JS builds (rerenderBookmarksList
+			// runs on init); rendering them flat too would flash duplicate tabs.
+			if (($c['parent'] ?? '') !== '') return '';
 			$qs = '?coll=' . rawurlencode($cid);
 			$cls = 'ml-bookmark ml-bookmark--collection' . ($shared ? ' ml-bookmark--shared' : '');
 			// Curate actions are cursor-driven, not buttons: while a selection
@@ -6149,24 +6153,24 @@ class ProcessImageLibrary extends Process {
 		foreach ($collections as $c)       $out .= $renderCollection($c, false);
 		foreach ($sharedCollections as $c) $out .= $renderCollection($c, true);
 
-		// "Manage" link — opens the drag-and-drop collections manager. Only
-		// shown when there's at least one collection to organise. JS keeps it
-		// in sync (it's preserved across the client-side tab re-render).
-		if ($collections || ($sharedCollections && $canManageShared)) {
-			$manageTitle = $san->entities($this->_('Manage collections'));
-			$manageLabel = $san->entities($this->_('Manage'));
-			$out .= '<li class="ml-collections-manage"><a href="#" role="button" title="' . $manageTitle . '">'
-				. '<i class="fa fa-sliders" aria-hidden="true"></i> ' . $manageLabel . '</a></li>';
-		}
-
-		// Add button rightmost — opens the name-dialog. Server-side it's hidden
-		// unless a non-saved filter is active; the JS additionally reveals it
-		// whenever a checkbox selection exists (→ "save as collection").
+		// Add button — opens the name-dialog. Server-side it's hidden unless a
+		// non-saved filter is active; the JS additionally reveals it whenever a
+		// checkbox selection exists (→ "save as collection").
 		$addHidden = ($currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
 		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
 			. ' title="' . $addTitle . '">'
 			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
 			. '</a></li>';
+
+		// "Manage collections" — icon-only, pushed flush-right (CSS margin-left:
+		// auto) so it lines up with the columns icon below. Opens the
+		// drag-and-drop manager. Shown only when there's something to organise.
+		if ($collections || ($sharedCollections && $canManageShared)) {
+			$manageTitle = $san->entities($this->_('Manage collections'));
+			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
+				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
+				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
+		}
 
 		$out .= '</ul>';
 		return $out;

@@ -3789,6 +3789,17 @@
 					}
 				}
 			});
+			// Nested (flyout) collection items: mark the active one, and light up
+			// its parent tab so the active group is visible while the flyout is closed.
+			document.querySelectorAll('.ml-coll-flyout-item').forEach(function (fli) {
+				var on = fli.dataset.collId === coll && coll !== '';
+				fli.classList.toggle('uk-active', on);
+				if (on) {
+					var parentTab = fli.closest('.ml-bookmarks-tabs > li');
+					if (parentTab) parentTab.classList.add('uk-active');
+				}
+			});
+
 			// A checkbox selection enables collection actions: the per-collection
 			// "+" chips (CSS-gated by this class) and the add-button's collection
 			// mode. Mark the strip so the CSS can reveal the chips.
@@ -3826,8 +3837,9 @@
 			// bookmark <li>s in memory order BEFORE the Add button so
 			// it stays rightmost.
 			var addLi = ul.querySelector('li.ml-bookmarks-add');
+			var manageLi = ul.querySelector('li.ml-collections-manage');
 			Array.from(ul.children).forEach(function (li, i) {
-				if (i === 0 || li === addLi) return;
+				if (i === 0 || li === addLi || li === manageLi) return;
 				li.remove();
 			});
 			function makeDelBtn(label) {
@@ -3856,46 +3868,83 @@
 				if (!isShared || canManageShared) li.appendChild(makeDelBtn(labels.bookmarkDelete || 'Delete bookmark'));
 				ul.insertBefore(li, addLi);
 			}
-			// Collection tabs are icon-marked (fa-clone). data-qs is the short
-			// ?coll=<id> recall link — the same AJAX swap pipeline applies it
-			// (server resolves the id → image keys, personal then shared).
-			function addCollectionLi(c, isShared) {
-				if (!c || !c.id) return;
-				var li = document.createElement('li');
-				li.dataset.collId = c.id;
-				if (isShared) li.dataset.shared = '1';
+			// One collection link (icon-marked fa-clone). data-qs is the short
+			// ?coll=<id> recall link the AJAX swap applies; data-coll-id on the
+			// <li> drives curate + active state.
+			function makeCollLink(c, isShared, withIcon) {
 				var a = document.createElement('a');
 				a.className = 'ml-bookmark ml-bookmark--collection' + (isShared ? ' ml-bookmark--shared' : '');
 				var qs = '?coll=' + encodeURIComponent(c.id);
 				a.href = location.pathname + qs;
 				a.dataset.qs = qs;
-				a.innerHTML = '<i class="fa fa-clone" aria-hidden="true"></i> ';
+				if (withIcon) a.innerHTML = '<i class="fa fa-clone" aria-hidden="true"></i> ';
 				a.appendChild(document.createTextNode(c.name || ''));
+				return a;
+			}
+			// A top-level collection tab. Only depth-0 collections get a tab; their
+			// descendants live in a hover flyout (1 level shown, the rest on hover),
+			// indented by relative depth. Children carry their own data-coll-id so
+			// recall / curate / delete keep working unchanged.
+			function addCollectionTab(c, isShared, arr) {
+				if (!c || !c.id || (c.parent || '') !== '') return;   // top-level only
+				var hasKids = collIsParent(arr, c.id);
+				var li = document.createElement('li');
+				li.dataset.collId = c.id;
+				if (isShared) li.dataset.shared = '1';
+				if (hasKids) li.classList.add('ml-coll-has-children');
+				var a = makeCollLink(c, isShared, true);
+				if (hasKids) {
+					a.appendChild(document.createTextNode(' '));
+					var car = document.createElement('i');
+					car.className = 'fa fa-caret-down ml-coll-tab-caret';
+					car.setAttribute('aria-hidden', 'true');
+					a.appendChild(car);
+				}
 				li.appendChild(a);
 				if (!isShared || canManageShared) li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
+				if (hasKids) {
+					var fly = document.createElement('ul');
+					fly.className = 'ml-coll-flyout';
+					collDescendants(arr, c.id).forEach(function (d) {
+						var rel = collDepth(arr, d.id) - 1;   // 0 = direct child, 1 = grandchild
+						var fli = document.createElement('li');
+						fli.className = 'ml-coll-flyout-item';
+						fli.dataset.collId = d.id;
+						if (isShared) fli.dataset.shared = '1';
+						fli.style.paddingLeft = (0.75 + rel * 1) + 'rem';
+						fli.appendChild(makeCollLink(d, isShared, false));
+						if (!isShared || canManageShared) fli.appendChild(makeDelBtn(labels.collectionDelete || 'Delete'));
+						fly.appendChild(fli);
+					});
+					li.appendChild(fly);
+				}
 				ul.insertBefore(li, addLi);
 			}
-			// Ordered by TYPE, not owner: all bookmarks (personal then team),
-			// then all collections (personal then team). No separator — shared
-			// tabs are distinguished only typographically (ml-bookmark--shared).
+			// Ordered by TYPE, not owner: all bookmarks (personal then team), then
+			// all collections (personal then team). Shared tabs differ only
+			// typographically (ml-bookmark--shared).
 			bookmarks.forEach(function (b, idx) { addBookmarkLi(b, idx, false); });
 			sharedBookmarks.forEach(function (b, idx) { addBookmarkLi(b, idx, true); });
-			collections.forEach(function (c) { addCollectionLi(c, false); });
-			sharedCollections.forEach(function (c) { addCollectionLi(c, true); });
-			// "Manage" link after the collections (shared counts only for
-			// managers, who can actually edit the team store). Kept in sync here
-			// since the strip is rebuilt client-side on every change.
-			if (collections.length || (canManageShared && sharedCollections.length)) {
-				var mli = document.createElement('li');
-				mli.className = 'ml-collections-manage';
+			collections.forEach(function (c) { addCollectionTab(c, false, collections); });
+			sharedCollections.forEach(function (c) { addCollectionTab(c, true, sharedCollections); });
+			// "Manage collections" — icon-only, flush-right (CSS), kept as the
+			// last child after the Add button. Shown only when there's something
+			// to organise (shared counts only for managers).
+			var wantManage = collections.length || (canManageShared && sharedCollections.length);
+			if (wantManage && !manageLi) {
+				manageLi = document.createElement('li');
+				manageLi.className = 'ml-collections-manage';
 				var ma = document.createElement('a');
 				ma.href = '#';
 				ma.setAttribute('role', 'button');
 				ma.title = labels.collectionsManage || 'Manage collections';
-				ma.innerHTML = '<i class="fa fa-sliders" aria-hidden="true"></i> ';
-				ma.appendChild(document.createTextNode(labels.collectionsManageShort || 'Manage'));
-				mli.appendChild(ma);
-				ul.insertBefore(mli, addLi);
+				ma.setAttribute('aria-label', ma.title);
+				ma.innerHTML = '<i class="fa fa-sliders" aria-hidden="true"></i>';
+				manageLi.appendChild(ma);
+			}
+			if (manageLi) {
+				manageLi.hidden = !wantManage;
+				ul.appendChild(manageLi);   // keep it last (flush-right via CSS)
 			}
 			syncBookmarkActive();
 		}
@@ -3921,6 +3970,18 @@
 			var d = 0, c = collById(arr, id), g = 0;
 			while (c && (c.parent || '') !== '' && g++ < 64) { d++; c = collById(arr, c.parent); }
 			return d;
+		}
+		// All descendants of id in display (pre-order) order — the contiguous run
+		// of deeper items right after it (arrays keep the child-after-parent
+		// invariant). Used to build the tab strip's hover flyout.
+		function collDescendants(arr, id) {
+			var i = collIndexOf(arr, id);
+			if (i < 0) return [];
+			var d = collDepth(arr, id), out = [];
+			for (var j = i + 1; j < arr.length; j++) {
+				if (collDepth(arr, arr[j].id) > d) out.push(arr[j]); else break;
+			}
+			return out;
 		}
 		function collHeight(arr, id) {
 			var ch = collChildren(arr, id);
@@ -4430,10 +4491,13 @@
 				// delete (li carries data-bookmark-idx).
 				if (li.dataset.collId) {
 					var cid = li.dataset.collId;
+					// Drop the collection, then re-flatten so any children of a
+					// deleted parent are promoted to top level (collFlatten clears
+					// orphaned parent ids) instead of vanishing from the strip.
 					if (isShared) {
-						sharedCollections = sharedCollections.filter(function (c) { return c && c.id !== cid; });
+						sharedCollections = collFlatten(sharedCollections.filter(function (c) { return c && c.id !== cid; }));
 					} else {
-						collections = collections.filter(function (c) { return c && c.id !== cid; });
+						collections = collFlatten(collections.filter(function (c) { return c && c.id !== cid; }));
 					}
 					rerenderBookmarksList();
 					if (isShared) saveSharedPrefs(); else saveUserPrefs();
@@ -4531,7 +4595,11 @@
 		// bar) onto the bookmark active marker.
 		window.addEventListener('popstate', syncBookmarkActive);
 		root._mlSyncBookmarkActive = syncBookmarkActive;
-		syncBookmarkActive();
+		// Build the strip from the in-memory model on load so nested collections
+		// render as top-level tabs + hover flyouts (the server emits only the
+		// top-level tabs to avoid a flat-children flash). Falls back to a plain
+		// active-sync if the container isn't present.
+		if (bookmarksContainer()) rerenderBookmarksList(); else syncBookmarkActive();
 
 		// Sync the <li> order in the picker to match columnsOrder
 		// (after init from user-meta, before drag-drop wiring).
