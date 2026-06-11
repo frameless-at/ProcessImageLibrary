@@ -4,6 +4,7 @@ require_once __DIR__ . '/src/ImageLibraryDiscovery.php';
 require_once __DIR__ . '/src/ImageLibraryMultilang.php';
 require_once __DIR__ . '/src/ImageLibraryExportImport.php';
 require_once __DIR__ . '/src/ImageLibraryHashing.php';
+require_once __DIR__ . '/src/ImageLibraryUsage.php';
 
 /**
  * Process Image Library
@@ -35,6 +36,7 @@ class ProcessImageLibrary extends Process {
 	use ImageLibraryMultilang;
 	use ImageLibraryExportImport;
 	use ImageLibraryHashing;
+	use ImageLibraryUsage;
 
 	// Picker mode: the view is embedded (modal iframe) to pick an existing
 	// image to assign to a page's image field. Set from ?picker + target_*.
@@ -529,6 +531,15 @@ class ProcessImageLibrary extends Process {
 		// twin is uploaded later and links any group the save-time pass
 		// missed. Both are no-ops once everything is hashed + linked.
 		$this->addHookAfter('Pages::saved', $this, 'autoHashOnPageSave');
+
+		// Where-used index maintenance. On every save, re-scan the saved
+		// page's rich-text (textarea) fields and refresh its rows in the
+		// usage index (prune-then-add) so the "where is this image embedded?"
+		// lookup stays current. Cheap: one page, its textarea fields only.
+		// The hook fires on whichever page hosts the field — top-level pages
+		// AND repeater item pages — so embeds inside repeaters are covered.
+		$this->addHookAfter('Pages::saved', $this, 'autoIndexUsageOnPageSave');
+
 		$this->addHook('LazyCron::everyHour', $this, 'autoMaintenance');
 
 		// Picker add-ons — OFF by default, toggled per-feature in the module
@@ -796,6 +807,30 @@ class ProcessImageLibrary extends Process {
 			}
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: auto-hash on save failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Refresh the where-used index for the saved page. Re-scans only this
+	 * page's textarea fields and replaces its rows in the usage index
+	 * (prune-then-add), so an edit that adds or removes an embedded library
+	 * image is reflected immediately. Skips pages with no textarea field.
+	 */
+	public function autoIndexUsageOnPageSave(HookEvent $event): void {
+		$page = $event->arguments(0);
+		if (!$page instanceof Page || !$page->id || !$page->template) return;
+		$textareaFields = $this->discoverTextareaFields();
+		if (!$textareaFields) return;
+		$hosts = false;
+		foreach ($textareaFields as $fn) {
+			if ($page->template->hasField($fn)) { $hosts = true; break; }
+		}
+		if (!$hosts) return;
+
+		try {
+			$this->reindexPageUsage((int) $page->id);
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: auto-index usage on save failed: ' . $e->getMessage());
 		}
 	}
 
@@ -6971,6 +7006,7 @@ class ProcessImageLibrary extends Process {
 		$cache = $this->wire('cache');
 		$cache->deleteFor($this, '*');
 		$this->dropHashTable();
+		$this->dropUsageTable();
 
 		$permissions = $this->wire('permissions');
 		$shared = $permissions->get(self::PERMISSION_MANAGE_SHARED);

@@ -665,6 +665,15 @@ trait ImageLibraryHashing {
 			// Collapse page-version file copies (the v<n>/ subdirs) onto the live
 			// inode — a quick, self-contained filesystem pass.
 			$this->reclaimVersionFiles();
+
+			// Where-used index: drop stale references first, then (re)build the
+			// index over every page that embeds a library image. Same budgeted,
+			// converging shape as the hash scan — a large site fills in over a
+			// few passes; steady state is a no-op once everything is indexed.
+			$this->pruneOrphanedUsageRows();
+			$off = 0;
+			do { $r = $this->scanUsage($off); $off = (int) $r['nextOffset']; }
+			while (empty($r['complete']) && microtime(true) < $stop);
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: maintenance pass failed: ' . $e->getMessage());
 		}
