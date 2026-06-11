@@ -2403,6 +2403,90 @@
 			return document.createTextNode(label);
 		}
 
+		// "Used in" column → dialog listing every page (and the fields on it)
+		// that embeds this image in rich-text. Content-based: the server
+		// aggregates across the image's whole dedup cluster (usage-detail
+		// endpoint), so the list matches the badge count regardless of which
+		// placement was clicked. Same chrome as the other dialogs: header
+		// title, scrollable body, Close button in a bottom footer.
+		function openUsageDialog(pageId, field, basename) {
+			var dialog = document.createElement('dialog');
+			dialog.className = 'ml-usage-dialog';
+
+			var header = document.createElement('header');
+			// The label travels through the JS-config JSON; show a literal "&"
+			// rather than an escaped "&amp;".
+			header.textContent = (labels.usedInTitle || 'Embedded on these pages & fields')
+				.replace(/&amp;/g, '&');
+			dialog.appendChild(header);
+
+			var body = document.createElement('div');
+			body.className = 'ml-usage-dialog-body';
+			body.textContent = labels.usedInLoading || 'Loading…';
+			dialog.appendChild(body);
+
+			var footer = document.createElement('footer');
+			var closeBtn = document.createElement('button');
+			closeBtn.type = 'button';
+			closeBtn.className = 'uk-button uk-button-primary';
+			closeBtn.textContent = labels.close || 'Close';
+			footer.appendChild(closeBtn);
+			dialog.appendChild(footer);
+
+			document.body.appendChild(dialog);
+			closeBtn.addEventListener('click', function () { if (dialog.open) dialog.close(); });
+			dialog.addEventListener('close', function () { dialog.remove(); });
+			dialog.showModal();
+			closeBtn.focus();
+
+			if (!config.usageDetailUrl) { body.textContent = labels.usedInEmpty || ''; return; }
+			var fd = new FormData();
+			fd.append('pageId', pageId);
+			fd.append('field', field || '');
+			fd.append('basename', basename);
+			appendCsrf(fd);
+			fetch(config.usageDetailUrl, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' },
+				body: fd
+			}).then(function (r) {
+				return r.json().catch(function () { return null; });
+			}).then(function (d) {
+				body.textContent = '';
+				var pages = (d && d.ok && d.pages) || [];
+				if (!pages.length) {
+					var p = document.createElement('p');
+					p.className = 'ml-usage-dialog-empty';
+					p.textContent = labels.usedInEmpty || 'Not embedded in any rich-text field.';
+					body.appendChild(p);
+					return;
+				}
+				// Reuse the existing where-used list styling (delete/rename dialogs).
+				var ul = document.createElement('ul');
+				ul.className = 'ml-delete-confirm-usage-list';
+				pages.forEach(function (r) {
+					var li = document.createElement('li');
+					li.appendChild(buildUsageRef(r));
+					ul.appendChild(li);
+				});
+				body.appendChild(ul);
+			}).catch(function () { body.textContent = labels.usedInEmpty || ''; });
+		}
+
+		// Delegated on .ml-results so it survives the innerHTML swaps on
+		// filter / sort / pagination.
+		results && results.addEventListener('click', function (e) {
+			var link = e.target.closest && e.target.closest('.ml-usage-link');
+			if (!link) return;
+			e.preventDefault();
+			openUsageDialog(
+				link.getAttribute('data-page-id'),
+				link.getAttribute('data-field'),
+				link.getAttribute('data-basename')
+			);
+		});
+
 		// Post-rename summary. The rename already happened and every
 		// rich-text embed of the file was rewritten server-side; this
 		// dialog confirms the new filename and lists the references that

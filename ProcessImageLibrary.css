@@ -347,7 +347,8 @@
 .ml-columns-dialog,
 .ml-bulk-result-dialog,
 .ml-delete-confirm,
-.ml-bookmark-dialog {
+.ml-bookmark-dialog,
+.ml-usage-dialog {
 	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 4px;
 	padding: 1.25rem;
@@ -363,14 +364,16 @@
 .ml-delete-confirm::backdrop,
 .ml-bookmark-dialog::backdrop,
 .ml-image-modal::backdrop,
-.ml-cluster-modal::backdrop {
+.ml-cluster-modal::backdrop,
+.ml-usage-dialog::backdrop {
 	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
 }
 .ml-popup-editor > header,
 .ml-columns-dialog > header,
 .ml-bulk-result-dialog > header,
 .ml-delete-confirm > header,
-.ml-bookmark-dialog > header {
+.ml-bookmark-dialog > header,
+.ml-usage-dialog > header {
 	font-weight: 600;
 	font-size: 1.05em;
 	margin: 0 0 0.75rem;
@@ -381,7 +384,8 @@
 .ml-columns-dialog > footer,
 .ml-bulk-result-dialog > footer,
 .ml-delete-confirm > footer,
-.ml-bookmark-dialog > footer {
+.ml-bookmark-dialog > footer,
+.ml-usage-dialog > footer {
 	display: flex;
 	justify-content: flex-end;
 	gap: 0.5rem;
@@ -396,6 +400,7 @@
 .ml-delete-confirm     { width: min(480px, 92vw); }
 .ml-columns-dialog     { width: min(420px, 92vw); }
 .ml-bookmark-dialog    { width: min(420px, 92vw); }
+.ml-usage-dialog       { width: min(480px, 92vw); }
 
 /* Delete-confirm content bits (preview list + warning line) — the
    structural chrome is inherited from the shared block above. */
@@ -476,10 +481,6 @@
 	margin-bottom: 0.15rem;
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	font-weight: 600;
-}
-.ml-delete-confirm-usage-list a {
-	color: inherit;
-	text-decoration: underline;
 }
 /* Drop-target highlight: the single row currently under the file
    drag pointer. Uses the same soft tint as inline-edit hover so the
@@ -856,10 +857,16 @@ textarea.ml-cell-input {
 	outline-offset: -2px;
 }
 
-/* Variations cell renders just a count — right-align like other
-   numeric cells for quick at-a-glance scanning. */
+/* Pure-integer count columns (Variations, Used in) are centre-aligned —
+   header and cells — so single-digit counts read consistently down the
+   column instead of drifting to an edge. */
+.ml-cell-variations,
+.ml-cell-usedin,
+.ml-table thead th[data-col="variations"],
+.ml-table thead th[data-col="usedIn"] {
+	text-align: center;
+}
 .ml-cell-variations {
-	text-align: right;
 	color: var(--pw-muted-color, #555);
 }
 
@@ -1410,6 +1417,26 @@ textarea.ml-langtabs-pane {
 }
 .ml-cluster-modal-body .ml-table-scroll {
 	max-width: 100%;
+}
+
+/* "Used in" column. The count is a plain link (it inherits the admin
+   theme's anchor colour, like the Page cell); a muted dash marks images
+   embedded nowhere. No bespoke control. */
+.ml-usage-link {
+	font-weight: 500;
+	cursor: pointer;
+}
+.ml-usage-none {
+	color: var(--pw-muted-color, #999);
+}
+
+/* "Used in" dialog — all chrome (border, padding, header, footer, width,
+   backdrop) is inherited from the shared dialog block above; the page/field
+   list reuses .ml-delete-confirm-usage-list. Only the empty-state line is
+   unique here. */
+.ml-usage-dialog-empty {
+	margin: 0;
+	color: var(--pw-muted-color, #777);
 }
 
 /* Masonry: the duplicate tile reads as a "stack" you open, not an editor. */

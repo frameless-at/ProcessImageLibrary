@@ -4,6 +4,7 @@ require_once __DIR__ . '/src/ImageLibraryDiscovery.php';
 require_once __DIR__ . '/src/ImageLibraryMultilang.php';
 require_once __DIR__ . '/src/ImageLibraryExportImport.php';
 require_once __DIR__ . '/src/ImageLibraryHashing.php';
+require_once __DIR__ . '/src/ImageLibraryUsage.php';
 
 /**
  * Process Image Library
@@ -35,6 +36,7 @@ class ProcessImageLibrary extends Process {
 	use ImageLibraryMultilang;
 	use ImageLibraryExportImport;
 	use ImageLibraryHashing;
+	use ImageLibraryUsage;
 
 	// Picker mode: the view is embedded (modal iframe) to pick an existing
 	// image to assign to a page's image field. Set from ?picker + target_*.
@@ -416,8 +418,24 @@ class ProcessImageLibrary extends Process {
 
 	protected function getDefaultHiddenColumns(): array {
 		$val = $this->get('defaultHiddenColumns');
-		if (!is_array($val)) return [];
-		return array_values(array_filter(array_map('strval', $val)));
+		$cfg = is_array($val) ? array_filter(array_map('strval', $val)) : [];
+		// 'usedIn' (the where-used column) is intrinsically hidden by default —
+		// it's an opt-in audit column, and keeping it off costs nothing on every
+		// render. The user's own toggle still wins once they enable it (saved
+		// column visibility takes precedence over this default everywhere).
+		$cfg[] = 'usedIn';
+		return array_values(array_unique($cfg));
+	}
+
+	/**
+	 * Is the (default-hidden) "Used in" column actually enabled for this user?
+	 * Gates the per-render usage lookup so a table whose column is off pays
+	 * nothing. User pref wins; otherwise it follows the hidden-by-default.
+	 */
+	protected function usedInColumnVisible(): bool {
+		$visible = $this->getUserPrefs()['columns']['visible'] ?? [];
+		if (array_key_exists('usedIn', $visible)) return (bool) $visible['usedIn'];
+		return !in_array('usedIn', $this->getDefaultHiddenColumns(), true);
 	}
 
 	/**
@@ -437,6 +455,11 @@ class ProcessImageLibrary extends Process {
 		// strings; ISO-shaped, so string sort = chronological sort.
 		'created'     => 'string',
 		'modified'    => 'string',
+		// Integer count columns. Not present in the cached findRaw rows —
+		// hydrated onto the full filtered set just-in-time before the sort
+		// (see renderResultsHtml), the same way custom-subfield sorts are.
+		'variationsCount' => 'int',
+		'usageCount'      => 'int',
 	];
 
 	const DEFAULT_SORT = 'pageTitle';
@@ -529,6 +552,15 @@ class ProcessImageLibrary extends Process {
 		// twin is uploaded later and links any group the save-time pass
 		// missed. Both are no-ops once everything is hashed + linked.
 		$this->addHookAfter('Pages::saved', $this, 'autoHashOnPageSave');
+
+		// Where-used index maintenance. On every save, re-scan the saved
+		// page's rich-text (textarea) fields and refresh its rows in the
+		// usage index (prune-then-add) so the "where is this image embedded?"
+		// lookup stays current. Cheap: one page, its textarea fields only.
+		// The hook fires on whichever page hosts the field — top-level pages
+		// AND repeater item pages — so embeds inside repeaters are covered.
+		$this->addHookAfter('Pages::saved', $this, 'autoIndexUsageOnPageSave');
+
 		$this->addHook('LazyCron::everyHour', $this, 'autoMaintenance');
 
 		// Picker add-ons — OFF by default, toggled per-feature in the module
@@ -796,6 +828,30 @@ class ProcessImageLibrary extends Process {
 			}
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: auto-hash on save failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Refresh the where-used index for the saved page. Re-scans only this
+	 * page's textarea fields and replaces its rows in the usage index
+	 * (prune-then-add), so an edit that adds or removes an embedded library
+	 * image is reflected immediately. Skips pages with no textarea field.
+	 */
+	public function autoIndexUsageOnPageSave(HookEvent $event): void {
+		$page = $event->arguments(0);
+		if (!$page instanceof Page || !$page->id || !$page->template) return;
+		$textareaFields = $this->discoverTextareaFields();
+		if (!$textareaFields) return;
+		$hosts = false;
+		foreach ($textareaFields as $fn) {
+			if ($page->template->hasField($fn)) { $hosts = true; break; }
+		}
+		if (!$hosts) return;
+
+		try {
+			$this->reindexPageUsage((int) $page->id);
+		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: auto-index usage on save failed: ' . $e->getMessage());
 		}
 	}
 
@@ -1449,6 +1505,7 @@ class ProcessImageLibrary extends Process {
 			'created'     => $this->_('Uploaded'),
 			'modified'    => $this->_('Modified'),
 			'variations'  => $this->_('Variations'),
+			'usedIn'      => $this->_('Used in'),
 		];
 		foreach ($customCols as $name) {
 			$cols['custom:' . $name] = $name;
@@ -1554,6 +1611,21 @@ class ProcessImageLibrary extends Process {
 		// case here so the full row set carries the column.
 		if (strncmp($sort, 'custom:', 7) === 0 && $this->hasAnyCustomFields()) {
 			$rows = $this->bulkHydrateCustomFields($rows);
+		}
+		// Integer-count sorts (Used in / Variations): these values aren't in the
+		// cached findRaw rows, so populate them on the FULL filtered set before
+		// sorting — only when that sort is active, so normal browsing pays
+		// nothing. usageCount is an in-memory index pass; variationsCount needs
+		// a per-image filesystem scan, hence strictly opt-in via this sort.
+		if ($sort === 'usageCount') {
+			$counts = $this->usagePageCountsForRows($rows);
+			foreach ($rows as &$r) {
+				$key = (int) $r['pageId'] . "\0" . (string) $r['fieldName'] . "\0" . (string) $r['basename'];
+				$r['usageCount'] = $counts[$key] ?? 0;
+			}
+			unset($r);
+		} elseif ($sort === 'variationsCount') {
+			$this->hydrateVariationCounts($rows);
 		}
 		$this->applySort($rows, $sort, $dir);
 
@@ -2971,6 +3043,40 @@ class ProcessImageLibrary extends Process {
 
 		$usage = $this->findImageReferences($clean);
 		return $this->jsonResponse(['ok' => true, 'usage' => $usage]);
+	}
+
+	/**
+	 * Content-based where-used for ONE image — backs the "Used in" column's
+	 * click-through. Unlike ___executeUsage (a live per-placement scan used by
+	 * the delete/rename preflight), this reads the prebuilt usage index and
+	 * aggregates across the image's whole dedup cluster, so the answer matches
+	 * the column's badge count regardless of which placement was clicked.
+	 *
+	 * Returns { ok, pages: [ { pageId, pageTitle, editUrl, fieldName }, … ] }.
+	 */
+	public function ___executeUsageDetail() {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			return $this->jsonError('POST required', 405);
+		}
+		$session = $this->wire('session');
+		if (!$session->CSRF->hasValidToken()) {
+			return $this->jsonError('Invalid CSRF token', 403);
+		}
+
+		$input    = $this->wire('input');
+		$pageId   = (int) $input->post('pageId');
+		$field    = $this->wire('sanitizer')->fieldName((string) $input->post('field'));
+		$basename = basename((string) $input->post('basename'));
+		if (!$pageId || $basename === '') {
+			return $this->jsonError('Missing required parameter');
+		}
+
+		$pages = $this->usagePagesForImage($pageId, $field, $basename);
+		return $this->jsonResponse(['ok' => true, 'pages' => $pages]);
 	}
 
 	/**
@@ -4980,6 +5086,38 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Populate $row['variationsCount'] on every given row by scanning each
+	 * image's variation files. Used to sort the table by the Variations
+	 * column: the count isn't in the cached rows, and unlike hydrateSlice
+	 * (which only does the visible slice) a sort needs it on the full set.
+	 * Pages are batch-loaded once; the per-image getVariations() filesystem
+	 * scan is the cost, so this only runs when that sort is actually chosen.
+	 *
+	 * @param array<int,array<string,mixed>> $rows by reference
+	 */
+	protected function hydrateVariationCounts(array &$rows): void {
+		if (!$rows) return;
+		$idSet = [];
+		foreach ($rows as $r) {
+			if (!empty($r['pageId'])) $idSet[(int) $r['pageId']] = true;
+		}
+		$pagesById = [];
+		foreach ($this->wire('pages')->getById(array_keys($idSet)) as $p) {
+			$pagesById[$p->id] = $p;
+		}
+		foreach ($rows as &$r) {
+			$r['variationsCount'] = 0;
+			$page = $pagesById[(int) $r['pageId']] ?? null;
+			if (!$page || !$page->id) continue;
+			$img = $this->resolvePageimage($page, (string) $r['fieldName'], (string) $r['basename']);
+			if (!$img) continue;
+			$vars = $img->getVariations();
+			$r['variationsCount'] = $vars ? $vars->count() : 0;
+		}
+		unset($r);
+	}
+
+	/**
 	 * Apply PHP-level row filters that PW's findRaw selector can't (or shouldn't)
 	 * express. Template narrowing is already done at the selector level in
 	 * loadRows; here we handle the per-image-row filters.
@@ -5550,6 +5688,20 @@ class ProcessImageLibrary extends Process {
 		}
 		unset($row);
 
+		// Where-used counts for the visible slice — one in-memory pass over the
+		// usage index + dedup cluster map (no per-row queries). Only rows whose
+		// image is embedded somewhere get a count; the rest render the dash.
+		// Skipped entirely when the (default-hidden) column is off, so a table
+		// nobody toggled it on for pays nothing.
+		$usageCounts = $this->usedInColumnVisible() ? $this->usagePageCountsForRows($slice) : [];
+		if ($usageCounts) {
+			foreach ($slice as &$row) {
+				$key = (int) $row['pageId'] . "\0" . (string) $row['fieldName'] . "\0" . (string) $row['basename'];
+				if (isset($usageCounts[$key])) $row['usageCount'] = (int) $usageCounts[$key];
+			}
+			unset($row);
+		}
+
 		return $slice;
 	}
 
@@ -5661,6 +5813,7 @@ class ProcessImageLibrary extends Process {
 			'replaceUrl' => $this->wire('page')->url . 'replace/',
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
 			'usageUrl'   => $this->wire('page')->url . 'usage/',
+			'usageDetailUrl' => $this->wire('page')->url . 'usage-detail/',
 			'widgetUrl'  => $this->wire('page')->url . 'widget/',
 			// Used to build the page-edit URL for the thumbnail-click
 			// modal — wraps PW's native image editor in an iframe.
@@ -5790,6 +5943,10 @@ class ProcessImageLibrary extends Process {
 				'usageScanning'    => $this->_('Checking references…'),
 				'usageFieldFmt'    => $this->_('“%1$s” · %2$s'),
 				'usageCountFmt'    => $this->_('used in %d page(s)'),
+				// "Used in" column click-through dialog.
+				'usedInTitle'      => $this->_('Embedded on these pages & fields'),
+				'usedInEmpty'      => $this->_('Not embedded in any rich-text field.'),
+				'usedInLoading'    => $this->_('Loading…'),
 				// Post-rename summary dialog. A rename rewrites every
 				// rich-text embed automatically, so instead of warning
 				// beforehand we confirm afterwards which embeds were fixed.
@@ -6294,7 +6451,8 @@ class ProcessImageLibrary extends Process {
 			['size',        $this->_('Size'),        'filesize'],
 			['created',     $this->_('Uploaded'),    'created'],
 			['modified',    $this->_('Modified'),    'modified'],
-			['variations',  $this->_('Variations'),  null],
+			['variations',  $this->_('Variations'),  'variationsCount'],
+			['usedIn',      $this->_('Used in'),     'usageCount'],
 		];
 		if (!$showTagsCol) {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
@@ -6582,6 +6740,24 @@ class ProcessImageLibrary extends Process {
 				. $san->entities($this->formatTimestamp($row['modified'] ?? '')) . '</td>';
 			$out .= '<td class="ml-cell-nowrap ml-cell-variations" data-col="variations">'
 				. (int) ($row['variationsCount'] ?? 0) . '</td>';
+
+			// Where-used: how many pages embed this image in a rich-text field
+			// (content-based, hydrated for the visible slice only). A count
+			// badge opens the page list; a dash means "embedded nowhere".
+			$usageCount = (int) ($row['usageCount'] ?? 0);
+			$out .= '<td class="ml-cell-nowrap ml-cell-usedin" data-col="usedIn">';
+			if ($usageCount > 0) {
+				$out .= '<a href="#" class="ml-usage-link"'
+					. ' data-page-id="' . (int) $row['pageId'] . '"'
+					. ' data-field="' . $san->entities((string) $row['fieldName']) . '"'
+					. ' data-basename="' . $san->entities((string) $row['basename']) . '"'
+					. ' title="' . $san->entities(sprintf(
+						$this->_('Embedded on %d page(s) — click to list'), $usageCount
+					)) . '">' . $usageCount . '</a>';
+			} else {
+				$out .= '<span class="ml-usage-none" aria-hidden="true">–</span>';
+			}
+			$out .= '</td>';
 
 			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
@@ -6971,6 +7147,7 @@ class ProcessImageLibrary extends Process {
 		$cache = $this->wire('cache');
 		$cache->deleteFor($this, '*');
 		$this->dropHashTable();
+		$this->dropUsageTable();
 
 		$permissions = $this->wire('permissions');
 		$shared = $permissions->get(self::PERMISSION_MANAGE_SHARED);
