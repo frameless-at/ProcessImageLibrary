@@ -1414,6 +1414,16 @@ textarea.ml-langtabs-pane {
 .ml-coll-move:focus-visible {
 	opacity: 1;
 }
+/* Inline delete (like the tag manager): × goes red on hover; once armed it
+   becomes a red ✓, the row's controls stay visible and the name is struck
+   through until you confirm or it auto-disarms. */
+.ml-coll-del:hover { color: #c33; }
+.ml-coll-del.ml-coll-armed { color: #c33; opacity: 1; }
+.ml-coll-row-deleting .ml-coll-move { opacity: 1; }
+.ml-coll-row-deleting .ml-coll-name {
+	text-decoration: line-through;
+	color: #c33;
+}
 /* Drop indicators set during dragover. */
 .ml-coll-row.ml-drop-before { box-shadow: inset 0 2px 0 0 var(--pw-primary, #3480e3); }
 .ml-coll-row.ml-drop-after  { box-shadow: inset 0 -2px 0 0 var(--pw-primary, #3480e3); }

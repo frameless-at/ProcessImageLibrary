@@ -5963,6 +5963,8 @@ class ProcessImageLibrary extends Process {
 				'collUnnest'        => $this->_('Move out one level'),
 				'collCollapse'      => $this->_('Collapse'),
 				'collExpand'        => $this->_('Expand'),
+				'collDelete'        => $this->_('Delete collection'),
+				'collConfirmDelete' => $this->_('Click again to delete'),
 				'collManageEmpty'   => $this->_('No collections yet.'),
 				'collManageTeam'    => $this->_('Team'),
 				'collectionsManage'      => $this->_('Manage collections'),
@@ -6138,11 +6140,7 @@ class ProcessImageLibrary extends Process {
 				. '<i class="fa fa-clone" aria-hidden="true"></i> '
 				. $san->entities((string) ($c['name'] ?? ''))
 				. '</a>'
-				. ((!$shared || $canManageShared)
-					? '<button type="button" class="ml-bookmark-del"'
-						. ' aria-label="' . $collDelTitle . '" title="' . $collDelTitle . '">'
-						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
-					: '')
+				// No × on collection tabs — deletion lives in the manager dialog.
 				. '</li>';
 		};
 

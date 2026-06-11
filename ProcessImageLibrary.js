@@ -3901,7 +3901,8 @@
 					a.appendChild(car);
 				}
 				li.appendChild(a);
-				if (!isShared || canManageShared) li.appendChild(makeDelBtn(labels.collectionDelete || labels.bookmarkDelete || 'Delete'));
+				// No × on the strip — deleting collections lives in the manager
+				// dialog now (like the tag manager). The strip is for navigating.
 				if (hasKids) {
 					var fly = document.createElement('ul');
 					fly.className = 'ml-coll-flyout';
@@ -3913,7 +3914,6 @@
 						if (isShared) fli.dataset.shared = '1';
 						fli.style.paddingLeft = (0.75 + rel * 1) + 'rem';
 						fli.appendChild(makeCollLink(d, isShared, false));
-						if (!isShared || canManageShared) fli.appendChild(makeDelBtn(labels.collectionDelete || 'Delete'));
 						fly.appendChild(fli);
 					});
 					li.appendChild(fly);
@@ -3956,6 +3956,8 @@
 		var collectionsDialog = document.querySelector('.ml-collections-dialog');
 		var COLL_MAX_DEPTH = 3;        // levels 0,1,2
 		var collCollapsed = {};        // "own:id" / "shared:id" -> true (manager-local, resets on reload)
+		var collDelArmedBtn = null;    // delete-confirm armed button (one at a time)
+		var collDelTimer = null;
 
 		function collStoreArr(isShared) { return isShared ? sharedCollections : collections; }
 		function collKey(isShared, id) { return (isShared ? 'shared:' : 'own:') + id; }
@@ -4108,6 +4110,47 @@
 			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
 			return b;
 		}
+		// Inline delete-confirm for a manager row (tag-manager pattern).
+		function collDelSetIcon(btn, icon, title) {
+			var i = btn.querySelector('i'); if (i) i.className = 'fa ' + icon;
+			btn.title = title; btn.setAttribute('aria-label', title);
+		}
+		function collDelArm(btn, li) {
+			collDelArmedBtn = btn;
+			btn.classList.add('ml-coll-armed');
+			collDelSetIcon(btn, 'fa-check', labels.collConfirmDelete || 'Click again to delete');
+			if (li) li.classList.add('ml-coll-row-deleting');
+			collDelTimer = setTimeout(collDelDisarm, 4000);
+		}
+		function collDelDisarm() {
+			if (collDelTimer) { clearTimeout(collDelTimer); collDelTimer = null; }
+			if (!collDelArmedBtn) return;
+			collDelArmedBtn.classList.remove('ml-coll-armed');
+			collDelSetIcon(collDelArmedBtn, 'fa-times', labels.collDelete || 'Delete collection');
+			var row = collDelArmedBtn.closest('.ml-coll-row');
+			if (row) row.classList.remove('ml-coll-row-deleting');
+			collDelArmedBtn = null;
+		}
+		function collDelete(isShared, id) {
+			collDelDisarm();
+			var arr = collStoreArr(isShared);
+			// Drop it, then re-flatten so children of a deleted parent are promoted
+			// to top level rather than vanishing.
+			var flat = collFlatten(arr.filter(function (c) { return c && c.id !== id; }));
+			if (isShared) sharedCollections = flat; else collections = flat;
+			if (isShared) saveSharedPrefs(); else saveUserPrefs();
+			renderCollectionsManager();
+			rerenderBookmarksList();
+			announce(isShared
+				? (labels.sharedDeleted || 'Removed from the team')
+				: (labels.collectionDeleted || 'Collection deleted'));
+			// If we're currently viewing the deleted collection, drop ?coll and reload.
+			if (currentColl() === id) {
+				var rest = location.search.replace(/^\?/, '').split('&')
+					.filter(function (p) { return p && !/^coll=/.test(p); }).join('&');
+				replaceFromQs(rest ? '?' + rest : '', true, true);
+			}
+		}
 		function collAncestorCollapsed(arr, isShared, c) {
 			var anc = c.parent || '', g = 0;
 			while (anc && g++ < 64) {
@@ -4157,6 +4200,9 @@
 				btns.appendChild(mkCollBtn('nest', 'fa-indent', labels.collNest || 'Indent'));
 			}
 			if (depth > 0) btns.appendChild(mkCollBtn('unnest', 'fa-outdent', labels.collUnnest || 'Outdent'));
+			var delB = mkCollBtn('del', 'fa-times', labels.collDelete || 'Delete collection');
+			delB.classList.add('ml-coll-del');
+			btns.appendChild(delB);
 			li.appendChild(btns);
 			return li;
 		}
@@ -4164,6 +4210,8 @@
 			if (!collectionsDialog) return;
 			var list = collectionsDialog.querySelector('.ml-collections-list');
 			if (!list) return;
+			collDelDisarm();           // rows are about to be replaced
+			collDelArmedBtn = null;
 			list.innerHTML = '';
 			function section(arr, isShared) {
 				arr.forEach(function (c) {
@@ -4267,6 +4315,14 @@
 					var isShared = li.dataset.store === 'shared';
 					var id = li.dataset.collId;
 					var act = btn.dataset.act;
+					if (act === 'del') {
+						// Inline delete confirm — same as the tag manager: first × arms
+						// (turns red ✓), second × confirms; auto-disarms after a few sec.
+						if (btn === collDelArmedBtn) { collDelDisarm(); collDelete(isShared, id); }
+						else { collDelDisarm(); collDelArm(btn, li); }
+						return;
+					}
+					collDelDisarm();   // any other control cancels a pending delete
 					if (act === 'up') collMove(isShared, id, 'up');
 					else if (act === 'down') collMove(isShared, id, 'down');
 					else if (act === 'nest') collIndent(isShared, id);
