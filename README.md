@@ -515,10 +515,13 @@ ProcessImageLibrary/
 │   ├── ImageLibraryDiscovery.php        # trait: image-field / template / tags-config introspection
 │   ├── ImageLibraryMultilang.php        # trait: per-language read/write, name⇄id mapping
 │   ├── ImageLibraryHashing.php          # trait: content-hash de-duplication (hard-links byte-identical copies)
+│   ├── ImageLibraryUsage.php            # trait: where-used reverse index (which pages embed an image in rich-text)
 │   └── ImageLibraryExportImport.php     # trait: JSON + CSV emit, parse, idempotent re-apply
 ├── docs/
 │   ├── ImageLibrary-Concept_EN.md      # architecture / design notes (English)
 │   ├── ImageLibrary-Konzept_DE.md      # German translation of the same
+│   ├── deduplication-design.md         # design rationale: the de-duplication engine
+│   ├── where-used-index-design.md      # design rationale: the where-used index
 │   └── screenshots/                    # README screenshots
 ├── README.md                            # this file
 └── LICENSE
