@@ -4187,6 +4187,11 @@
 			if (!collectionsDialog) return;
 			if (typeof collectionsDialog.showModal === 'function') collectionsDialog.showModal();
 			else collectionsDialog.setAttribute('open', '');
+			// showModal() auto-focuses the first focusable element. Here that's a
+			// reorder button (no checkbox like the tag list has), which would then
+			// match :focus-visible and reveal itself on open. Drop that focus.
+			if (collectionsDialog.contains(document.activeElement)
+				&& document.activeElement !== collectionsDialog) document.activeElement.blur();
 		}
 		// One-time wiring: row controls (delegated), open / close.
 		if (collectionsDialog) {
@@ -4642,6 +4647,11 @@
 					} else {
 						columnsDialog.setAttribute('open', '');
 					}
+					// Drop the auto-focus so the first row's controls don't reveal
+					// themselves on open (the tag list's first focusable is a neutral
+					// checkbox; here it'd be a reorder button).
+					if (columnsDialog.contains(document.activeElement)
+						&& document.activeElement !== columnsDialog) document.activeElement.blur();
 					return;
 				}
 				if (e.target.classList && e.target.classList.contains('ml-columns-close')) {
