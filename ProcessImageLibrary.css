@@ -482,9 +482,6 @@
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 	font-weight: 600;
 }
-.ml-delete-confirm-usage-list a {
-	text-decoration: underline;
-}
 /* Drop-target highlight: the single row currently under the file
    drag pointer. Uses the same soft tint as inline-edit hover so the
    visual language matches the rest of the editor. */
