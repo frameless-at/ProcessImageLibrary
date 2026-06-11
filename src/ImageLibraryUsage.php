@@ -161,30 +161,43 @@ trait ImageLibraryUsage {
 			$dirPid = (int) $m[1];
 			$file   = (string) $m[2];
 
-			// Cross-page copy carries the origin page as -pid<id>; otherwise the
-			// URL directory id IS the source page.
-			$srcPid = $dirPid;
+			// Which page is the SOURCE image's storage page? pwimage stores the
+			// inserted (sized/cropped) variation in the SOURCE image's own files
+			// folder, so the URL directory id IS the source page — even for a
+			// cross-page insert, where the "-pid<id>" suffix records the TARGET
+			// page the variation was made for, NOT the source. (Verified against
+			// real data: /files/1164/img.x-is-pid1171.jpeg is the 1164 image used
+			// on page 1171.) We still try the -pid id as a fallback so the rarer
+			// setups where the copy lands in the editing page's folder (tagged
+			// with the source id) also resolve. First candidate that maps to a
+			// known managed image on that page wins; the directory takes priority
+			// because that's where the file physically lives.
+			$candidates = [$dirPid];
 			if (preg_match('#-pid(\d+)\b#', $file, $pm)) {
-				$srcPid = (int) $pm[1];
+				$marker = (int) $pm[1];
+				if ($marker !== $dirPid) $candidates[] = $marker;
 			}
 
-			$stems = $stemIndex[$srcPid] ?? null;
-			if (!$stems) continue;   // no managed image on that page → not ours
+			foreach ($candidates as $srcPid) {
+				$stems = $stemIndex[$srcPid] ?? null;
+				if (!$stems) continue;   // no managed image on that page
 
-			// The filename always begins "<originalStem>." — find the known stem
-			// of this page that prefixes it. Longest match wins so "foo.bar"
-			// isn't shadowed by a shorter "foo" when both exist.
-			$matchStem = null;
-			foreach ($stems as $stem => $_) {
-				$needle = $stem . '.';
-				if (strncmp($file, $needle, strlen($needle)) === 0
-					&& ($matchStem === null || strlen($stem) > strlen($matchStem))) {
-					$matchStem = $stem;
+				// The filename always begins "<originalStem>." — find the known
+				// stem of this page that prefixes it. Longest match wins so
+				// "foo.bar" isn't shadowed by a shorter "foo" when both exist.
+				$matchStem = null;
+				foreach ($stems as $stem => $_) {
+					$needle = $stem . '.';
+					if (strncmp($file, $needle, strlen($needle)) === 0
+						&& ($matchStem === null || strlen($stem) > strlen($matchStem))) {
+						$matchStem = $stem;
+					}
 				}
-			}
-			if ($matchStem === null) continue;
+				if ($matchStem === null) continue;
 
-			$out[$srcPid . "\0" . $matchStem] = [$srcPid, $matchStem];
+				$out[$srcPid . "\0" . $matchStem] = [$srcPid, $matchStem];
+				break;   // resolved this token to its source; don't double-count
+			}
 		}
 		return $out;
 	}

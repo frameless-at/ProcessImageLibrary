@@ -55,9 +55,14 @@ The index reuses the same matcher the rename/delete path uses, so it covers both
 ways pwimage embeds a library image:
 
 - **Direct, same page:** `/<pid>/<stem>.<variation>.<ext>`
-- **Cross-page insert:** `/<anyPid>/<stem>.<variation>-pid<pid>[-hidpi].<ext>` —
-  a sized/cropped copy PW stores on the editing page, tagged with the source
-  page id. (Multi-dot crop variations included.)
+- **Cross-page insert:** `/<srcPid>/<stem>.<variation>-is-pid<targetPid>[-hidpi].<ext>`
+  — pwimage stores the inserted sized/cropped variation in the **source image's
+  own** files folder, so the directory id `<srcPid>` is the source page; the
+  `-pid<targetPid>` suffix records the page the variation was made *for* (the one
+  whose rich-text holds the embed), **not** the source. The source page is
+  therefore the URL directory, not the marker. (Multi-dot crop variations and
+  `-hidpi` included. Verified against real data: `/files/1164/img.x-is-pid1171.jpeg`
+  is the page-1164 image used on page 1171.)
 
 ### Building the index
 
@@ -66,8 +71,11 @@ ways pwimage embeds a library image:
   equivalent), `include=all`, `check_access=0` so it's complete and
   access-independent like the row enumeration.
 - Parse each value once in PHP, extract every `/files/<pid>/<stem>…` token, and
-  record the resolved source image key (direct → `pid:stem`; cross-page →
-  `pid:stem` from the `-pid<pid>` marker).
+  record the resolved source image key. The source page is the **URL directory
+  id** (where the file physically lives); the `-pid<id>` marker is the *target*
+  page and is only tried as a fallback for the rarer setup where the copy lands
+  in the editing page's folder instead. The matched stem is the longest known
+  managed-image stem on that page that prefixes the filename.
 - **Budgeted** like the dedup scan so a large site converges over a few passes
   rather than blocking one request.
 
