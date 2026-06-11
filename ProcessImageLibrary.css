@@ -348,7 +348,8 @@
 .ml-bulk-result-dialog,
 .ml-delete-confirm,
 .ml-bookmark-dialog,
-.ml-usage-dialog {
+.ml-usage-dialog,
+.ml-collections-dialog {
 	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 4px;
 	padding: 1.25rem;
@@ -365,7 +366,8 @@
 .ml-bookmark-dialog::backdrop,
 .ml-image-modal::backdrop,
 .ml-cluster-modal::backdrop,
-.ml-usage-dialog::backdrop {
+.ml-usage-dialog::backdrop,
+.ml-collections-dialog::backdrop {
 	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
 }
 .ml-popup-editor > header,
@@ -373,7 +375,8 @@
 .ml-bulk-result-dialog > header,
 .ml-delete-confirm > header,
 .ml-bookmark-dialog > header,
-.ml-usage-dialog > header {
+.ml-usage-dialog > header,
+.ml-collections-dialog > header {
 	font-weight: 600;
 	font-size: 1.05em;
 	margin: 0 0 0.75rem;
@@ -385,7 +388,8 @@
 .ml-bulk-result-dialog > footer,
 .ml-delete-confirm > footer,
 .ml-bookmark-dialog > footer,
-.ml-usage-dialog > footer {
+.ml-usage-dialog > footer,
+.ml-collections-dialog > footer {
 	display: flex;
 	justify-content: flex-end;
 	gap: 0.5rem;
@@ -401,6 +405,7 @@
 .ml-columns-dialog     { width: min(420px, 92vw); }
 .ml-bookmark-dialog    { width: min(420px, 92vw); }
 .ml-usage-dialog       { width: min(480px, 92vw); }
+.ml-collections-dialog { width: min(460px, 92vw); }
 
 /* Delete-confirm content bits (preview list + warning line) — the
    structural chrome is inherited from the shared block above. */
@@ -1316,7 +1321,8 @@ textarea.ml-langtabs-pane {
 .ml-columns-list label:hover {
 	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
 }
-.ml-col-move {
+.ml-col-move,
+.ml-coll-move {
 	flex: 0 0 auto;
 	background: transparent;
 	border: 0;
@@ -1327,10 +1333,82 @@ textarea.ml-langtabs-pane {
 	font-size: 0.85em;
 	border-radius: 2px;
 }
-.ml-col-move:hover {
+.ml-col-move:hover,
+.ml-coll-move:hover {
 	background: color-mix(in srgb, var(--pw-main-background, #f0f0f0) 60%, var(--pw-text-color, #000) 8%);
 	color: var(--pw-text-color, #333);
 }
+
+/* Collections manager — drag-and-drop tree of collections (one level deep).
+   Mirrors the column-picker list; rows are draggable, children are indented,
+   and drop targets show a line (reorder) or a box (nest). */
+.ml-collections-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+}
+.ml-coll-row {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.25rem 0.3rem;
+	border-radius: 3px;
+	cursor: grab;
+	border: 1px solid transparent;   /* reserved so drop highlights don't shift layout */
+}
+.ml-coll-row:active { cursor: grabbing; }
+.ml-coll-row.ml-dragging { opacity: 0.35; }
+.ml-coll-child { margin-left: 1.6rem; }   /* one-level indent for subgroups */
+.ml-coll-handle {
+	flex: 0 0 auto;
+	color: var(--pw-muted-color, #bbb);
+	cursor: grab;
+	font-size: 0.95em;
+	user-select: none;
+}
+.ml-coll-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.ml-coll-btns {
+	flex: 0 0 auto;
+	display: flex;
+	gap: 0.05rem;
+	opacity: 0;
+	transition: opacity 0.12s ease-out;
+}
+.ml-coll-row:hover .ml-coll-btns,
+.ml-coll-row:focus-within .ml-coll-btns { opacity: 1; }
+/* Drop indicators set during dragover. */
+.ml-coll-row.ml-drop-before { box-shadow: inset 0 2px 0 0 var(--pw-primary, #3480e3); }
+.ml-coll-row.ml-drop-after  { box-shadow: inset 0 -2px 0 0 var(--pw-primary, #3480e3); }
+.ml-coll-row.ml-drop-into {
+	border-color: var(--pw-primary, #3480e3);
+	background: color-mix(in srgb, var(--pw-main-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+}
+/* "Team" separator + empty state. */
+.ml-coll-sep {
+	margin: 0.5rem 0 0.15rem;
+	font-size: 0.8em;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--pw-muted-color, #999);
+}
+.ml-coll-empty {
+	color: var(--pw-muted-color, #999);
+	font-style: italic;
+	padding: 0.25rem 0.3rem;
+}
+/* "Manage" link in the bookmarks/collections tab strip. */
+.ml-collections-manage > a { color: var(--pw-muted-color, #888); }
+.ml-collections-manage > a:hover { color: var(--pw-text-color, inherit); }
 
 /* Visually-hidden live region — kept in the DOM and announced by
    screen readers, invisible to sighted users. Same idiom as

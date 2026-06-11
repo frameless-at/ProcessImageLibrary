@@ -3882,7 +3882,312 @@
 			sharedBookmarks.forEach(function (b, idx) { addBookmarkLi(b, idx, true); });
 			collections.forEach(function (c) { addCollectionLi(c, false); });
 			sharedCollections.forEach(function (c) { addCollectionLi(c, true); });
+			// "Manage" link after the collections (shared counts only for
+			// managers, who can actually edit the team store). Kept in sync here
+			// since the strip is rebuilt client-side on every change.
+			if (collections.length || (canManageShared && sharedCollections.length)) {
+				var mli = document.createElement('li');
+				mli.className = 'ml-collections-manage';
+				var ma = document.createElement('a');
+				ma.href = '#';
+				ma.setAttribute('role', 'button');
+				ma.title = labels.collectionsManage || 'Manage collections';
+				ma.innerHTML = '<i class="fa fa-sliders" aria-hidden="true"></i> ';
+				ma.appendChild(document.createTextNode(labels.collectionsManageShort || 'Manage'));
+				mli.appendChild(ma);
+				ul.insertBefore(mli, addLi);
+			}
 			syncBookmarkActive();
+		}
+
+		// ---- Collections manager: drag-and-drop reorder + one-level nesting ----
+		// Each store (personal `collections`, team `sharedCollections`) is kept in
+		// DISPLAY order: a child sits immediately after its parent. A collection's
+		// `parent` is the id of its top-level parent ('' = top level). One level
+		// deep — a parent can't itself be nested.
+		var collectionsDialog = document.querySelector('.ml-collections-dialog');
+
+		function collStoreArr(isShared) { return isShared ? sharedCollections : collections; }
+		function collIndexOf(arr, id) {
+			for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].id === id) return i;
+			return -1;
+		}
+		function collById(arr, id) { var i = collIndexOf(arr, id); return i < 0 ? null : arr[i]; }
+		function collChildren(arr, id) {
+			return arr.filter(function (c) { return c && (c.parent || '') === id; });
+		}
+		function collIsParent(arr, id) {
+			return arr.some(function (c) { return c && (c.parent || '') === id; });
+		}
+		// [item] + its children (top-level only); a child is its own block.
+		function collBlock(arr, id) {
+			var c = collById(arr, id);
+			if (!c) return [];
+			if ((c.parent || '') !== '') return [c];
+			return [c].concat(collChildren(arr, id));
+		}
+		// Re-flatten a store to the display-order invariant and demote any child
+		// whose parent vanished or is itself a child (keeps it one level).
+		function collNormalize(arr) {
+			var byId = {};
+			arr.forEach(function (c) { if (c && c.id) byId[c.id] = c; });
+			arr.forEach(function (c) {
+				if (!c) return;
+				var p = c.parent || '';
+				if (p && (!byId[p] || (byId[p].parent || '') !== '')) c.parent = '';
+			});
+			var out = [], seen = {};
+			arr.forEach(function (c) {
+				if (!c || seen[c.id] || (c.parent || '') !== '') return;
+				seen[c.id] = true; out.push(c);
+				collChildren(arr, c.id).forEach(function (ch) {
+					if (!seen[ch.id]) { seen[ch.id] = true; out.push(ch); }
+				});
+			});
+			arr.forEach(function (c) { if (c && !seen[c.id]) { seen[c.id] = true; out.push(c); } });
+			return out;
+		}
+		function collPersist(isShared) {
+			var arr = collStoreArr(isShared);
+			var norm = collNormalize(arr);
+			arr.length = 0;
+			Array.prototype.push.apply(arr, norm);
+			if (isShared) saveSharedPrefs(); else saveUserPrefs();
+			renderCollectionsManager();
+			rerenderBookmarksList();
+		}
+		// Make `id` a child of top-level `parentId` (leaf-only, same store).
+		function collNest(isShared, id, parentId) {
+			var arr = collStoreArr(isShared);
+			var c = collById(arr, id), p = collById(arr, parentId);
+			if (!c || !p || id === parentId) return;
+			if ((p.parent || '') !== '') return;       // target must be top level
+			if (collIsParent(arr, id)) return;          // dragged must be a leaf
+			c.parent = parentId;
+			collPersist(isShared);
+		}
+		function collUnnest(isShared, id) {
+			var arr = collStoreArr(isShared);
+			var c = collById(arr, id);
+			if (!c || (c.parent || '') === '') return;
+			c.parent = '';
+			collPersist(isShared);
+		}
+		// Swap with the adjacent sibling at the same level (blocks move together
+		// for top-level items).
+		function collMove(isShared, id, dir) {
+			var arr = collStoreArr(isShared);
+			var c = collById(arr, id);
+			if (!c) return;
+			var p = c.parent || '';
+			if (p !== '') {
+				var sibs = arr.filter(function (x) { return (x.parent || '') === p; });
+				var i = sibs.indexOf(c), j = dir === 'up' ? i - 1 : i + 1;
+				if (j < 0 || j >= sibs.length) return;
+				var ia = arr.indexOf(c), ja = arr.indexOf(sibs[j]);
+				arr[ia] = sibs[j]; arr[ja] = c;
+			} else {
+				var tops = arr.filter(function (x) { return (x.parent || '') === ''; });
+				var ti = tops.indexOf(c), tj = dir === 'up' ? ti - 1 : ti + 1;
+				if (tj < 0 || tj >= tops.length) return;
+				var newTops = tops.slice();
+				newTops[ti] = tops[tj]; newTops[tj] = c;
+				var rebuilt = [];
+				newTops.forEach(function (t) {
+					rebuilt.push(t);
+					collChildren(arr, t.id).forEach(function (ch) { rebuilt.push(ch); });
+				});
+				arr.length = 0; Array.prototype.push.apply(arr, rebuilt);
+			}
+			collPersist(isShared);
+		}
+		// Place `id`'s block before/after `targetId`, adopting newParent ('' =
+		// top level). A parent (has children) can only land at top level.
+		function collPlace(isShared, id, targetId, after, newParent) {
+			var arr = collStoreArr(isShared);
+			var c = collById(arr, id);
+			if (!c || id === targetId) return;
+			newParent = newParent || '';
+			if (newParent !== '' && collIsParent(arr, id)) newParent = '';
+			var block = collBlock(arr, id), ids = {};
+			block.forEach(function (b) { ids[b.id] = true; });
+			var rest = arr.filter(function (x) { return !ids[x.id]; });
+			c.parent = newParent;
+			var ti = -1;
+			for (var i = 0; i < rest.length; i++) { if (rest[i].id === targetId) { ti = i; break; } }
+			if (ti < 0) { Array.prototype.push.apply(rest, block); }
+			else {
+				var at = after ? ti + 1 : ti;
+				// when dropping AFTER a top-level target, skip past its children
+				if (after && (rest[ti].parent || '') === '') {
+					while (at < rest.length && (rest[at].parent || '') === targetId) at++;
+				}
+				rest.splice.apply(rest, [at, 0].concat(block));
+			}
+			arr.length = 0; Array.prototype.push.apply(arr, rest);
+			collPersist(isShared);
+		}
+
+		function mkCollBtn(act, icon, title) {
+			var b = document.createElement('button');
+			b.type = 'button';
+			b.className = 'ml-coll-move';
+			b.dataset.act = act;
+			b.title = title || '';
+			b.setAttribute('aria-label', title || '');
+			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
+			return b;
+		}
+		function buildCollRow(c, isShared, isChild, nestUnderId) {
+			var li = document.createElement('li');
+			li.className = 'ml-coll-row' + (isChild ? ' ml-coll-child' : '');
+			li.draggable = true;
+			li.dataset.collId = c.id;
+			li.dataset.store = isShared ? 'shared' : 'own';
+			var handle = document.createElement('span');
+			handle.className = 'ml-coll-handle';
+			handle.setAttribute('aria-hidden', 'true');
+			handle.textContent = '⠿';                 // ⠿ drag dots
+			li.appendChild(handle);
+			var name = document.createElement('span');
+			name.className = 'ml-coll-name';
+			name.textContent = c.name || '';
+			li.appendChild(name);
+			var btns = document.createElement('span');
+			btns.className = 'ml-coll-btns';
+			btns.appendChild(mkCollBtn('up', 'fa-chevron-up', labels.collMoveUp || 'Move up'));
+			btns.appendChild(mkCollBtn('down', 'fa-chevron-down', labels.collMoveDown || 'Move down'));
+			var leaf = !collIsParent(collStoreArr(isShared), c.id);
+			if (!isChild && nestUnderId && leaf) {
+				var nb = mkCollBtn('nest', 'fa-indent', labels.collNest || 'Make a subgroup');
+				nb.dataset.parent = nestUnderId;
+				btns.appendChild(nb);
+			}
+			if (isChild) btns.appendChild(mkCollBtn('unnest', 'fa-outdent', labels.collUnnest || 'Move out'));
+			li.appendChild(btns);
+			return li;
+		}
+		function renderCollectionsManager() {
+			if (!collectionsDialog) return;
+			var list = collectionsDialog.querySelector('.ml-collections-list');
+			if (!list) return;
+			list.innerHTML = '';
+			var any = false;
+			function section(arr, isShared) {
+				var lastTop = '';
+				arr.forEach(function (c) {
+					if (!c || !c.id) return;
+					var isChild = (c.parent || '') !== '';
+					var nestUnder = isChild ? '' : lastTop;   // a top-level leaf nests under the previous top
+					list.appendChild(buildCollRow(c, isShared, isChild, nestUnder));
+					if (!isChild) lastTop = c.id;
+					any = true;
+				});
+			}
+			section(collections, false);
+			if (canManageShared && sharedCollections.length) {
+				var sep = document.createElement('li');
+				sep.className = 'ml-coll-sep';
+				sep.textContent = labels.collManageTeam || 'Team';
+				list.appendChild(sep);
+				section(sharedCollections, true);
+			}
+			if (!any) {
+				var empty = document.createElement('li');
+				empty.className = 'ml-coll-empty';
+				empty.textContent = labels.collManageEmpty || 'No collections yet.';
+				list.appendChild(empty);
+			}
+			wireCollManagerDnD();
+		}
+		function wireCollManagerDnD() {
+			if (!collectionsDialog) return;
+			var list = collectionsDialog.querySelector('.ml-collections-list');
+			if (!list) return;
+			var dragId = null, dragShared = false, dragLeaf = false;
+			function clearMarks() {
+				Array.prototype.forEach.call(list.querySelectorAll('.ml-coll-row'), function (r) {
+					r.classList.remove('ml-drop-before', 'ml-drop-after', 'ml-drop-into');
+				});
+			}
+			Array.prototype.forEach.call(list.querySelectorAll('.ml-coll-row'), function (li) {
+				li.addEventListener('dragstart', function (e) {
+					dragId = li.dataset.collId;
+					dragShared = li.dataset.store === 'shared';
+					dragLeaf = !collIsParent(collStoreArr(dragShared), dragId);
+					li.classList.add('ml-dragging');
+					if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+				});
+				li.addEventListener('dragend', function () { li.classList.remove('ml-dragging'); clearMarks(); dragId = null; });
+				li.addEventListener('dragover', function (e) {
+					if (!dragId || li.dataset.collId === dragId) return;
+					if ((li.dataset.store === 'shared') !== dragShared) return;   // same store only
+					var tChild = li.classList.contains('ml-coll-child');
+					// A parent (with children) can only be reordered among
+					// top-level rows — never dropped onto a child.
+					if (!dragLeaf && tChild) return;
+					e.preventDefault();
+					if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+					clearMarks();
+					var rect = li.getBoundingClientRect();
+					var rel = (e.clientY - rect.top) / rect.height;
+					var intent = (dragLeaf && !tChild && rel > 0.33 && rel < 0.67) ? 'into'
+						: (rel < 0.5 ? 'before' : 'after');
+					li.dataset.dropIntent = intent;
+					li.classList.add(intent === 'into' ? 'ml-drop-into' : (intent === 'before' ? 'ml-drop-before' : 'ml-drop-after'));
+				});
+				li.addEventListener('drop', function (e) {
+					if (!dragId || li.dataset.collId === dragId) return;
+					if ((li.dataset.store === 'shared') !== dragShared) return;
+					e.preventDefault();
+					var targetId = li.dataset.collId;
+					var intent = li.dataset.dropIntent || 'after';
+					clearMarks();
+					if (intent === 'into') {
+						collNest(dragShared, dragId, targetId);
+					} else {
+						var t = collById(collStoreArr(dragShared), targetId);
+						var newParent = (t && (t.parent || '') !== '' && dragLeaf) ? t.parent : '';
+						collPlace(dragShared, dragId, targetId, intent === 'after', newParent);
+					}
+				});
+			});
+		}
+		function openCollectionsManager() {
+			renderCollectionsManager();
+			if (!collectionsDialog) return;
+			if (typeof collectionsDialog.showModal === 'function') collectionsDialog.showModal();
+			else collectionsDialog.setAttribute('open', '');
+		}
+		// One-time wiring: button clicks (delegated on the list), open / close.
+		if (collectionsDialog) {
+			var collList = collectionsDialog.querySelector('.ml-collections-list');
+			if (collList) {
+				collList.addEventListener('click', function (e) {
+					var btn = e.target.closest && e.target.closest('.ml-coll-move');
+					if (!btn) return;
+					e.preventDefault();
+					var li = btn.closest('li');
+					if (!li) return;
+					var isShared = li.dataset.store === 'shared';
+					var id = li.dataset.collId;
+					var act = btn.dataset.act;
+					if (act === 'up') collMove(isShared, id, 'up');
+					else if (act === 'down') collMove(isShared, id, 'down');
+					else if (act === 'nest') collNest(isShared, id, btn.dataset.parent);
+					else if (act === 'unnest') collUnnest(isShared, id);
+				});
+			}
+			collectionsDialog.addEventListener('click', function (e) {
+				if (e.target === collectionsDialog) collectionsDialog.close();
+				if (e.target.closest && e.target.closest('.ml-collections-close')) collectionsDialog.close();
+			});
+			document.addEventListener('click', function (e) {
+				var open = e.target.closest && e.target.closest('.ml-collections-manage a, .ml-collections-manage');
+				if (!open) return;
+				e.preventDefault();
+				openCollectionsManager();
+			});
 		}
 
 		// Short, URL-safe id for a new collection.
@@ -3965,7 +4270,7 @@
 				if (!name) { input.focus(); return; }
 				var toShared = !!(shareToggle && shareToggle.checked);
 				if (isCollection) {
-					var c = { id: newCollectionId(), name: name, keys: selKeys };
+					var c = { id: newCollectionId(), name: name, keys: selKeys, parent: '' };
 					(toShared ? sharedCollections : collections).push(c);
 				} else {
 					var b = { name: name, qs: current };

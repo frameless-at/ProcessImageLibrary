@@ -1472,6 +1472,11 @@ class ProcessImageLibrary extends Process {
 		if (!$this->pickerMode) {
 			$out .= $this->renderColumnsDialog($customCols);
 		}
+		// Collections manager dialog — sibling of .ml-results like the column
+		// picker, so it survives AJAX swaps; the JS builds its tree on open.
+		if (!$this->pickerMode) {
+			$out .= $this->renderCollectionsDialog();
+		}
 		if (!$this->pickerMode) {
 			$out .= $this->renderExportImportBar($filters);
 		}
@@ -1582,6 +1587,29 @@ class ProcessImageLibrary extends Process {
 		$out .= $this->renderColumnsListMarkup($customCols);
 		$out .= '<footer>';
 		$out .= '<button type="button" class="ml-columns-close uk-button uk-button-secondary">' . $close . '</button>';
+		$out .= '</footer>';
+		$out .= '</dialog>';
+		return $out;
+	}
+
+	/**
+	 * Collections manager dialog shell. The list (.ml-collections-list) is
+	 * built client-side from the in-memory collections so it always reflects
+	 * the current set; the JS wires drag-reorder + nesting and the arrow /
+	 * indent buttons, then persists via the prefs endpoints. Same chrome as
+	 * the column picker (shared dialog block).
+	 */
+	protected function renderCollectionsDialog(): string {
+		$san = $this->wire('sanitizer');
+		$title = $san->entities($this->_('Manage collections'));
+		$hint  = $san->entities($this->_('Drag to reorder. Drop a collection onto another to make it a subgroup — or use the arrow / indent buttons.'));
+		$close = $san->entities($this->_('Close'));
+		$out  = '<dialog class="ml-collections-dialog">';
+		$out .= '<header>' . $title . '</header>';
+		$out .= '<p class="ml-columns-hint">' . $hint . '</p>';
+		$out .= '<ul class="ml-collections-list"></ul>';
+		$out .= '<footer>';
+		$out .= '<button type="button" class="ml-collections-close uk-button uk-button-secondary">' . $close . '</button>';
 		$out .= '</footer>';
 		$out .= '</dialog>';
 		return $out;
@@ -4818,6 +4846,14 @@ class ProcessImageLibrary extends Process {
 		$name = $this->wire('sanitizer')->text((string) ($c['name'] ?? ''), ['maxLength' => 80]);
 		if ($id === '' || $name === '') return null;
 
+		// Parent collection id for nesting (one level deep). Same id charset; a
+		// collection can never be its own parent. Structural validity (parent
+		// exists, no grandchildren, same store) is enforced by the manager UI;
+		// the array order is preserved as the display order (a child sits right
+		// after its parent), so we don't reorder here.
+		$parent = preg_replace('/[^a-z0-9]/i', '', (string) ($c['parent'] ?? '')) ?? '';
+		if ($parent === $id) $parent = '';
+
 		$keys = [];
 		if (isset($c['keys']) && is_array($c['keys'])) {
 			foreach ($c['keys'] as $k) {
@@ -4827,7 +4863,7 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 		if (!$keys) return null;
-		return ['id' => $id, 'name' => $name, 'keys' => array_keys($keys)];
+		return ['id' => $id, 'name' => $name, 'keys' => array_keys($keys), 'parent' => $parent];
 	}
 
 	/**
@@ -5920,6 +5956,15 @@ class ProcessImageLibrary extends Process {
 				'collectionAdd'     => $this->_('Add collection'),
 				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
 				'collectionRemoved' => $this->_('Removed %d image(s) from the collection'),
+				// Collections manager (drag-and-drop reorder + nesting) row controls.
+				'collMoveUp'        => $this->_('Move up'),
+				'collMoveDown'      => $this->_('Move down'),
+				'collNest'          => $this->_('Make a subgroup of the item above'),
+				'collUnnest'        => $this->_('Move out to top level'),
+				'collManageEmpty'   => $this->_('No collections yet.'),
+				'collManageTeam'    => $this->_('Team'),
+				'collectionsManage'      => $this->_('Manage collections'),
+				'collectionsManageShort' => $this->_('Manage'),
 				// Shared (team-wide) bookmarks + collections — the manager-only
 				// "share with team" toggle in the save dialog + its toasts.
 				'shareWithTeam'     => $this->_('Share with the team'),
@@ -6101,6 +6146,16 @@ class ProcessImageLibrary extends Process {
 		// … then collections (personal, then team).
 		foreach ($collections as $c)       $out .= $renderCollection($c, false);
 		foreach ($sharedCollections as $c) $out .= $renderCollection($c, true);
+
+		// "Manage" link — opens the drag-and-drop collections manager. Only
+		// shown when there's at least one collection to organise. JS keeps it
+		// in sync (it's preserved across the client-side tab re-render).
+		if ($collections || ($sharedCollections && $canManageShared)) {
+			$manageTitle = $san->entities($this->_('Manage collections'));
+			$manageLabel = $san->entities($this->_('Manage'));
+			$out .= '<li class="ml-collections-manage"><a href="#" role="button" title="' . $manageTitle . '">'
+				. '<i class="fa fa-sliders" aria-hidden="true"></i> ' . $manageLabel . '</a></li>';
+		}
 
 		// Add button rightmost — opens the name-dialog. Server-side it's hidden
 		// unless a non-saved filter is active; the JS additionally reveals it
