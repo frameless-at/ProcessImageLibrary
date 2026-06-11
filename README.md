@@ -23,6 +23,7 @@ A ProcessWire admin module that puts every image across every page and every ima
 - [The table](#the-table)
   - [Columns dialog](#columns-dialog)
   - [Pagination row](#pagination-row)
+  - [Used in (where-used column)](#used-in-where-used-column)
 - [Inline editing](#inline-editing)
   - [Editing as paintbrush (bulk)](#editing-as-paintbrush-bulk)
   - [Managing the tag vocabulary](#managing-the-tag-vocabulary)
@@ -56,6 +57,7 @@ A ProcessWire admin module that puts every image across every page and every ima
 - **Replace image in place** — drag a file onto the row or click the upload icon. The basename + every URL stay intact, variations regenerate, metadata is preserved. Extension match enforced so format conversions can't sneak in.
 - **Delete (single + batch)** — trash icon on the row hides behind a confirm dialog. Selection-as-paintbrush works here too: with N rows ticked, clicking the trash on any selected row deletes the whole selection.
 - **Automatic de-duplication** — byte-identical images are fingerprinted and collapsed onto one hardlinked file (lossless, reversible), so duplicate copies cost disk space only once. Runs by itself (on save + hourly); a *Duplicates* filter, copy-count badges and an expandable cluster view surface them, and the config page shows the disk saved with manual Scan / Re-measure / Revert tools.
+- **Where-used column** (opt-in) — see at a glance how many pages embed an image in their rich-text (CKEditor / TinyMCE), and click through to the list of pages + fields. Content-based, so it spans an image's duplicate copies; powered by a cached reverse index maintained on save, the same shape as the dedup engine.
 - **Bookmarks** — save the current filter combination as a named tab above the filter bar. Click a tab to jump back to that view; the filter form repopulates so what you see matches what's applied. Persisted per user via `$user->meta`, cross-device. The "+ Add bookmark" tab surfaces only when the active filter isn't already saved.
 - **Collections** — curate an arbitrary set of images that no filter could reproduce: tick checkboxes, save them as a named collection tab in the same strip. Recall the exact set instantly via a short `?coll=<id>` URL (the image keys live in `$user->meta`, never the URL — a 100-image collection is still a ~12-character link). Grow / trim a collection by clicking its tab while a selection is active; the cursor shows whether the click **adds** (+) or **removes** (−). Collections can themselves be filtered.
 - **Picker add-ons** (optional, off by default) — two opt-in integrations that let editors pull a library image in elsewhere: a *Choose from library* button on every image field, and an *Insert from library* button in TinyMCE / CKEditor (admin + front-end inline editor). No re-upload — the existing file is assigned / embedded; on a versioned page it lands in that version's folder.
@@ -202,7 +204,8 @@ Either way the checkboxes clear as confirmation. With **no** selection, a collec
 - **Filename** — inline-editable (see [Renaming](#renaming-files)). Extension stays locked.
 - **Description, Tags** — inline-editable (see [Editing](#inline-editing)).
 - **Uploaded, Modified** — created / last-modified timestamps from the underlying Pagefile, formatted in `$config->dateFormat`. Read-only, sortable.
-- **Dimensions, Size, Variations** — read-only.
+- **Dimensions, Size** — read-only. **Variations** — read-only, sortable.
+- **Used in** — opt-in usage column (hidden by default), sortable; see [Used in](#used-in-where-used-column).
 - **Custom subfields** — auto-discovered from each image field's `field-{name}` custom template (PW 3.0.142+). Editable.
 
 **Long-value display.** Description and Textarea-backed custom cells cap their *visible* height to a few lines (≈150 characters) with a trailing ellipsis so a long value can't stretch the row and blow up the table layout. Only the display is clamped — the full text always stays in the cell, so clicking it opens the editor with the complete value (see [Inline editing](#inline-editing)). The line count is configurable via the `--ml-clamp-lines` CSS custom property (default 3).
@@ -220,6 +223,22 @@ The `fa-columns` icon in the pagination row opens a `<dialog>` listing every col
 - Summary + prev/next on the left
 - Per-page picker + columns icon on the right
 - Rendered both above and below the table for long pages
+
+### Used in (where-used column)
+
+A page can embed a library image in its **rich-text (CKEditor / TinyMCE)** body via *Insert from library* — usage that's invisible from the image field the file lives in, and exactly what breaks on a careless delete or rename. The optional **Used in** column surfaces it: per image, the number of pages that embed it, with click-through to the list.
+
+![The Used in column showing per-image embed counts, sorted descending](docs/screenshots/25-used-in-column.png)
+
+- **Opt-in & cheap.** Hidden by default — enable it in the [Columns dialog](#columns-dialog). The count is computed for the visible slice only, from a prebuilt index (below), so showing it doesn't slow the table. Sortable.
+- **Content-based.** It answers "on which pages is *this image* embedded?" across the image's whole byte-identical set, so every duplicate copy gives the same answer. (Where an image lives in image *fields* is the [Deduplication](#deduplication) view's job — this column is strictly about rich-text embeds.)
+- **Click a count** to list the pages, each with the field(s) it's embedded in, linked to the page editor.
+
+![The where-used dialog listing pages and the fields each embeds the image in](docs/screenshots/26-used-in-dialog.png)
+
+Both pwimage embed forms are recognised: direct same-page embeds, and cross-page *Insert from library* copies (the sized/cropped variant pwimage stores in the **source** image's folder, tagged with the target page), including multi-dot crop variations and hi-dpi.
+
+**The index.** Like deduplication, this is a lazily-built, cached index (`process_imagelibrary_usage`), not a per-row live query — which wouldn't scale. Rich-text content is scanned once into a reverse map (image → referencing pages), maintained on save (re-scan only the saved page) with an hourly LazyCron reconcile; the column is then an O(1) lookup. See [`docs/where-used-index-design.md`](docs/where-used-index-design.md) for the full rationale.
 
 ## Inline editing
 
