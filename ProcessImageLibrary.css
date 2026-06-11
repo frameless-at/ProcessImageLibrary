@@ -1208,20 +1208,19 @@ textarea.ml-langtabs-pane {
 }
 
 /* Responsive tag chooser — placed AFTER the base .ml-popup-tag-list /
-   .ml-tag-chip / .ml-tag-manage rules above so these overrides win on
-   equal specificity (a @media query adds no specificity; later source
-   order decides). Phones get one column, taller touch-target rows and
-   bigger manage icons; the two-column grid is too cramped at <=640px. */
+   .ml-tag-chip rules above so this override wins on equal specificity
+   (a @media query adds no specificity; later source order decides).
+   Phones just collapse the two-column grid to one column.
+
+   NOTE: do NOT enlarge .ml-tag-manage here. The button is a flex child
+   of the chip row and keeps its layout box even at opacity:0 — making
+   it taller inflates EVERY row's height (the cause of the too-large
+   mobile row spacing). It stays at the 1.7rem base, matching desktop. */
 @media (max-width: 640px) {
 	.ml-popup-tag-list {
 		grid-template-columns: 1fr;
 		gap: 0;
 		max-height: 60vh;
-	}
-	.ml-tag-manage {
-		min-width: 2.4rem;
-		height: 2.4rem;
-		font-size: 1.4rem;
 	}
 }
 
