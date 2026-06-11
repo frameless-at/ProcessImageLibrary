@@ -1338,6 +1338,16 @@ textarea.ml-langtabs-pane {
 	background: color-mix(in srgb, var(--pw-main-background, #f0f0f0) 60%, var(--pw-text-color, #000) 8%);
 	color: var(--pw-text-color, #333);
 }
+/* Column picker: reveal the reorder arrows on row hover / focus (cleaner
+   resting state — matches the collections manager). */
+.ml-columns-list .ml-col-move {
+	opacity: 0;
+	transition: opacity 0.12s ease-out;
+}
+.ml-columns-list li:hover .ml-col-move,
+.ml-columns-list li:focus-within .ml-col-move {
+	opacity: 1;
+}
 
 /* Collections manager — drag-and-drop tree of collections (one level deep).
    Mirrors the column-picker list; rows are draggable, children are indented,
@@ -1361,14 +1371,22 @@ textarea.ml-langtabs-pane {
 }
 .ml-coll-row:active { cursor: grabbing; }
 .ml-coll-row.ml-dragging { opacity: 0.35; }
-.ml-coll-child { margin-left: 1.6rem; }   /* one-level indent for subgroups */
-.ml-coll-handle {
+.ml-coll-row--shared { font-style: italic; }   /* team collections, like the tab strip */
+/* Collapse caret for parents; a same-width spacer keeps leaf names aligned.
+   (Indent per nesting level is applied inline as padding-left.) */
+.ml-coll-caret {
 	flex: 0 0 auto;
-	color: var(--pw-muted-color, #bbb);
-	cursor: grab;
+	width: 1.1rem;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	color: var(--pw-muted-color, #999);
+	cursor: pointer;
 	font-size: 0.95em;
-	user-select: none;
+	line-height: 1;
+	text-align: center;
 }
+.ml-coll-caret--leaf { cursor: default; }
 .ml-coll-name {
 	flex: 1 1 auto;
 	min-width: 0;

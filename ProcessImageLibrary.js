@@ -3900,129 +3900,138 @@
 			syncBookmarkActive();
 		}
 
-		// ---- Collections manager: drag-and-drop reorder + one-level nesting ----
+		// ---- Collections manager: drag-and-drop tree (up to 3 levels) + collapse ----
 		// Each store (personal `collections`, team `sharedCollections`) is kept in
-		// DISPLAY order: a child sits immediately after its parent. A collection's
-		// `parent` is the id of its top-level parent ('' = top level). One level
-		// deep — a parent can't itself be nested.
+		// DISPLAY order (pre-order DFS: a node sits right before its descendants).
+		// A collection's `parent` is the id of its immediate parent ('' = top).
 		var collectionsDialog = document.querySelector('.ml-collections-dialog');
+		var COLL_MAX_DEPTH = 3;        // levels 0,1,2
+		var collCollapsed = {};        // "own:id" / "shared:id" -> true (manager-local, resets on reload)
 
 		function collStoreArr(isShared) { return isShared ? sharedCollections : collections; }
+		function collKey(isShared, id) { return (isShared ? 'shared:' : 'own:') + id; }
 		function collIndexOf(arr, id) {
 			for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].id === id) return i;
 			return -1;
 		}
 		function collById(arr, id) { var i = collIndexOf(arr, id); return i < 0 ? null : arr[i]; }
-		function collChildren(arr, id) {
-			return arr.filter(function (c) { return c && (c.parent || '') === id; });
+		function collChildren(arr, id) { return arr.filter(function (c) { return c && (c.parent || '') === id; }); }
+		function collIsParent(arr, id) { return arr.some(function (c) { return c && (c.parent || '') === id; }); }
+		function collDepth(arr, id) {
+			var d = 0, c = collById(arr, id), g = 0;
+			while (c && (c.parent || '') !== '' && g++ < 64) { d++; c = collById(arr, c.parent); }
+			return d;
 		}
-		function collIsParent(arr, id) {
-			return arr.some(function (c) { return c && (c.parent || '') === id; });
+		function collHeight(arr, id) {
+			var ch = collChildren(arr, id);
+			if (!ch.length) return 0;
+			var m = 0;
+			ch.forEach(function (c) { m = Math.max(m, collHeight(arr, c.id)); });
+			return 1 + m;
 		}
-		// [item] + its children (top-level only); a child is its own block.
-		function collBlock(arr, id) {
-			var c = collById(arr, id);
-			if (!c) return [];
-			if ((c.parent || '') !== '') return [c];
-			return [c].concat(collChildren(arr, id));
+		function collIsDescendant(arr, id, ofId) {
+			var c = collById(arr, id), g = 0;
+			while (c && (c.parent || '') !== '' && g++ < 64) { if (c.parent === ofId) return true; c = collById(arr, c.parent); }
+			return false;
 		}
-		// Re-flatten a store to the display-order invariant and demote any child
-		// whose parent vanished or is itself a child (keeps it one level).
-		function collNormalize(arr) {
+		function collSubtreeSet(arr, id) {
+			var s = {}; s[id] = true; var changed = true;
+			while (changed) { changed = false; arr.forEach(function (c) { if (c && c.parent && s[c.parent] && !s[c.id]) { s[c.id] = true; changed = true; } }); }
+			return s;
+		}
+		// DFS flatten by parent, preserving sibling array order; promote orphans / cycles.
+		function collFlatten(arr) {
 			var byId = {};
 			arr.forEach(function (c) { if (c && c.id) byId[c.id] = c; });
-			arr.forEach(function (c) {
-				if (!c) return;
-				var p = c.parent || '';
-				if (p && (!byId[p] || (byId[p].parent || '') !== '')) c.parent = '';
-			});
+			arr.forEach(function (c) { if (c && (c.parent || '') !== '' && !byId[c.parent]) c.parent = ''; });
+			var roots = [], cm = {};
+			arr.forEach(function (c) { if (!c) return; var p = c.parent || ''; (p === '' ? roots : (cm[p] = cm[p] || [])).push(c); });
 			var out = [], seen = {};
-			arr.forEach(function (c) {
-				if (!c || seen[c.id] || (c.parent || '') !== '') return;
-				seen[c.id] = true; out.push(c);
-				collChildren(arr, c.id).forEach(function (ch) {
-					if (!seen[ch.id]) { seen[ch.id] = true; out.push(ch); }
-				});
-			});
-			arr.forEach(function (c) { if (c && !seen[c.id]) { seen[c.id] = true; out.push(c); } });
+			function walk(n) { if (seen[n.id]) return; seen[n.id] = true; out.push(n); (cm[n.id] || []).forEach(walk); }
+			roots.forEach(walk);
+			arr.forEach(function (c) { if (c && !seen[c.id]) { c.parent = ''; seen[c.id] = true; out.push(c); } });
 			return out;
 		}
 		function collPersist(isShared) {
 			var arr = collStoreArr(isShared);
-			var norm = collNormalize(arr);
-			arr.length = 0;
-			Array.prototype.push.apply(arr, norm);
+			var flat = collFlatten(arr);
+			arr.length = 0; Array.prototype.push.apply(arr, flat);
 			if (isShared) saveSharedPrefs(); else saveUserPrefs();
 			renderCollectionsManager();
 			rerenderBookmarksList();
 		}
-		// Make `id` a child of top-level `parentId` (leaf-only, same store).
+		// Make `id` a child of `parentId` (cycle-safe, depth-capped).
 		function collNest(isShared, id, parentId) {
 			var arr = collStoreArr(isShared);
 			var c = collById(arr, id), p = collById(arr, parentId);
 			if (!c || !p || id === parentId) return;
-			if ((p.parent || '') !== '') return;       // target must be top level
-			if (collIsParent(arr, id)) return;          // dragged must be a leaf
+			if (collIsDescendant(arr, parentId, id)) return;                              // no cycle
+			if (collDepth(arr, parentId) + 1 + collHeight(arr, id) > COLL_MAX_DEPTH - 1) return;  // depth cap
 			c.parent = parentId;
 			collPersist(isShared);
 		}
-		function collUnnest(isShared, id) {
+		// Indent: become a child of the previous sibling.
+		function collIndent(isShared, id) {
+			var arr = collStoreArr(isShared);
+			var prev = collPrevSibling(arr, id);
+			if (prev) collNest(isShared, id, prev.id);
+		}
+		// Outdent: rise one level (become a sibling of the current parent).
+		function collOutdent(isShared, id) {
 			var arr = collStoreArr(isShared);
 			var c = collById(arr, id);
 			if (!c || (c.parent || '') === '') return;
-			c.parent = '';
+			var p = collById(arr, c.parent);
+			c.parent = p ? (p.parent || '') : '';
 			collPersist(isShared);
 		}
-		// Swap with the adjacent sibling at the same level (blocks move together
-		// for top-level items).
+		function collPrevSibling(arr, id) {
+			var i = collIndexOf(arr, id);
+			if (i <= 0) return null;
+			var c = arr[i], d = collDepth(arr, id);
+			for (var j = i - 1; j >= 0; j--) {
+				var dj = collDepth(arr, arr[j].id);
+				if (dj < d) break;
+				if (dj === d && (arr[j].parent || '') === (c.parent || '')) return arr[j];
+			}
+			return null;
+		}
+		// Reorder: swap with the adjacent sibling (subtrees move together).
 		function collMove(isShared, id, dir) {
 			var arr = collStoreArr(isShared);
 			var c = collById(arr, id);
 			if (!c) return;
 			var p = c.parent || '';
-			if (p !== '') {
-				var sibs = arr.filter(function (x) { return (x.parent || '') === p; });
-				var i = sibs.indexOf(c), j = dir === 'up' ? i - 1 : i + 1;
-				if (j < 0 || j >= sibs.length) return;
-				var ia = arr.indexOf(c), ja = arr.indexOf(sibs[j]);
-				arr[ia] = sibs[j]; arr[ja] = c;
-			} else {
-				var tops = arr.filter(function (x) { return (x.parent || '') === ''; });
-				var ti = tops.indexOf(c), tj = dir === 'up' ? ti - 1 : ti + 1;
-				if (tj < 0 || tj >= tops.length) return;
-				var newTops = tops.slice();
-				newTops[ti] = tops[tj]; newTops[tj] = c;
-				var rebuilt = [];
-				newTops.forEach(function (t) {
-					rebuilt.push(t);
-					collChildren(arr, t.id).forEach(function (ch) { rebuilt.push(ch); });
-				});
-				arr.length = 0; Array.prototype.push.apply(arr, rebuilt);
-			}
+			var sibs = arr.filter(function (x) { return (x.parent || '') === p; });
+			var i = sibs.indexOf(c), j = dir === 'up' ? i - 1 : i + 1;
+			if (j < 0 || j >= sibs.length) return;
+			var roots = [], cm = {};
+			arr.forEach(function (x) { var pp = x.parent || ''; (pp === '' ? roots : (cm[pp] = cm[pp] || [])).push(x); });
+			var lst = p === '' ? roots : cm[p];
+			var a = lst.indexOf(c), b = lst.indexOf(sibs[j]);
+			var t = lst[a]; lst[a] = lst[b]; lst[b] = t;
+			var out = [];
+			(function () { function walk(n) { out.push(n); (cm[n.id] || []).forEach(walk); } roots.forEach(walk); })();
+			arr.length = 0; Array.prototype.push.apply(arr, out);
 			collPersist(isShared);
 		}
-		// Place `id`'s block before/after `targetId`, adopting newParent ('' =
-		// top level). A parent (has children) can only land at top level.
-		function collPlace(isShared, id, targetId, after, newParent) {
+		// Drag-place: make `id` a sibling of `targetId`, before / after its subtree.
+		function collPlace(isShared, id, targetId, after) {
 			var arr = collStoreArr(isShared);
-			var c = collById(arr, id);
-			if (!c || id === targetId) return;
-			newParent = newParent || '';
-			if (newParent !== '' && collIsParent(arr, id)) newParent = '';
-			var block = collBlock(arr, id), ids = {};
-			block.forEach(function (b) { ids[b.id] = true; });
-			var rest = arr.filter(function (x) { return !ids[x.id]; });
-			c.parent = newParent;
-			var ti = -1;
-			for (var i = 0; i < rest.length; i++) { if (rest[i].id === targetId) { ti = i; break; } }
-			if (ti < 0) { Array.prototype.push.apply(rest, block); }
+			var c = collById(arr, id), t = collById(arr, targetId);
+			if (!c || !t || id === targetId) return;
+			if (collIsDescendant(arr, targetId, id)) return;                          // not into own subtree
+			if (collDepth(arr, targetId) + collHeight(arr, id) > COLL_MAX_DEPTH - 1) return;
+			var set = collSubtreeSet(arr, id);
+			var blk = arr.filter(function (x) { return set[x.id]; });
+			var rest = arr.filter(function (x) { return !set[x.id]; });
+			c.parent = t.parent || '';
+			var ti = collIndexOf(rest, targetId);
+			if (ti < 0) { Array.prototype.push.apply(rest, blk); }
 			else {
 				var at = after ? ti + 1 : ti;
-				// when dropping AFTER a top-level target, skip past its children
-				if (after && (rest[ti].parent || '') === '') {
-					while (at < rest.length && (rest[at].parent || '') === targetId) at++;
-				}
-				rest.splice.apply(rest, [at, 0].concat(block));
+				if (after) { var td = collDepth(rest, targetId); while (at < rest.length && collDepth(rest, rest[at].id) > td) at++; }
+				rest.splice.apply(rest, [at, 0].concat(blk));
 			}
 			arr.length = 0; Array.prototype.push.apply(arr, rest);
 			collPersist(isShared);
@@ -4038,32 +4047,55 @@
 			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
 			return b;
 		}
-		function buildCollRow(c, isShared, isChild, nestUnderId) {
+		function collAncestorCollapsed(arr, isShared, c) {
+			var anc = c.parent || '', g = 0;
+			while (anc && g++ < 64) {
+				if (collCollapsed[collKey(isShared, anc)]) return true;
+				var pa = collById(arr, anc); anc = pa ? (pa.parent || '') : '';
+			}
+			return false;
+		}
+		function buildCollRow(arr, c, isShared) {
+			var depth = collDepth(arr, c.id);
+			var hasKids = collIsParent(arr, c.id);
 			var li = document.createElement('li');
-			li.className = 'ml-coll-row' + (isChild ? ' ml-coll-child' : '');
+			li.className = 'ml-coll-row' + (isShared ? ' ml-coll-row--shared' : '');
 			li.draggable = true;
 			li.dataset.collId = c.id;
 			li.dataset.store = isShared ? 'shared' : 'own';
-			var handle = document.createElement('span');
-			handle.className = 'ml-coll-handle';
-			handle.setAttribute('aria-hidden', 'true');
-			handle.textContent = '⠿';                 // ⠿ drag dots
-			li.appendChild(handle);
+			li.style.paddingLeft = (0.3 + depth * 1.4) + 'rem';
+			// Collapse caret for parents; a spacer keeps leaf names aligned.
+			if (hasKids) {
+				var collapsed = !!collCollapsed[collKey(isShared, c.id)];
+				var car = document.createElement('button');
+				car.type = 'button';
+				car.className = 'ml-coll-caret';
+				car.dataset.act = 'toggle';
+				car.title = collapsed ? (labels.collExpand || 'Expand') : (labels.collCollapse || 'Collapse');
+				car.setAttribute('aria-label', car.title);
+				car.innerHTML = '<i class="fa ' + (collapsed ? 'fa-caret-right' : 'fa-caret-down') + '" aria-hidden="true"></i>';
+				li.appendChild(car);
+			} else {
+				var sp = document.createElement('span');
+				sp.className = 'ml-coll-caret ml-coll-caret--leaf';
+				sp.setAttribute('aria-hidden', 'true');
+				li.appendChild(sp);
+			}
 			var name = document.createElement('span');
 			name.className = 'ml-coll-name';
 			name.textContent = c.name || '';
 			li.appendChild(name);
 			var btns = document.createElement('span');
 			btns.className = 'ml-coll-btns';
-			btns.appendChild(mkCollBtn('up', 'fa-chevron-up', labels.collMoveUp || 'Move up'));
-			btns.appendChild(mkCollBtn('down', 'fa-chevron-down', labels.collMoveDown || 'Move down'));
-			var leaf = !collIsParent(collStoreArr(isShared), c.id);
-			if (!isChild && nestUnderId && leaf) {
-				var nb = mkCollBtn('nest', 'fa-indent', labels.collNest || 'Make a subgroup');
-				nb.dataset.parent = nestUnderId;
-				btns.appendChild(nb);
+			var sibs = arr.filter(function (x) { return (x.parent || '') === (c.parent || ''); });
+			var si = sibs.indexOf(c);
+			if (si > 0) btns.appendChild(mkCollBtn('up', 'fa-chevron-up', labels.collMoveUp || 'Move up'));
+			if (si >= 0 && si < sibs.length - 1) btns.appendChild(mkCollBtn('down', 'fa-chevron-down', labels.collMoveDown || 'Move down'));
+			var prev = collPrevSibling(arr, c.id);
+			if (prev && collDepth(arr, prev.id) + 1 + collHeight(arr, c.id) <= COLL_MAX_DEPTH - 1) {
+				btns.appendChild(mkCollBtn('nest', 'fa-indent', labels.collNest || 'Indent'));
 			}
-			if (isChild) btns.appendChild(mkCollBtn('unnest', 'fa-outdent', labels.collUnnest || 'Move out'));
+			if (depth > 0) btns.appendChild(mkCollBtn('unnest', 'fa-outdent', labels.collUnnest || 'Outdent'));
 			li.appendChild(btns);
 			return li;
 		}
@@ -4072,27 +4104,28 @@
 			var list = collectionsDialog.querySelector('.ml-collections-list');
 			if (!list) return;
 			list.innerHTML = '';
-			var any = false;
 			function section(arr, isShared) {
-				var lastTop = '';
 				arr.forEach(function (c) {
 					if (!c || !c.id) return;
-					var isChild = (c.parent || '') !== '';
-					var nestUnder = isChild ? '' : lastTop;   // a top-level leaf nests under the previous top
-					list.appendChild(buildCollRow(c, isShared, isChild, nestUnder));
-					if (!isChild) lastTop = c.id;
-					any = true;
+					if (collAncestorCollapsed(arr, isShared, c)) return;   // hidden under a collapsed parent
+					list.appendChild(buildCollRow(arr, c, isShared));
 				});
 			}
+			var hasOwn = collections.length > 0;
+			var hasTeam = canManageShared && sharedCollections.length > 0;
 			section(collections, false);
-			if (canManageShared && sharedCollections.length) {
-				var sep = document.createElement('li');
-				sep.className = 'ml-coll-sep';
-				sep.textContent = labels.collManageTeam || 'Team';
-				list.appendChild(sep);
+			if (hasTeam) {
+				// The "Team" heading only earns its place as a DIVIDER between the
+				// two stores; with team-only collections it'd be noise.
+				if (hasOwn) {
+					var sep = document.createElement('li');
+					sep.className = 'ml-coll-sep';
+					sep.textContent = labels.collManageTeam || 'Team';
+					list.appendChild(sep);
+				}
 				section(sharedCollections, true);
 			}
-			if (!any) {
+			if (!hasOwn && !hasTeam) {
 				var empty = document.createElement('li');
 				empty.className = 'ml-coll-empty';
 				empty.textContent = labels.collManageEmpty || 'No collections yet.';
@@ -4104,7 +4137,7 @@
 			if (!collectionsDialog) return;
 			var list = collectionsDialog.querySelector('.ml-collections-list');
 			if (!list) return;
-			var dragId = null, dragShared = false, dragLeaf = false;
+			var dragId = null, dragShared = false;
 			function clearMarks() {
 				Array.prototype.forEach.call(list.querySelectorAll('.ml-coll-row'), function (r) {
 					r.classList.remove('ml-drop-before', 'ml-drop-after', 'ml-drop-into');
@@ -4114,25 +4147,26 @@
 				li.addEventListener('dragstart', function (e) {
 					dragId = li.dataset.collId;
 					dragShared = li.dataset.store === 'shared';
-					dragLeaf = !collIsParent(collStoreArr(dragShared), dragId);
 					li.classList.add('ml-dragging');
 					if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 				});
 				li.addEventListener('dragend', function () { li.classList.remove('ml-dragging'); clearMarks(); dragId = null; });
 				li.addEventListener('dragover', function (e) {
 					if (!dragId || li.dataset.collId === dragId) return;
-					if ((li.dataset.store === 'shared') !== dragShared) return;   // same store only
-					var tChild = li.classList.contains('ml-coll-child');
-					// A parent (with children) can only be reordered among
-					// top-level rows — never dropped onto a child.
-					if (!dragLeaf && tChild) return;
+					if ((li.dataset.store === 'shared') !== dragShared) return;          // same store only
+					var arr = collStoreArr(dragShared);
+					var targetId = li.dataset.collId;
+					if (collIsDescendant(arr, targetId, dragId)) return;                 // not into own subtree
+					var rect = li.getBoundingClientRect();
+					var rel = (e.clientY - rect.top) / rect.height;
+					var canInto = collDepth(arr, targetId) + 1 + collHeight(arr, dragId) <= COLL_MAX_DEPTH - 1;
+					var canSibling = collDepth(arr, targetId) + collHeight(arr, dragId) <= COLL_MAX_DEPTH - 1;
+					var intent = (canInto && rel > 0.33 && rel < 0.67) ? 'into'
+						: (rel < 0.5 ? 'before' : 'after');
+					if (intent !== 'into' && !canSibling) { if (canInto) intent = 'into'; else return; }
 					e.preventDefault();
 					if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
 					clearMarks();
-					var rect = li.getBoundingClientRect();
-					var rel = (e.clientY - rect.top) / rect.height;
-					var intent = (dragLeaf && !tChild && rel > 0.33 && rel < 0.67) ? 'into'
-						: (rel < 0.5 ? 'before' : 'after');
 					li.dataset.dropIntent = intent;
 					li.classList.add(intent === 'into' ? 'ml-drop-into' : (intent === 'before' ? 'ml-drop-before' : 'ml-drop-after'));
 				});
@@ -4143,13 +4177,8 @@
 					var targetId = li.dataset.collId;
 					var intent = li.dataset.dropIntent || 'after';
 					clearMarks();
-					if (intent === 'into') {
-						collNest(dragShared, dragId, targetId);
-					} else {
-						var t = collById(collStoreArr(dragShared), targetId);
-						var newParent = (t && (t.parent || '') !== '' && dragLeaf) ? t.parent : '';
-						collPlace(dragShared, dragId, targetId, intent === 'after', newParent);
-					}
+					if (intent === 'into') collNest(dragShared, dragId, targetId);
+					else collPlace(dragShared, dragId, targetId, intent === 'after');
 				});
 			});
 		}
@@ -4159,12 +4188,12 @@
 			if (typeof collectionsDialog.showModal === 'function') collectionsDialog.showModal();
 			else collectionsDialog.setAttribute('open', '');
 		}
-		// One-time wiring: button clicks (delegated on the list), open / close.
+		// One-time wiring: row controls (delegated), open / close.
 		if (collectionsDialog) {
 			var collList = collectionsDialog.querySelector('.ml-collections-list');
 			if (collList) {
 				collList.addEventListener('click', function (e) {
-					var btn = e.target.closest && e.target.closest('.ml-coll-move');
+					var btn = e.target.closest && e.target.closest('.ml-coll-move, .ml-coll-caret');
 					if (!btn) return;
 					e.preventDefault();
 					var li = btn.closest('li');
@@ -4174,8 +4203,13 @@
 					var act = btn.dataset.act;
 					if (act === 'up') collMove(isShared, id, 'up');
 					else if (act === 'down') collMove(isShared, id, 'down');
-					else if (act === 'nest') collNest(isShared, id, btn.dataset.parent);
-					else if (act === 'unnest') collUnnest(isShared, id);
+					else if (act === 'nest') collIndent(isShared, id);
+					else if (act === 'unnest') collOutdent(isShared, id);
+					else if (act === 'toggle') {
+						var k = collKey(isShared, id);
+						if (collCollapsed[k]) delete collCollapsed[k]; else collCollapsed[k] = true;
+						renderCollectionsManager();   // manager-local, no persist
+					}
 				});
 			}
 			collectionsDialog.addEventListener('click', function (e) {
