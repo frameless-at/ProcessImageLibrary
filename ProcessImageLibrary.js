@@ -867,11 +867,45 @@
 						? (labels.tagDeleted || 'Tag deleted from %d image(s)')
 						: (labels.tagRenamed || 'Tag renamed on %d image(s)')).replace('%d', d.count));
 					if (d.tagsAllowed) applyTagsAllowed(d.field, d.tagsAllowed);
+					// Rename/delete already propagated to every image server-side;
+					// mirror it onto the visible table rows so the change shows
+					// everywhere live, not just after a reload.
+					refreshTableTagCells(field, op, tag, newTag);
 					if (onSuccess) onSuccess(d);
 				} else {
 					announce((d && d.error) || labels.error || 'Failed');
 				}
 			}).catch(function (err) { console.error('[ImageLibrary] tag apply failed:', err); });
+		}
+
+		// Live-update the displayed tag cells in the table after a library-wide
+		// rename/delete. Tag cells are plain space-separated text tokens
+		// (td.textContent); rewrite the matching token in place — case-insensitive
+		// match like PW's tag keys — and de-dupe so a rename that merges onto an
+		// existing tag doesn't leave the token twice. The cell whose modal
+		// triggered this is swept too: the rename is committed on the server
+		// regardless of whether that modal is later saved or cancelled, so the new
+		// spelling is correct either way.
+		function refreshTableTagCells(field, op, oldTag, newTag) {
+			var oldLc = String(oldTag).toLowerCase();
+			document.querySelectorAll('td[data-col="tags"][data-field="' + field + '"]').forEach(function (cell) {
+				var cur = (cell.textContent || '').trim();
+				if (!cur) return;
+				var changed = false, out = [], seen = {};
+				cur.split(/\s+/).forEach(function (t) {
+					var rep = t;
+					if (t.toLowerCase() === oldLc) {
+						changed = true;
+						if (op !== 'rename' || !newTag) return;   // delete → drop token
+						rep = newTag;
+					}
+					var k = rep.toLowerCase();
+					if (seen[k]) { changed = true; return; }      // merge duplicate
+					seen[k] = true;
+					out.push(rep);
+				});
+				if (changed) setCellText(cell, out.join(' '));
+			});
 		}
 
 		// Find an existing chip checkbox in the same list whose tag matches (case-
