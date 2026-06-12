@@ -1489,28 +1489,33 @@ textarea.ml-langtabs-pane {
 	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
 	display: none;
 }
-/* The flyout is a DOM child of the tab, so hovering it keeps the tab :hover —
-   no gap to fall through. */
-.ml-coll-has-children:hover > .ml-coll-flyout,
-.ml-coll-flyout:hover { display: block; }
+/* Cascading: a flyout (or sub-flyout) shows while its parent item is hovered.
+   The flyout is a DOM descendant of that item, so hovering anywhere inside —
+   including a deeper sub-flyout — keeps the whole chain open (no gaps). */
+.ml-coll-has-children:hover > .ml-coll-flyout { display: block; }
+/* A NESTED flyout (under a flyout item) opens to the SIDE; the top-level one
+   stays directly below its tab (inherited top:100%/left:0). */
+.ml-coll-flyout-item > .ml-coll-flyout {
+	top: -0.3rem;
+	left: 100%;
+}
 .ml-coll-flyout-item { position: relative; }
 .ml-coll-flyout-item > a.ml-bookmark {
-	display: block;
+	display: flex;
+	align-items: center;
 	padding-top: 0.2rem;
 	padding-bottom: 0.2rem;
-	padding-right: 1.6rem;   /* room for the × */
+	padding-right: 0.75rem;
 	white-space: nowrap;
 	margin: 0;
 }
+/* A flyout item that has a submenu pushes its caret to the right edge. */
+.ml-coll-flyout-parent > a.ml-bookmark { justify-content: space-between; }
+.ml-coll-flyout-parent > a .ml-coll-tab-caret { margin-left: 0.75rem; }
 .ml-coll-flyout-item > a:hover,
 .ml-coll-flyout-item.uk-active > a {
 	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
 }
-/* The × is hover-revealed on the flyout row (the strip's own rule only
-   targets direct-child tabs). */
-.ml-coll-flyout-item .ml-bookmark-del { right: 0.4rem; }
-.ml-coll-flyout-item:hover .ml-bookmark-del,
-.ml-coll-flyout-item .ml-bookmark-del:focus-visible { opacity: 1; }
 
 /* Visually-hidden live region — kept in the DOM and announced by
    screen readers, invisible to sighted users. Same idiom as

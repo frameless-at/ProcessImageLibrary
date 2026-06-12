@@ -3881,6 +3881,34 @@
 				a.appendChild(document.createTextNode(c.name || ''));
 				return a;
 			}
+			// Recursive cascading flyout: a <ul> of a collection's DIRECT children;
+			// a child that itself has children gets a caret + its own nested flyout
+			// (shown on hover, positioned to the side via CSS) — so the 3rd level
+			// only appears once you hover into the 2nd.
+			function buildCollFlyout(arr, parentId, isShared) {
+				var fly = document.createElement('ul');
+				fly.className = 'ml-coll-flyout';
+				collChildren(arr, parentId).forEach(function (d) {
+					var fli = document.createElement('li');
+					fli.className = 'ml-coll-flyout-item';
+					fli.dataset.collId = d.id;
+					if (isShared) fli.dataset.shared = '1';
+					var grand = collIsParent(arr, d.id);
+					if (grand) fli.classList.add('ml-coll-has-children', 'ml-coll-flyout-parent');
+					var fa = makeCollLink(d, isShared, false);
+					if (grand) {
+						fa.appendChild(document.createTextNode(' '));
+						var car = document.createElement('i');
+						car.className = 'fa fa-caret-right ml-coll-tab-caret';
+						car.setAttribute('aria-hidden', 'true');
+						fa.appendChild(car);
+					}
+					fli.appendChild(fa);
+					if (grand) fli.appendChild(buildCollFlyout(arr, d.id, isShared));
+					fly.appendChild(fli);
+				});
+				return fly;
+			}
 			// A top-level collection tab. Only depth-0 collections get a tab; their
 			// descendants live in a hover flyout (1 level shown, the rest on hover),
 			// indented by relative depth. Children carry their own data-coll-id so
@@ -3903,21 +3931,7 @@
 				li.appendChild(a);
 				// No × on the strip — deleting collections lives in the manager
 				// dialog now (like the tag manager). The strip is for navigating.
-				if (hasKids) {
-					var fly = document.createElement('ul');
-					fly.className = 'ml-coll-flyout';
-					collDescendants(arr, c.id).forEach(function (d) {
-						var rel = collDepth(arr, d.id) - 1;   // 0 = direct child, 1 = grandchild
-						var fli = document.createElement('li');
-						fli.className = 'ml-coll-flyout-item';
-						fli.dataset.collId = d.id;
-						if (isShared) fli.dataset.shared = '1';
-						fli.style.paddingLeft = (0.75 + rel * 1) + 'rem';
-						fli.appendChild(makeCollLink(d, isShared, false));
-						fly.appendChild(fli);
-					});
-					li.appendChild(fly);
-				}
+				if (hasKids) li.appendChild(buildCollFlyout(arr, c.id, isShared));
 				ul.insertBefore(li, addLi);
 			}
 			// Ordered by TYPE, not owner: all bookmarks (personal then team), then
@@ -3974,18 +3988,6 @@
 			var d = 0, c = collById(arr, id), g = 0;
 			while (c && (c.parent || '') !== '' && g++ < 64) { d++; c = collById(arr, c.parent); }
 			return d;
-		}
-		// All descendants of id in display (pre-order) order — the contiguous run
-		// of deeper items right after it (arrays keep the child-after-parent
-		// invariant). Used to build the tab strip's hover flyout.
-		function collDescendants(arr, id) {
-			var i = collIndexOf(arr, id);
-			if (i < 0) return [];
-			var d = collDepth(arr, id), out = [];
-			for (var j = i + 1; j < arr.length; j++) {
-				if (collDepth(arr, arr[j].id) > d) out.push(arr[j]); else break;
-			}
-			return out;
 		}
 		function collHeight(arr, id) {
 			var ch = collChildren(arr, id);
