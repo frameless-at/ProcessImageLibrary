@@ -3484,14 +3484,14 @@
 		// Collections: saved sets of specific images ({id, name, keys[]}).
 		// Recalled via ?coll=<id>; the keys live here + in $user->meta, never
 		// in the URL (a 100-image collection stays a ~12-char link).
-		var collections = (userPrefs.collections && Array.isArray(userPrefs.collections))
-			? userPrefs.collections.slice()
-			: [];
+		// Collections are TEAM-wide now: one store, read by everyone, created /
+		// edited / curated only by managers (canManageShared). There is no
+		// personal-vs-shared split for collections any more — sharedCollections
+		// IS the store; the personal array stays empty.
+		var collections = [];
 
-		// Team-wide shared store — same shape as the personal bookmarks /
-		// collections, but read by everyone and written only by managers
-		// (canManageShared) through a separate endpoint. Rendered after the
-		// personal tabs, italic/lighter (no extra icon).
+		// Team-wide shared store. Bookmarks still keep the personal/shared split
+		// (italic/lighter); collections live entirely here.
 		var shared = (config.shared && typeof config.shared === 'object') ? config.shared : {};
 		var sharedBookmarks = Array.isArray(shared.bookmarks) ? shared.bookmarks.slice() : [];
 		var sharedCollections = Array.isArray(shared.collections) ? shared.collections.slice() : [];
@@ -3813,7 +3813,9 @@
 			// Its label reflects which it'll do.
 			var addLi = document.querySelector('.ml-bookmarks-add');
 			if (addLi) {
-				addLi.hidden = !(hasSel || (current !== '' && !bookmarkMatched));
+				// Selection → "save as collection" is manager-only now; a filter →
+				// "save as bookmark" stays available to everyone.
+				addLi.hidden = !((hasSel && canManageShared) || (current !== '' && !bookmarkMatched));
 				var addA = addLi.querySelector('a');
 				if (addA) {
 					var addLabel = hasSel
@@ -3944,7 +3946,7 @@
 			// "Manage collections" — icon-only, flush-right (CSS), kept as the
 			// last child after the Add button. Shown only when there's something
 			// to organise (shared counts only for managers).
-			var wantManage = collections.length || (canManageShared && sharedCollections.length);
+			var wantManage = canManageShared;   // collections are manager-managed
 			if (wantManage && !manageLi) {
 				manageLi = document.createElement('li');
 				manageLi.className = 'ml-collections-manage';
@@ -4346,20 +4348,20 @@
 				});
 			});
 		}
-		// Create an empty personal collection at the top level and open it
-		// straight into inline rename (like making a new folder in Finder). An
-		// empty collection is a valid container: nest subgroups under it, or fill
-		// it later.
+		// Create an empty team collection at the top level and open it straight
+		// into inline rename (like making a new folder in Finder). An empty
+		// collection is a valid container: nest subgroups under it, or fill later.
 		function collNewEmpty() {
+			if (!canManageShared) return;
 			var c = { id: newCollectionId(), name: labels.collNewName || 'New collection', keys: [], parent: '' };
-			collections.unshift(c);          // top of the personal list
-			saveUserPrefs();
+			sharedCollections.unshift(c);
+			saveSharedPrefs();
 			renderCollectionsManager();
 			rerenderBookmarksList();
 			var list = collectionsDialog && collectionsDialog.querySelector('.ml-collections-list');
 			var row = list && list.querySelector('.ml-coll-row[data-coll-id="' + c.id + '"]');
 			var editBtn = row && row.querySelector('.ml-coll-move[data-act="edit"]');
-			if (editBtn) collEditStart(false, c.id, row, editBtn);
+			if (editBtn) collEditStart(true, c.id, row, editBtn);
 		}
 		function openCollectionsManager() {
 			renderCollectionsManager();
@@ -4464,10 +4466,10 @@
 			input.maxLength = 80;
 			dialog.appendChild(input);
 
-			// Managers can save straight into the team-wide shared store via a
-			// single checkbox — no separate dialog, no extra icon in the bar.
+			// "Share with the team" toggle — bookmarks only (collections are
+			// always team now, so no choice to offer).
 			var shareToggle = null;
-			if (canManageShared) {
+			if (canManageShared && !isCollection) {
 				var shareLabel = document.createElement('label');
 				shareLabel.className = 'ml-share-toggle';
 				shareToggle = document.createElement('input');
@@ -4502,10 +4504,13 @@
 			function commit() {
 				var name = input.value.trim();
 				if (!name) { input.focus(); return; }
-				var toShared = !!(shareToggle && shareToggle.checked);
+				// Collections are always team now (no toggle). Bookmarks still
+				// honour the "Share with the team" toggle.
+				var toShared = isCollection ? true : !!(shareToggle && shareToggle.checked);
 				if (isCollection) {
+					if (!canManageShared) { cleanup(); return; }
 					var c = { id: newCollectionId(), name: name, keys: selKeys, parent: '' };
-					(toShared ? sharedCollections : collections).push(c);
+					sharedCollections.push(c);
 				} else {
 					var b = { name: name, qs: current };
 					(toShared ? sharedBookmarks : bookmarks).push(b);
@@ -4516,10 +4521,10 @@
 				// A new collection consumes the selection → uncheck the boxes as
 				// confirmation (also flips the bar back out of collection mode).
 				if (isCollection) clearSelectionConfirm();
-				announce(toShared
-					? (labels.sharedSaved || 'Shared with the team')
-					: (isCollection
-						? (labels.collectionSaved || 'Collection saved')
+				announce(isCollection
+					? (labels.collectionSaved || 'Collection saved')
+					: (toShared
+						? (labels.sharedSaved || 'Shared with the team')
 						: (labels.bookmarkSaved || 'Bookmark saved')));
 			}
 			saveBtn.addEventListener('click', commit);

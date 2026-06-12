@@ -289,15 +289,9 @@ class ProcessImageLibrary extends Process {
 					$bookmarks[] = ['name' => $name, 'qs' => $qs];
 				}
 			}
-			// Collections: a saved set of specific images (row-keys), recalled
-			// by ?coll=<id>. Stored as DATA here (not in the URL) so a 100-image
-			// collection stays a 12-char link. See sanitizeCollection().
-			if (isset($raw['collections']) && is_array($raw['collections'])) {
-				foreach ($raw['collections'] as $c) {
-					$clean = $this->sanitizeCollection($c);
-					if ($clean !== null) $collections[] = $clean;
-				}
-			}
+			// Collections are TEAM-wide now (one store, getSharedPrefs); there is
+			// no personal collections store any more, so we don't read them here.
+			// Any legacy personal collections in $user->meta are simply ignored.
 			if (isset($raw['thumbScale'])) {
 				$ts = (float) $raw['thumbScale'];
 				if ($ts >= self::THUMB_SCALE_MIN && $ts <= self::THUMB_SCALE_MAX) {
@@ -4886,21 +4880,8 @@ class ProcessImageLibrary extends Process {
 	protected function resolveCollectionKeys(string $id): array {
 		$id = preg_replace('/[^a-z0-9]/i', '', $id) ?? '';
 		if ($id === '') return [];
-		// Personal collections win on id-collision; the union stays within one
-		// store (a personal parent unions personal descendants, team unions team).
-		$user = $this->getUserPrefs()['collections'];
-		if ($this->collectionInList($id, $user)) return $this->collectionUnionKeys($id, $user);
-		$shared = $this->getSharedPrefs()['collections'];
-		if ($this->collectionInList($id, $shared)) return $this->collectionUnionKeys($id, $shared);
-		return [];
-	}
-
-	/** Whether a collection id exists in the given store list. */
-	protected function collectionInList(string $id, array $list): bool {
-		foreach ($list as $c) {
-			if (($c['id'] ?? '') === $id) return true;
-		}
-		return false;
+		// Collections live in ONE team-wide store now (no personal split).
+		return $this->collectionUnionKeys($id, $this->getSharedPrefs()['collections']);
 	}
 
 	/**
@@ -6214,8 +6195,9 @@ class ProcessImageLibrary extends Process {
 
 		// "Manage collections" — icon-only, pushed flush-right (CSS margin-left:
 		// auto) so it lines up with the columns icon below. Opens the
-		// drag-and-drop manager. Shown only when there's something to organise.
-		if ($collections || ($sharedCollections && $canManageShared)) {
+		// drag-and-drop manager. Managers only (they create/curate team
+		// collections); shown even with none so the first one can be created.
+		if ($canManageShared) {
 			$manageTitle = $san->entities($this->_('Manage collections'));
 			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
 				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'

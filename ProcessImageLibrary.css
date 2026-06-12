@@ -1401,7 +1401,9 @@ textarea.ml-langtabs-pane {
 .ml-coll-row:focus-within {
 	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
 }
-.ml-coll-row--shared { font-style: italic; }   /* team collections, like the tab strip */
+/* Collections are all team now — no personal/shared distinction, so no italic
+   marker on manager rows. */
+.ml-coll-row--shared { font-style: normal; }
 /* Collapse caret for parents; a same-width spacer keeps leaf names aligned.
    (Indent per nesting level is applied inline as padding-left.) */
 .ml-coll-caret {
@@ -1836,6 +1838,11 @@ textarea.ml-langtabs-pane {
    the personal tabs, no extra icon. */
 .ml-bookmark--shared {
 	font-style: italic;
+}
+/* …except collection tabs: collections are all team now, so the italic
+   "shared" marker is meaningless for them (only shared BOOKMARKS keep it). */
+.ml-bookmark--collection.ml-bookmark--shared {
+	font-style: normal;
 }
 
 /* "Share with the team" toggle in the save dialog. */
