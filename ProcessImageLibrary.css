@@ -1503,9 +1503,7 @@ textarea.ml-langtabs-pane {
 .ml-coll-flyout-item > a.ml-bookmark {
 	display: flex;
 	align-items: center;
-	padding-top: 0.2rem;
-	padding-bottom: 0.2rem;
-	padding-right: 0.75rem;
+	padding: 0.3rem 0.85rem;
 	white-space: nowrap;
 	margin: 0;
 }
