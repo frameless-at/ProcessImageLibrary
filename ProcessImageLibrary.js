@@ -3958,6 +3958,8 @@
 		var collCollapsed = {};        // "own:id" / "shared:id" -> true (manager-local, resets on reload)
 		var collDelArmedBtn = null;    // delete-confirm armed button (one at a time)
 		var collDelTimer = null;
+		var collEditInput = null;      // inline-rename input while editing, else null
+		var collEditId = null, collEditShared = false, collEditBtn = null, collEditNameSpan = null;
 
 		function collStoreArr(isShared) { return isShared ? sharedCollections : collections; }
 		function collKey(isShared, id) { return (isShared ? 'shared:' : 'own:') + id; }
@@ -4108,6 +4110,9 @@
 			b.title = title || '';
 			b.setAttribute('aria-label', title || '');
 			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
+			// Keep focus on the inline-rename input when its ✓ (or any control) is
+			// clicked, so the click commits instead of blurring → cancelling.
+			b.addEventListener('mousedown', function (e) { e.preventDefault(); });
 			return b;
 		}
 		// Inline delete-confirm for a manager row (tag-manager pattern).
@@ -4151,6 +4156,52 @@
 				replaceFromQs(rest ? '?' + rest : '', true, true);
 			}
 		}
+		// Inline rename for a manager row — same pattern as the tag manager: the
+		// name turns into a text input, the ✎ becomes a ✓. Enter / ✓ commits,
+		// Esc / blur cancels. Renaming a collection is just a name change.
+		function collEditStart(isShared, id, li, btn) {
+			collDelDisarm();
+			collEditCancel();   // only one edit at a time
+			var c = collById(collStoreArr(isShared), id);
+			var nameSpan = li && li.querySelector('.ml-coll-name');
+			if (!c || !nameSpan) return;
+			collEditInput = document.createElement('input');
+			collEditInput.type = 'text';
+			collEditInput.className = 'ml-coll-edit-input uk-input';
+			collEditInput.value = c.name || '';
+			collEditId = id; collEditShared = isShared; collEditBtn = btn; collEditNameSpan = nameSpan;
+			nameSpan.style.display = 'none';
+			nameSpan.parentNode.insertBefore(collEditInput, nameSpan);
+			collDelSetIcon(btn, 'fa-check', labels.save || 'Save');
+			btn.classList.add('ml-coll-confirm');   // green ✓, like the tag rename
+			collEditInput.focus();
+			collEditInput.select();
+			collEditInput.addEventListener('keydown', function (e) {
+				if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); collEditCommit(); }
+				else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); collEditCancel(); }
+			});
+			collEditInput.addEventListener('blur', function () { collEditCancel(); });
+		}
+		function collEditEnd() {
+			if (collEditInput) { collEditInput.remove(); collEditInput = null; }
+			if (collEditNameSpan) { collEditNameSpan.style.display = ''; collEditNameSpan = null; }
+			if (collEditBtn) { collDelSetIcon(collEditBtn, 'fa-pencil', labels.collRename || 'Rename collection'); collEditBtn.classList.remove('ml-coll-confirm'); collEditBtn = null; }
+			collEditId = null; collEditShared = false;
+		}
+		function collEditCancel() { collEditEnd(); }
+		function collEditCommit() {
+			if (!collEditInput) return;
+			var nt = (collEditInput.value || '').trim();
+			var isShared = collEditShared, id = collEditId;
+			collEditEnd();
+			if (nt === '') return;
+			var c = collById(collStoreArr(isShared), id);
+			if (!c || c.name === nt) return;
+			c.name = nt;
+			if (isShared) saveSharedPrefs(); else saveUserPrefs();
+			renderCollectionsManager();
+			rerenderBookmarksList();
+		}
 		function collAncestorCollapsed(arr, isShared, c) {
 			var anc = c.parent || '', g = 0;
 			while (anc && g++ < 64) {
@@ -4191,6 +4242,7 @@
 			li.appendChild(name);
 			var btns = document.createElement('span');
 			btns.className = 'ml-coll-btns';
+			btns.appendChild(mkCollBtn('edit', 'fa-pencil', labels.collRename || 'Rename collection'));
 			var sibs = arr.filter(function (x) { return (x.parent || '') === (c.parent || ''); });
 			var si = sibs.indexOf(c);
 			if (si > 0) btns.appendChild(mkCollBtn('up', 'fa-chevron-up', labels.collMoveUp || 'Move up'));
@@ -4212,6 +4264,7 @@
 			if (!list) return;
 			collDelDisarm();           // rows are about to be replaced
 			collDelArmedBtn = null;
+			collEditEnd();             // drop any in-flight rename state
 			list.innerHTML = '';
 			function section(arr, isShared) {
 				arr.forEach(function (c) {
@@ -4315,6 +4368,12 @@
 					var isShared = li.dataset.store === 'shared';
 					var id = li.dataset.collId;
 					var act = btn.dataset.act;
+					if (act === 'edit') {
+						// Inline rename: first ✎ starts editing (✎ → ✓), ✓ commits.
+						if (collEditInput && collEditBtn === btn) collEditCommit();
+						else collEditStart(isShared, id, li, btn);
+						return;
+					}
 					if (act === 'del') {
 						// Inline delete confirm — same as the tag manager: first × arms
 						// (turns red ✓), second × confirms; auto-disarms after a few sec.
@@ -4323,6 +4382,7 @@
 						return;
 					}
 					collDelDisarm();   // any other control cancels a pending delete
+					collEditCancel();  // …and a pending rename
 					if (act === 'up') collMove(isShared, id, 'up');
 					else if (act === 'down') collMove(isShared, id, 'down');
 					else if (act === 'nest') collIndent(isShared, id);

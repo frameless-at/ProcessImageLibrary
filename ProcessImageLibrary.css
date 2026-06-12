@@ -1201,8 +1201,10 @@ textarea.ml-langtabs-pane {
 	color: var(--pw-muted-color, #888);
 	white-space: nowrap;
 }
-/* Inline rename input — replaces the chip's label in place. */
-.ml-tag-edit-input {
+/* Inline rename input — replaces the chip's label (tags) / row name
+   (collections manager) in place. */
+.ml-tag-edit-input,
+.ml-coll-edit-input {
 	flex: 1 1 auto;
 	min-width: 0;
 	height: auto;
@@ -1374,6 +1376,12 @@ textarea.ml-langtabs-pane {
 }
 .ml-coll-row:active { cursor: grabbing; }
 .ml-coll-row.ml-dragging { opacity: 0.35; }
+/* Light-grey highlight on hover / while a row is focused (being renamed) —
+   the exact tint the tag manager uses for its chip rows. */
+.ml-coll-row:hover,
+.ml-coll-row:focus-within {
+	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+}
 .ml-coll-row--shared { font-style: italic; }   /* team collections, like the tab strip */
 /* Collapse caret for parents; a same-width spacer keeps leaf names aligned.
    (Indent per nesting level is applied inline as padding-left.) */
@@ -1419,6 +1427,7 @@ textarea.ml-langtabs-pane {
    through until you confirm or it auto-disarms. */
 .ml-coll-del:hover { color: #c33; }
 .ml-coll-del.ml-coll-armed { color: #c33; opacity: 1; }
+.ml-coll-move.ml-coll-confirm { color: #2a8a2a; opacity: 1; }   /* green ✓ while renaming */
 .ml-coll-row-deleting .ml-coll-move { opacity: 1; }
 .ml-coll-row-deleting .ml-coll-name {
 	text-decoration: line-through;

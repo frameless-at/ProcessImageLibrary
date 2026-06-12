@@ -5965,6 +5965,7 @@ class ProcessImageLibrary extends Process {
 				'collExpand'        => $this->_('Expand'),
 				'collDelete'        => $this->_('Delete collection'),
 				'collConfirmDelete' => $this->_('Click again to delete'),
+				'collRename'        => $this->_('Rename collection'),
 				'collManageEmpty'   => $this->_('No collections yet.'),
 				'collManageTeam'    => $this->_('Team'),
 				'collectionsManage'      => $this->_('Manage collections'),
