@@ -1604,9 +1604,14 @@ class ProcessImageLibrary extends Process {
 		$title = $san->entities($this->_('Manage collections'));
 		$hint  = $san->entities($this->_('Drag to reorder. Drop a collection onto another to make it a subgroup — or use the arrow / indent buttons.'));
 		$close = $san->entities($this->_('Close'));
+		$newLabel = $san->entities($this->_('New collection'));
 		$out  = '<dialog class="ml-collections-dialog">';
 		$out .= '<header>' . $title . '</header>';
 		$out .= '<p class="ml-columns-hint">' . $hint . '</p>';
+		// Create an empty collection (a container you then nest subgroups under,
+		// or fill later). Opens straight into inline rename.
+		$out .= '<button type="button" class="ml-coll-new">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newLabel . '</button>';
 		$out .= '<ul class="ml-collections-list"></ul>';
 		$out .= '<footer>';
 		$out .= '<button type="button" class="ml-collections-close uk-button uk-button-secondary">' . $close . '</button>';
@@ -4846,11 +4851,10 @@ class ProcessImageLibrary extends Process {
 		$name = $this->wire('sanitizer')->text((string) ($c['name'] ?? ''), ['maxLength' => 80]);
 		if ($id === '' || $name === '') return null;
 
-		// Parent collection id for nesting (one level deep). Same id charset; a
-		// collection can never be its own parent. Structural validity (parent
-		// exists, no grandchildren, same store) is enforced by the manager UI;
-		// the array order is preserved as the display order (a child sits right
-		// after its parent), so we don't reorder here.
+		// Parent collection id for nesting. Same id charset; a collection can
+		// never be its own parent. Structural validity (parent exists, depth cap,
+		// same store) is enforced by the manager UI; the array order is preserved
+		// as the display order (a child sits right after its parent).
 		$parent = preg_replace('/[^a-z0-9]/i', '', (string) ($c['parent'] ?? '')) ?? '';
 		if ($parent === $id) $parent = '';
 
@@ -4862,7 +4866,9 @@ class ProcessImageLibrary extends Process {
 				if (count($keys) >= self::COLLECTION_KEYS_MAX) break;
 			}
 		}
-		if (!$keys) return null;
+		// Empty keys are allowed: a collection can be an empty container created
+		// up-front (you then nest subgroups under it, or add images later). A
+		// valid id + name is enough.
 		return ['id' => $id, 'name' => $name, 'keys' => array_keys($keys), 'parent' => $parent];
 	}
 
@@ -6010,6 +6016,7 @@ class ProcessImageLibrary extends Process {
 				'collDelete'        => $this->_('Delete collection'),
 				'collConfirmDelete' => $this->_('Click again to delete'),
 				'collRename'        => $this->_('Rename collection'),
+				'collNewName'       => $this->_('New collection'),
 				'collManageEmpty'   => $this->_('No collections yet.'),
 				'collManageTeam'    => $this->_('Team'),
 				'collectionsManage'      => $this->_('Manage collections'),

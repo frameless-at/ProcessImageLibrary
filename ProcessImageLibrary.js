@@ -4346,6 +4346,21 @@
 				});
 			});
 		}
+		// Create an empty personal collection at the top level and open it
+		// straight into inline rename (like making a new folder in Finder). An
+		// empty collection is a valid container: nest subgroups under it, or fill
+		// it later.
+		function collNewEmpty() {
+			var c = { id: newCollectionId(), name: labels.collNewName || 'New collection', keys: [], parent: '' };
+			collections.unshift(c);          // top of the personal list
+			saveUserPrefs();
+			renderCollectionsManager();
+			rerenderBookmarksList();
+			var list = collectionsDialog && collectionsDialog.querySelector('.ml-collections-list');
+			var row = list && list.querySelector('.ml-coll-row[data-coll-id="' + c.id + '"]');
+			var editBtn = row && row.querySelector('.ml-coll-move[data-act="edit"]');
+			if (editBtn) collEditStart(false, c.id, row, editBtn);
+		}
 		function openCollectionsManager() {
 			renderCollectionsManager();
 			if (!collectionsDialog) return;
@@ -4397,6 +4412,7 @@
 				});
 			}
 			collectionsDialog.addEventListener('click', function (e) {
+				if (e.target.closest && e.target.closest('.ml-coll-new')) { e.preventDefault(); collNewEmpty(); return; }
 				if (e.target === collectionsDialog) collectionsDialog.close();
 				if (e.target.closest && e.target.closest('.ml-collections-close')) collectionsDialog.close();
 			});
