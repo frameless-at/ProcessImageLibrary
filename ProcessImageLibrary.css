@@ -1361,7 +1361,8 @@ textarea.ml-langtabs-pane {
 /* Collections manager — drag-and-drop tree of collections (one level deep).
    Mirrors the column-picker list; rows are draggable, children are indented,
    and drop targets show a line (reorder) or a box (nest). */
-/* "+ New collection" — a plain link-style action above the manager list. */
+/* "+ New collection" — a plain link-style action above the manager list.
+   No bespoke colour: it inherits the dialog text colour. */
 .ml-coll-new {
 	display: inline-flex;
 	align-items: center;
@@ -1370,7 +1371,7 @@ textarea.ml-langtabs-pane {
 	padding: 0;
 	background: none;
 	border: 0;
-	color: var(--pw-primary, #3480e3);
+	color: inherit;
 	font: inherit;
 	cursor: pointer;
 }
