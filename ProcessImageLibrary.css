@@ -885,8 +885,12 @@ textarea.ml-cell-input {
 		row-gap: 0.5rem;
 	}
 	.ml-pagination-right {
-		margin-left: 0;
+		/* Stay right-aligned on mobile too: margin-left:auto (from the base
+		   rule) pushes the group right when it wraps to its own line, and
+		   justify-content:flex-end keeps its controls right-aligned if they
+		   wrap across lines. */
 		flex-wrap: wrap;
+		justify-content: flex-end;
 	}
 	/* Pre-JS masonry fallback: smaller column on phones so the brief
 	   un-hydrated state isn't one giant column. (The hydrated flex layout
