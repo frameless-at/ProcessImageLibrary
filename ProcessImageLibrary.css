@@ -1800,37 +1800,37 @@ textarea.ml-langtabs-pane {
 /* While a selection is active you're CURATING, not deleting — hide the × on
    collection tabs. Clicking the tab itself adds/removes the selection; the
    cursor says which. */
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] .ml-bookmark-del {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] .ml-bookmark-del {
 	display: none;
 }
 /* Curate cursors (selection active):
    - a NON-active collection tab → "+" (the click ADDS the selection to it);
    - the ACTIVE collection tab (you're inside it) → "−" (the click REMOVES the
      selection from it). Custom SVG cursors, native copy/pointer as fallback. */
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] > a {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
 }
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].uk-active > a {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].uk-active > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
 /* Shared (team-wide) tabs are read-only for non-managers: no curate cursor —
    a click just recalls. Managers get the curate cursors back via the
    ml-can-manage-shared root class (the rules above already cover non-shared
    tabs for them). */
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared] > a {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a {
 	cursor: pointer;
 }
-.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared] > a {
+.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
 }
-.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared].uk-active > a {
+.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared].uk-active > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
 /* A PARENT collection (has subgroups) is a read-only union — no curate cursor;
    curate the leaves instead. Higher specificity + later source order than the
    +/− rules above so it wins for both own and team parents, active or not. */
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].ml-coll-has-children > a,
-.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].ml-coll-has-children > a {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a,
+.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a {
 	cursor: not-allowed;
 }
 
