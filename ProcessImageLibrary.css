@@ -1479,7 +1479,7 @@ textarea.ml-langtabs-pane {
 	top: 100%;
 	left: 0;
 	z-index: 60;
-	min-width: max(180px, 100%);
+	width: max-content;   /* only as wide as the longest item, no fixed width */
 	margin: 0;
 	padding: 0.25rem 0;
 	list-style: none;
