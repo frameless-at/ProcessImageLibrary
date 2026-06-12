@@ -4870,20 +4870,63 @@ class ProcessImageLibrary extends Process {
 	 * Row-keys of the saved collection with the given id (empty if none). The
 	 * source for the ?coll= grid filter — keys live in $user->meta, never the URL.
 	 *
+	 * A collection resolves to the UNION of its OWN keys and the keys of ALL its
+	 * descendant collections (recursive). So a parent like "Flowers" that only
+	 * groups colour subgroups shows every image in red ∪ yellow ∪ pink, plus
+	 * any it holds directly. Leaves (no children) just return their own keys.
+	 *
 	 * @return array<int,string>
 	 */
 	protected function resolveCollectionKeys(string $id): array {
 		$id = preg_replace('/[^a-z0-9]/i', '', $id) ?? '';
 		if ($id === '') return [];
-		foreach ($this->getUserPrefs()['collections'] as $c) {
-			if (($c['id'] ?? '') === $id) return $c['keys'];
-		}
-		// Personal collections win on id-collision; fall through to the
-		// team-wide shared store so ?coll=<id> resolves shared sets too.
-		foreach ($this->getSharedPrefs()['collections'] as $c) {
-			if (($c['id'] ?? '') === $id) return $c['keys'];
-		}
+		// Personal collections win on id-collision; the union stays within one
+		// store (a personal parent unions personal descendants, team unions team).
+		$user = $this->getUserPrefs()['collections'];
+		if ($this->collectionInList($id, $user)) return $this->collectionUnionKeys($id, $user);
+		$shared = $this->getSharedPrefs()['collections'];
+		if ($this->collectionInList($id, $shared)) return $this->collectionUnionKeys($id, $shared);
 		return [];
+	}
+
+	/** Whether a collection id exists in the given store list. */
+	protected function collectionInList(string $id, array $list): bool {
+		foreach ($list as $c) {
+			if (($c['id'] ?? '') === $id) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Union of a collection's own keys plus every descendant's keys, de-duped.
+	 * Depth-first over the parent→children relationship; cycle-safe via $seen.
+	 *
+	 * @param array<int,array<string,mixed>> $list  one store's collections
+	 * @return array<int,string>
+	 */
+	protected function collectionUnionKeys(string $id, array $list): array {
+		$keysById = [];
+		$children = [];
+		foreach ($list as $c) {
+			$cid = (string) ($c['id'] ?? '');
+			if ($cid === '') continue;
+			$keysById[$cid] = $c['keys'] ?? [];
+			$p = (string) ($c['parent'] ?? '');
+			if ($p !== '') $children[$p][] = $cid;
+		}
+		$out  = [];
+		$seen = [];
+		$stack = [$id];
+		while ($stack) {
+			$cur = array_pop($stack);
+			if (isset($seen[$cur])) continue;
+			$seen[$cur] = true;
+			foreach ($keysById[$cur] ?? [] as $k) $out[$k] = true;
+			foreach ($children[$cur] ?? [] as $childId) {
+				if (!isset($seen[$childId])) $stack[] = $childId;
+			}
+		}
+		return array_keys($out);
 	}
 
 	/**
@@ -5956,6 +5999,7 @@ class ProcessImageLibrary extends Process {
 				'collectionAdd'     => $this->_('Add collection'),
 				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
 				'collectionRemoved' => $this->_('Removed %d image(s) from the collection'),
+				'collectionParentReadonly' => $this->_('This group shows its subgroups combined — add or remove images in a subgroup.'),
 				// Collections manager (drag-and-drop reorder + nesting) row controls.
 				'collMoveUp'        => $this->_('Move up'),
 				'collMoveDown'      => $this->_('Move down'),

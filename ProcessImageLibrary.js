@@ -4658,6 +4658,12 @@
 				// fall through to normal recall so the click still does something.
 				var curatable = !(tLi && tLi.dataset.shared === '1') || canManageShared;
 				if (tCid && hasSelNow && curatable) {
+					// A parent collection is a read-only union of its subgroups —
+					// curate the leaves, not the group.
+					if (collIsParent(collections, tCid) || collIsParent(sharedCollections, tCid)) {
+						announce(labels.collectionParentReadonly || 'Curate the subgroups, not the group.');
+						return;
+					}
 					if (tLi.classList.contains('uk-active')) removeSelectionFromCollection(tCid);
 					else addSelectionToCollection(tCid);
 					return;

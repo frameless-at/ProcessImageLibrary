@@ -1809,6 +1809,13 @@ textarea.ml-langtabs-pane {
 .ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared].uk-active > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
+/* A PARENT collection (has subgroups) is a read-only union — no curate cursor;
+   curate the leaves instead. Higher specificity + later source order than the
+   +/− rules above so it wins for both own and team parents, active or not. */
+.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].ml-coll-has-children > a,
+.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].ml-coll-has-children > a {
+	cursor: not-allowed;
+}
 
 /* Shared tabs are distinguished by italics alone — same colour and weight as
    the personal tabs, no extra icon. */
