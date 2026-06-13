@@ -3868,8 +3868,16 @@
 		// flyout (reusing the desktop .ml-coll-flyout). Touch has no hover, so
 		// tapping a parent toggles its flyout; a leaf recalls; tapping elsewhere
 		// closes. Desktop is untouched (this handler is a no-op there).
+		// Narrow phones (<=640px) get the NESTED bar (Bookmarks/Collections
+		// parents). The flat desktop bar stays for everything wider.
 		function isMobileBar() {
 			return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+		}
+		// Tap-to-open is for ANY touch device (no hover) - incl. tablets that are
+		// >640px and use the FLAT bar. Without it their flyouts can't open (hover
+		// is gated to mouse; tap was wrongly gated to phone width).
+		function isTouchBar() {
+			return !!(window.matchMedia && window.matchMedia('(hover: none)').matches);
 		}
 		function barFlyoutsCloseAll() {
 			var ul = bookmarksContainer();
@@ -3878,7 +3886,7 @@
 				function (li) { li.classList.remove('ml-flyout-open'); });
 		}
 		document.addEventListener('click', function (e) {
-			if (!isMobileBar()) return;
+			if (!isTouchBar()) return;
 			var a = e.target.closest && e.target.closest('.ml-bookmarks-tabs a.ml-bookmark');
 			if (a) {
 				var li = a.parentElement;
