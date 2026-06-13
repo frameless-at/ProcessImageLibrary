@@ -5197,8 +5197,12 @@ class ProcessImageLibrary extends Process {
 		// normal filters below apply WITHIN it — a collection can be filtered, so
 		// coll and the filter params coexist rather than replace each other. Rows
 		// whose images were since deleted/renamed simply don't match here.
-		$sel = $filters['sel'] ?? [];
-		if (!empty($sel)) {
+		// Gate on whether a collection is being recalled at all — NOT on whether
+		// it resolved to any keys. An empty collection (a container with no
+		// images yet) must show NOTHING, not fall through to the full grid.
+		$collActive = ((string) ($filters['coll'] ?? '')) !== '';
+		if ($collActive) {
+			$sel    = $filters['sel'] ?? [];
 			$selSet = array_fill_keys($sel, true);
 			$rows = array_values(array_filter($rows, function ($r) use ($selSet) {
 				$key = ((int) $r['pageId']) . ':' . $r['fieldName'] . ':' . $r['basename'];
