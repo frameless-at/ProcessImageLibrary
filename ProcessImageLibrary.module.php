@@ -6278,25 +6278,24 @@ class ProcessImageLibrary extends Process {
 		foreach ($sharedBookmarks as $b)   $out .= $renderBookmark($b);
 		foreach ($sharedCollections as $c) $out .= $renderCollection($c, true);
 
-		// Add button — opens the name-dialog. Server-side it's hidden unless a
-		// non-saved filter is active; the JS additionally reveals it whenever a
-		// checkbox selection exists (→ "save as collection").
-		$addHidden = (!$canManageShared || $currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
-		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
-			. ' title="' . $addTitle . '">'
-			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
-			. '</a></li>';
-
-		// "Manage collections" — icon-only, pushed flush-right (CSS margin-left:
-		// auto) so it lines up with the columns icon below. Opens the
-		// drag-and-drop manager. Managers only (they create/curate team
-		// collections); shown even with none so the first one can be created.
+		// "Manage" — icon-only, sitting directly after the bookmarks/collections
+		// and BEFORE the "New" link (no far-right float). Opens the drag-and-drop
+		// manager. Managers only; shown even with none so the first can be created.
 		if ($canManageShared) {
 			$manageTitle = $this->_('Manage bookmarks & collections');   // literal &, no entities (see renderCollectionsDialog)
 			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
 				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
 				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
 		}
+
+		// Add ("New") button — opens the name-dialog. Server-side it's hidden
+		// unless a non-saved filter is active; the JS additionally reveals it
+		// whenever a checkbox selection exists (→ "save as collection").
+		$addHidden = (!$canManageShared || $currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
+		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
+			. ' title="' . $addTitle . '">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
+			. '</a></li>';
 
 		$out .= '</ul>';
 		return $out;

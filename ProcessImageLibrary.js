@@ -3986,24 +3986,24 @@
 			bookmarks.forEach(function (b) { addBookmarkLi(b); });
 			collections.forEach(function (c) { addCollectionTab(c, false, collections); });
 			sharedCollections.forEach(function (c) { addCollectionTab(c, true, sharedCollections); });
-			// "Manage collections" — icon-only, flush-right (CSS), kept as the
-			// last child after the Add button. Shown only when there's something
-			// to organise (shared counts only for managers).
-			var wantManage = canManageShared;   // collections are manager-managed
+			// "Manage" — icon-only, sitting right after the bookmarks/collections
+			// and BEFORE the "New" (Add) link, not floated to the far right.
+			// Manager-only.
+			var wantManage = canManageShared;
 			if (wantManage && !manageLi) {
 				manageLi = document.createElement('li');
 				manageLi.className = 'ml-collections-manage';
 				var ma = document.createElement('a');
 				ma.href = '#';
 				ma.setAttribute('role', 'button');
-				ma.title = labels.collectionsManage || 'Manage collections';
+				ma.title = labels.collectionsManage || 'Manage bookmarks & collections';
 				ma.setAttribute('aria-label', ma.title);
 				ma.innerHTML = '<i class="fa fa-sliders" aria-hidden="true"></i>';
 				manageLi.appendChild(ma);
 			}
 			if (manageLi) {
 				manageLi.hidden = !wantManage;
-				ul.appendChild(manageLi);   // keep it last (flush-right via CSS)
+				ul.insertBefore(manageLi, addLi);   // directly before the "New" link
 			}
 			syncBookmarkActive();
 		}
@@ -4317,14 +4317,21 @@
 				sp.setAttribute('aria-hidden', 'true');
 				li.appendChild(sp);
 			}
-			// A small type icon for bookmark rows: folder vs filter bookmark, so
-			// containers are obvious in the list. Collections carry no icon.
+			// A small type icon so containers are obvious in the list:
+			//   bookmarks    — folder (empty group) vs bookmark (a filter);
+			//   collections  — folder (empty container) vs the duplicate/clone
+			//                  icon (a real set that holds its own images).
+			var typeIcon;
 			if (isBm) {
-				var ic = document.createElement('i');
-				ic.className = 'fa ' + (isFolder ? 'fa-folder-o' : 'fa-bookmark-o') + ' ml-coll-typeicon';
-				ic.setAttribute('aria-hidden', 'true');
-				li.appendChild(ic);
+				typeIcon = isFolder ? 'fa-folder-o' : 'fa-bookmark-o';
+			} else {
+				var collEmpty = !(c.keys && c.keys.length);
+				typeIcon = collEmpty ? 'fa-folder-o' : 'fa-clone';
 			}
+			var ic = document.createElement('i');
+			ic.className = 'fa ' + typeIcon + ' ml-coll-typeicon';
+			ic.setAttribute('aria-hidden', 'true');
+			li.appendChild(ic);
 			var name = document.createElement('span');
 			name.className = 'ml-coll-name';
 			name.textContent = c.name || '';

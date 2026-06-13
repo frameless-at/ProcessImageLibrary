@@ -1488,14 +1488,14 @@ textarea.ml-langtabs-pane {
 	font-style: italic;
 	padding: 0.25rem 0.3rem;
 }
-/* "Manage collections" — icon-only, pushed to the far right of the tab strip
-   so it lines up with the columns icon / filter fieldset edge below. */
-.ml-collections-manage {
-	margin-left: auto;   /* flex strip → flush-right */
-}
+/* "Manage" — icon-only, sitting directly after the bookmarks/collections (the
+   "New" link follows it), NOT floated to the far right. Nudged ~3px down so the
+   gear lines up optically with the tab text baseline. */
 .ml-collections-manage > a {
 	margin-right: 0;     /* override the tab strip's 30px del-button gutter */
 	color: var(--pw-muted-color, #888);
+	position: relative;
+	top: 3px;
 }
 .ml-collections-manage > a:hover { color: var(--pw-text-color, inherit); }
 
