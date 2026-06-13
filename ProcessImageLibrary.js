@@ -3877,16 +3877,29 @@
 		}
 		document.addEventListener('click', function (e) {
 			var catLi = e.target.closest && e.target.closest('.ml-bar-cats li');
-			if (!catLi || !catLi.dataset.cat) return;
-			e.preventDefault();
-			var cat = catLi.dataset.cat;
-			setBarCat(cat);
-			// "Show all" doubles as the reset action; the other two only switch view.
-			if (cat === 'all') {
-				applyBookmarkToForm('');
-				replaceFromQs('', true, true);
-				syncBookmarkActive();
+			if (catLi && catLi.dataset.cat) {
+				e.preventDefault();
+				var cat = catLi.dataset.cat;
+				setBarCat(cat);
+				var bar = document.querySelector('.ml-bookmarks-bar');
+				if (cat === 'all') {
+					if (bar) bar.classList.remove('ml-bar-open');
+					applyBookmarkToForm('');
+					replaceFromQs('', true, true);
+					syncBookmarkActive();
+				} else if (bar) {
+					bar.classList.toggle('ml-bar-open');
+				}
+				return;
 			}
+			// A tap that recalls a leaf item, or lands outside the bar, closes the
+			// open dropdown.
+			var openBar = document.querySelector('.ml-bookmarks-bar.ml-bar-open');
+			if (!openBar) return;
+			var leaf = e.target.closest && e.target.closest('.ml-bookmarks-tabs a.ml-bookmark');
+			var hasQs = leaf && (leaf.dataset.qs || '') !== '';
+			var insideBar = e.target.closest && e.target.closest('.ml-bookmarks-bar');
+			if (hasQs || !insideBar) openBar.classList.remove('ml-bar-open');
 		});
 
 		function rerenderBookmarksList() {
