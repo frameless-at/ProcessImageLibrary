@@ -1641,31 +1641,27 @@ class ProcessImageLibrary extends Process {
 		$close = $san->entities($this->_('Close'));
 		$tabColl = $san->entities($this->_('Collections'));
 		$tabBm   = $san->entities($this->_('Bookmarks'));
-		$collHint = $san->entities($this->_('Drag to reorder. Drop a collection onto another to make it a subgroup — or use the arrow / indent buttons.'));
-		$bmHint   = $san->entities($this->_('Drag to reorder. Drop a bookmark into a folder to group it — only folders can hold others. Create folders with the button below.'));
 		$newColl   = $san->entities($this->_('New collection'));
 		$newFolder = $san->entities($this->_('New folder'));
 		$out  = '<dialog class="ml-collections-dialog">';
 		$out .= '<header>' . $title . '</header>';
 		// Two tabs: Collections (default) and Bookmarks — reusing the admin's own
 		// uk-tab markup (same as the bookmarks bar) so they pick up the theme's
-		// tab styling instead of a bespoke look. Each pane carries its own hint,
-		// "new" button and list; the JS wires reorder/nest/rename/delete
-		// generically over both, picking the store from each row's data-store.
+		// tab styling instead of a bespoke look. Each pane carries its own "new"
+		// link and list; the JS wires reorder/nest/rename/delete generically over
+		// both, picking the store from each row's data-store.
 		$out .= '<ul class="uk-tab ml-mgr-tabs">';
 		$out .= '<li class="uk-active" data-pane="coll"><a href="#">' . $tabColl . '</a></li>';
 		$out .= '<li data-pane="bm"><a href="#">' . $tabBm . '</a></li>';
 		$out .= '</ul>';
 		$out .= '<div class="ml-mgr-pane" data-pane="coll">';
-		$out .= '<p class="ml-columns-hint">' . $collHint . '</p>';
-		$out .= '<button type="button" class="ml-coll-new" data-kind="coll">'
-			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newColl . '</button>';
+		$out .= '<a href="#" role="button" class="ml-coll-new" data-kind="coll">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newColl . '</a>';
 		$out .= '<ul class="ml-collections-list"></ul>';
 		$out .= '</div>';
 		$out .= '<div class="ml-mgr-pane" data-pane="bm" hidden>';
-		$out .= '<p class="ml-columns-hint">' . $bmHint . '</p>';
-		$out .= '<button type="button" class="ml-coll-new" data-kind="bm">'
-			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newFolder . '</button>';
+		$out .= '<a href="#" role="button" class="ml-coll-new" data-kind="bm">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newFolder . '</a>';
 		$out .= '<ul class="ml-bookmarks-list"></ul>';
 		$out .= '</div>';
 		$out .= '<footer>';
