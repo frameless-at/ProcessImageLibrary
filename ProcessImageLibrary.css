@@ -1834,39 +1834,38 @@ textarea.ml-langtabs-pane {
 	cursor: not-allowed;
 }
 /* Touch devices have no cursor, so the curate +/− affordance is shown as a
-   glyph after the collection name instead. Mirrors the curate-cursor cascade
-   above one-for-one: same green "+" (#2a8a2a) to ADD the selection, red "−"
-   (#c0392b) to REMOVE it from the active tab; non-manager shared tabs and
-   read-only parents get no glyph. Selectors, colours and source order match
-   the cursor rules so the glyph always agrees with what a click does. */
+   glyph BEFORE the collection name instead. Mirrors the curate-cursor cascade
+   above one-for-one: "+" to ADD the selection, "−" to REMOVE it from the
+   active tab; non-manager shared tabs and read-only parents get no glyph.
+   Inherits the tab's own colour (no bespoke colour). Selectors and source
+   order match the cursor rules so the glyph always agrees with what a click
+   does. */
 @media (hover: none) {
-	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] > a::after {
+	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] > a::before {
 		content: "+";
-		margin-left: 0.4rem;
+		margin-right: 0.45rem;
+		font-size: 1.3em;
 		font-weight: 700;
-		color: #2a8a2a;
+		line-height: 1;
 	}
-	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].uk-active > a::after {
+	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].uk-active > a::before {
 		content: "\2212";
-		color: #c0392b;
 	}
-	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a::after {
+	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a::before {
 		content: "";
-		margin-left: 0;
+		margin-right: 0;
 	}
-	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a::after {
+	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a::before {
 		content: "+";
-		margin-left: 0.4rem;
-		color: #2a8a2a;
+		margin-right: 0.45rem;
 	}
-	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared].uk-active > a::after {
+	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared].uk-active > a::before {
 		content: "\2212";
-		color: #c0392b;
 	}
-	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a::after,
-	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a::after {
+	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a::before,
+	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a::before {
 		content: "";
-		margin-left: 0;
+		margin-right: 0;
 	}
 }
 

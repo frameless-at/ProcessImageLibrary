@@ -3922,7 +3922,7 @@
 				li.dataset.collId = c.id;
 				if (isShared) li.dataset.shared = '1';
 				if (hasKids) li.classList.add('ml-coll-has-children');
-				var a = makeCollLink(c, isShared, true);
+				var a = makeCollLink(c, isShared, false);
 				if (hasKids) {
 					a.appendChild(document.createTextNode(' '));
 					var car = document.createElement('i');
