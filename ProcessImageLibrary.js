@@ -3845,47 +3845,44 @@
 			return document.querySelector('.ml-bookmarks-tabs');
 		}
 
-		// Mobile category switcher (Show all / Bookmarks / Collections): the class
-		// on the strip (ml-bar-cat-*) drives which items CSS shows; this also marks
-		// the active category tab. Desktop hides the switcher, so it's a no-op there.
-		function setBarCat(cat) {
+		// Mobile bar: same desktop optics, one level deeper. "Bookmarks" and
+		// "Collections" are flyout-PARENT tabs; the real items live in their
+		// flyout (reusing the desktop .ml-coll-flyout). Touch has no hover, so
+		// tapping a parent toggles its flyout; a leaf recalls; tapping elsewhere
+		// closes. Desktop is untouched (this handler is a no-op there).
+		function isMobileBar() {
+			return !!(window.matchMedia && window.matchMedia('(max-width: 640px)').matches);
+		}
+		function barFlyoutsCloseAll() {
 			var ul = bookmarksContainer();
-			if (ul) {
-				ul.classList.remove('ml-bar-cat-all', 'ml-bar-cat-bm', 'ml-bar-cat-coll');
-				ul.classList.add('ml-bar-cat-' + cat);
-			}
-			var cats = document.querySelector('.ml-bar-cats');
-			if (cats) {
-				Array.prototype.forEach.call(cats.querySelectorAll('li'), function (li) {
-					li.classList.toggle('uk-active', li.dataset.cat === cat);
-				});
-			}
+			if (!ul) return;
+			Array.prototype.forEach.call(ul.querySelectorAll('.ml-flyout-open'),
+				function (li) { li.classList.remove('ml-flyout-open'); });
 		}
 		document.addEventListener('click', function (e) {
-			var catLi = e.target.closest && e.target.closest('.ml-bar-cats li');
-			if (catLi && catLi.dataset.cat) {
-				e.preventDefault();
-				var cat = catLi.dataset.cat;
-				setBarCat(cat);
-				var bar = document.querySelector('.ml-bookmarks-bar');
-				if (cat === 'all') {
-					if (bar) bar.classList.remove('ml-bar-open');
-					applyBookmarkToForm('');
-					replaceFromQs('', true, true);
-					syncBookmarkActive();
-				} else if (bar) {
-					bar.classList.toggle('ml-bar-open');
+			if (!isMobileBar()) return;
+			var a = e.target.closest && e.target.closest('.ml-bookmarks-tabs a.ml-bookmark');
+			if (a) {
+				var li = a.parentElement;
+				if (li && li.classList.contains('ml-coll-has-children')) {
+					e.preventDefault();
+					e.stopImmediatePropagation();
+					if (li.classList.contains('ml-flyout-open')) {
+						Array.prototype.forEach.call(li.querySelectorAll('.ml-flyout-open'),
+							function (d) { d.classList.remove('ml-flyout-open'); });
+						li.classList.remove('ml-flyout-open');
+					} else {
+						var ul = bookmarksContainer();
+						if (ul) Array.prototype.forEach.call(ul.querySelectorAll('.ml-flyout-open'),
+							function (o) { if (o !== li && !o.contains(li)) o.classList.remove('ml-flyout-open'); });
+						li.classList.add('ml-flyout-open');
+					}
+					return;
 				}
+				setTimeout(barFlyoutsCloseAll, 0);
 				return;
 			}
-			// A tap that recalls a leaf item, or lands outside the bar, closes the
-			// open dropdown.
-			var openBar = document.querySelector('.ml-bookmarks-bar.ml-bar-open');
-			if (!openBar) return;
-			var leaf = e.target.closest && e.target.closest('.ml-bookmarks-tabs a.ml-bookmark');
-			var hasQs = leaf && (leaf.dataset.qs || '') !== '';
-			var insideBar = e.target.closest && e.target.closest('.ml-bookmarks-bar');
-			if (hasQs || !insideBar) openBar.classList.remove('ml-bar-open');
+			if (!(e.target.closest && e.target.closest('.ml-bookmarks-tabs'))) barFlyoutsCloseAll();
 		});
 
 		function rerenderBookmarksList() {
@@ -4041,9 +4038,32 @@
 			// Ordered by TYPE: all bookmarks first, then all collections. Both are
 			// single team stores now; top-level entries get a tab, nested ones live
 			// in their parent's hover flyout.
-			bookmarks.forEach(function (b) { addBookmarkLi(b); });
-			collections.forEach(function (c) { addCollectionTab(c, false, collections); });
-			sharedCollections.forEach(function (c) { addCollectionTab(c, true, sharedCollections); });
+			// Desktop: flat strip. Mobile: "Bookmarks" + "Collections" flyout-parent
+			// tabs holding the items one level deeper (same .ml-coll-flyout optics).
+			function addCategoryTab(label, flyoutUl, hasAny) {
+				if (!hasAny) return;
+				var li = document.createElement('li');
+				li.className = 'ml-coll-has-children ml-bar-category';
+				var a = document.createElement('a');
+				a.className = 'ml-bookmark';
+				a.href = '#';
+				a.appendChild(document.createTextNode(label + ' '));
+				var car = document.createElement('i');
+				car.className = 'fa fa-caret-down ml-coll-tab-caret';
+				car.setAttribute('aria-hidden', 'true');
+				a.appendChild(car);
+				li.appendChild(a);
+				li.appendChild(flyoutUl);
+				ul.insertBefore(li, addLi);
+			}
+			if (isMobileBar()) {
+				addCategoryTab(labels.barBookmarks || 'Bookmarks', buildBmFlyout(''), collChildren(bookmarks, '').length > 0);
+				addCategoryTab(labels.barCollections || 'Collections', buildCollFlyout(sharedCollections, '', true), collChildren(sharedCollections, '').length > 0);
+			} else {
+				bookmarks.forEach(function (b) { addBookmarkLi(b); });
+				collections.forEach(function (c) { addCollectionTab(c, false, collections); });
+				sharedCollections.forEach(function (c) { addCollectionTab(c, true, sharedCollections); });
+			}
 			// "Manage" — icon-only, sitting right after the bookmarks/collections
 			// and BEFORE the "New" (Add) link, not floated to the far right.
 			// Manager-only.
@@ -4627,7 +4647,7 @@
 				if (e.target.closest && e.target.closest('.ml-collections-close')) collectionsDialog.close();
 			});
 			document.addEventListener('click', function (e) {
-				var open = e.target.closest && e.target.closest('.ml-collections-manage a, .ml-collections-manage, .ml-bar-manage a, .ml-bar-manage');
+				var open = e.target.closest && e.target.closest('.ml-collections-manage a, .ml-collections-manage');
 				if (!open) return;
 				e.preventDefault();
 				openCollectionsManager();
@@ -4942,6 +4962,13 @@
 		// top-level tabs to avoid a flat-children flash). Falls back to a plain
 		// active-sync if the container isn't present.
 		if (bookmarksContainer()) rerenderBookmarksList(); else syncBookmarkActive();
+		// Re-render the bar when crossing the mobile breakpoint (flat <-> nested).
+		if (window.matchMedia) {
+			var barMq = window.matchMedia('(max-width: 640px)');
+			var onBarMq = function () { if (bookmarksContainer()) rerenderBookmarksList(); };
+			if (barMq.addEventListener) barMq.addEventListener('change', onBarMq);
+			else if (barMq.addListener) barMq.addListener(onBarMq);
+		}
 
 		// Sync the <li> order in the picker to match columnsOrder
 		// (after init from user-meta, before drag-drop wiring).
