@@ -1363,19 +1363,14 @@ textarea.ml-langtabs-pane {
    and drop targets show a line (reorder) or a box (nest). */
 /* "+ New collection" — a plain link-style action above the manager list.
    No bespoke colour: it inherits the dialog text colour. */
+/* "New collection" / "New folder" — a real link, in the theme's link colour. */
 .ml-coll-new {
 	display: inline-flex;
 	align-items: center;
 	gap: 0.3rem;
 	margin: 0 0 0.6rem;
-	padding: 0;
-	background: none;
-	border: 0;
-	color: inherit;
-	font: inherit;
 	cursor: pointer;
 }
-.ml-coll-new:hover { text-decoration: underline; }
 /* Manager tab strip (Collections / Bookmarks): reuses the admin's own uk-tab
    styling (same markup as the bookmarks bar). Just give it a little breathing
    room below before the pane content. */
