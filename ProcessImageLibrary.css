@@ -874,6 +874,25 @@ textarea.ml-cell-input {
 .ml-cell-variations {
 	color: var(--pw-muted-color, #555);
 }
+/* Collections cell — managers can click it to assign (caret affordance). */
+.ml-cell-coll-edit {
+	cursor: pointer;
+}
+.ml-coll-cell-caret {
+	opacity: 0.5;
+	font-size: 0.85em;
+}
+/* Assign popover: a read-only parent (union) row, just a label above its
+   checkable leaves. The leaf rows reuse .ml-popup-checklist styling. */
+.ml-coll-assign-list {
+	max-height: 50vh;
+	overflow-y: auto;
+}
+.ml-coll-assign-parent {
+	padding: 0.2rem 0;
+	font-weight: 600;
+	opacity: 0.65;
+}
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
    columnWidth handling; here we let the pagination flex-wrap so the

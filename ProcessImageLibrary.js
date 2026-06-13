@@ -2986,6 +2986,14 @@
 					// internal anchor (e.g. Page-link in the Page column).
 					if (e.target.tagName === 'A' || e.target.closest('a')) return;
 				}
+				// Collections column (manager): a click that isn't on a collection
+				// link opens the inline assign tree.
+				var collTd = e.target.closest && e.target.closest('.ml-cell-coll-edit');
+				if (collTd) {
+					if (e.target.tagName === 'A' || e.target.closest('a')) return;   // link → recall
+					openCollCellEditor(collTd);
+					return;
+				}
 				var td = e.target.closest && e.target.closest('.ml-cell-editable');
 				if (!td) return;
 				if (td.classList.contains('ml-editing')) return;
@@ -3013,6 +3021,12 @@
 				if (nativeTd && e.target === nativeTd) {
 					e.preventDefault();
 					openImageEditor(nativeTd);
+					return;
+				}
+				var collTdK = e.target.closest && e.target.closest('.ml-cell-coll-edit');
+				if (collTdK && e.target === collTdK) {
+					e.preventDefault();
+					openCollCellEditor(collTdK);
 					return;
 				}
 				var editTd = e.target.closest && e.target.closest('.ml-cell-editable');
@@ -4675,7 +4689,105 @@
 
 		// Add the current selection to an EXISTING collection (one you're not
 		// viewing). Merge + de-dupe; confirm by clearing the selection.
-		function addSelectionToCollection(collId) {
+		// ---- Collections table column: per-row assign (manager only) ----
+			// The cell carries the row identity (data-page-id/-field/-basename).
+			function collCellRowKey(td) {
+				return td.dataset.pageId + ':' + td.dataset.field + ':' + td.dataset.basename;
+			}
+			// Repaint a Collections cell's links from current membership.
+			function renderCollCell(td) {
+				var listSpan = td.querySelector('.ml-coll-cell-list');
+				if (!listSpan) return;
+				var rowKey = collCellRowKey(td);
+				var members = sharedCollections.filter(function (c) {
+					return c && c.keys && c.keys.indexOf(rowKey) !== -1;
+				});
+				listSpan.innerHTML = '';
+				if (members.length) {
+					members.forEach(function (c, i) {
+						if (i) listSpan.appendChild(document.createTextNode(', '));
+						var a = document.createElement('a');
+						a.href = '?coll=' + encodeURIComponent(c.id);
+						a.textContent = c.name || '';
+						listSpan.appendChild(a);
+					});
+				} else {
+					var dash = document.createElement('span');
+					dash.className = 'ml-usage-none';
+					dash.setAttribute('aria-hidden', 'true');
+					dash.textContent = '–';
+					listSpan.appendChild(dash);
+				}
+			}
+			// Inline checkbox tree to assign / unassign one image. Leaves are
+			// checkable; a parent collection is a read-only union (curate its
+			// leaves), shown as an indented header. Toggling writes straight to the
+			// team store — the same live-write model as the curate flow.
+			function openCollCellEditor(td) {
+				if (!canManageShared || td.classList.contains('ml-editing')) return;
+				var rowKey = collCellRowKey(td);
+				td.classList.add('ml-editing');
+				var dialog = document.createElement('dialog');
+				dialog.className = 'ml-popup-editor ml-coll-assign';
+				var header = document.createElement('header');
+				header.textContent = labels.collectionsAssign || 'Assign to collections';
+				dialog.appendChild(header);
+				var wrap = document.createElement('div');
+				wrap.className = 'ml-popup-checklist ml-coll-assign-list';
+				if (!sharedCollections.length) {
+					var none = document.createElement('p');
+					none.className = 'ml-popup-hint';
+					none.textContent = labels.collManageEmpty || 'No collections yet.';
+					wrap.appendChild(none);
+				}
+				sharedCollections.forEach(function (c) {
+					if (!c || !c.id) return;
+					var pad = (0.2 + collDepth(sharedCollections, c.id) * 1.1) + 'rem';
+					if (collIsParent(sharedCollections, c.id)) {
+						var hd = document.createElement('div');
+						hd.className = 'ml-coll-assign-parent';
+						hd.style.paddingLeft = pad;
+						hd.appendChild(document.createTextNode(c.name || ''));
+						wrap.appendChild(hd);
+						return;
+					}
+					var lbl = document.createElement('label');
+					lbl.className = 'ml-popup-checklist-item';
+					lbl.style.paddingLeft = pad;
+					var cb = document.createElement('input');
+					cb.type = 'checkbox';
+					cb.className = 'uk-checkbox';
+					cb.checked = (c.keys || []).indexOf(rowKey) !== -1;
+					cb.addEventListener('change', function () {
+						if (cb.checked) {
+							if ((c.keys || []).indexOf(rowKey) === -1) c.keys = (c.keys || []).concat([rowKey]);
+						} else {
+							c.keys = (c.keys || []).filter(function (k) { return k !== rowKey; });
+						}
+						saveSharedPrefs();
+						renderCollCell(td);
+						rerenderBookmarksList();
+					});
+					lbl.appendChild(cb);
+					lbl.appendChild(document.createTextNode(' ' + (c.name || '')));
+					wrap.appendChild(lbl);
+				});
+				dialog.appendChild(wrap);
+				var footer = document.createElement('footer');
+				var closeBtn = document.createElement('button');
+				closeBtn.type = 'button';
+				closeBtn.className = 'ml-popup-cancel uk-button uk-button-secondary';
+				closeBtn.textContent = labels.close || 'Close';
+				footer.appendChild(closeBtn);
+				dialog.appendChild(footer);
+				document.body.appendChild(dialog);
+				function teardown() { td.classList.remove('ml-editing'); if (dialog.open) dialog.close(); dialog.remove(); }
+				closeBtn.addEventListener('click', teardown);
+				dialog.addEventListener('close', teardown);
+				dialog.addEventListener('click', function (ev) { if (ev.target === dialog) teardown(); });
+				dialog.showModal();
+			}
+			function addSelectionToCollection(collId) {
 			var selKeys = Array.from(selection);
 			var found = findCollection(collId);
 			if (!found || !selKeys.length) return;

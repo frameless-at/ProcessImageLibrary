@@ -6083,6 +6083,7 @@ class ProcessImageLibrary extends Process {
 				'collManageEmpty'   => $this->_('No collections yet.'),
 				'collManageTeam'    => $this->_('Team'),
 				'collectionsManage'      => $this->_('Manage bookmarks & collections'),
+				'collectionsAssign'      => $this->_('Assign to collections'),
 				'collectionsManageShort' => $this->_('Manage'),
 				// Shared (team-wide) bookmarks + collections — the manager-only
 				// "share with team" toggle in the save dialog + its toasts.
@@ -6689,6 +6690,8 @@ class ProcessImageLibrary extends Process {
 		// cached across rows). $fields->get() is itself cached, but skip the repeat.
 		$fieldEditBase = $this->wire('config')->urls->admin . 'setup/field/edit?id=';
 		$fieldIdCache  = [];
+		// Managers can assign an image to collections straight from the column.
+		$canAssignColl = $this->canManageShared();
 
 		// The slice arrives collapsed into per-image units (buildDisplayUnits):
 		// a duplicated image's copies sit consecutively, head first. Only the
@@ -6974,8 +6977,16 @@ class ProcessImageLibrary extends Process {
 			$out .= '</td>';
 
 			// Collections this image directly belongs to — each links to its
-			// ?coll= recall view. A dash means it's in no collection.
-			$out .= '<td class="ml-cell-collections" data-col="collections">';
+			// ?coll= recall view. A dash means it's in no collection. Managers get
+			// a clickable cell (caret affordance) that opens an inline checkbox
+			// tree to assign / unassign the image (JS reads the row identity attrs).
+			$out .= '<td class="ml-cell-collections' . ($canAssignColl ? ' ml-cell-coll-edit' : '') . '" data-col="collections"';
+			if ($canAssignColl) {
+				$out .= ' ' . $editAttrs . ' role="button" tabindex="0" title="'
+					. $san->entities($this->_('Assign to collections')) . '"';
+			}
+			$out .= '>';
+			$out .= '<span class="ml-coll-cell-list">';
 			$memberOf = $collByKey[$selKey] ?? [];
 			if ($memberOf) {
 				$links = [];
@@ -6986,6 +6997,10 @@ class ProcessImageLibrary extends Process {
 				$out .= implode(', ', $links);
 			} else {
 				$out .= '<span class="ml-usage-none" aria-hidden="true">–</span>';
+			}
+			$out .= '</span>';
+			if ($canAssignColl) {
+				$out .= ' <i class="fa fa-caret-down ml-coll-cell-caret" aria-hidden="true"></i>';
 			}
 			$out .= '</td>';
 
