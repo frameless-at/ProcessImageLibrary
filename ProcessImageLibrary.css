@@ -1425,11 +1425,20 @@ textarea.ml-langtabs-pane {
 }
 .ml-coll-row:active { cursor: grabbing; }
 .ml-coll-row.ml-dragging { opacity: 0.35; }
-/* Light-grey highlight on hover / while a row is focused (being renamed) —
-   the exact tint the tag manager uses for its chip rows. */
-.ml-coll-row:hover,
-.ml-coll-row:focus-within {
-	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+/* Light-grey highlight — the exact tint the tag manager uses for its chip rows.
+   DESKTOP uses transient :hover (follows the mouse). TOUCH has no hover (and a
+   tap's :hover sticks), so there the highlight is driven by an explicit JS
+   "active" class — exactly ONE row, the one last acted on / just reordered, so
+   it follows the moved element instead of lighting up the row in its old slot. */
+@media (hover: hover) {
+	.ml-coll-row:hover {
+		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+	}
+}
+@media (hover: none) {
+	.ml-coll-row--active {
+		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+	}
 }
 /* Collections are all team now — no personal/shared distinction, so no italic
    marker on manager rows. */
@@ -1461,17 +1470,34 @@ textarea.ml-langtabs-pane {
 	display: flex;
 	gap: 0.05rem;
 }
-/* Hover-reveal exactly like the tag-manager chip controls (.ml-tag-manage):
-   opacity on each BUTTON, shown on row hover or the button's own
-   :focus-visible (keyboard). Never :focus-within / a wrapper — that sticks
-   visible after a mouse click and reveals on the dialog's auto-focus. */
+/* Row controls are hidden at rest and revealed for the ACTIVE row (explicit JS
+   class — touch-reliable, exactly one row), on desktop hover, or the button's
+   own :focus-visible (keyboard). Hover is desktop-only so a sticky touch :hover
+   doesn't reveal a second row's controls next to the active one. */
 .ml-coll-move {
 	opacity: 0;
 	transition: opacity 0.12s ease-out;
 }
-.ml-coll-row:hover .ml-coll-move,
-.ml-coll-row:focus-within .ml-coll-move {
+@media (hover: hover) {
+	.ml-coll-row:hover .ml-coll-move {
+		opacity: 1;
+	}
+}
+.ml-coll-move:focus-visible {
 	opacity: 1;
+}
+@media (hover: none) {
+	/* Hidden controls are non-interactive on touch, so a tap on an inactive
+	   row's (invisible) buttons falls through to the row and just activates it;
+	   once active the controls show AND become tappable. (The collapse caret is
+	   a separate, always-visible control, unaffected.) */
+	.ml-coll-move {
+		pointer-events: none;
+	}
+	.ml-coll-row--active .ml-coll-move {
+		opacity: 1;
+		pointer-events: auto;
+	}
 }
 /* Inline delete (like the tag manager): × goes red on hover; once armed it
    becomes a red ✓, the row's controls stay visible and the name is struck
