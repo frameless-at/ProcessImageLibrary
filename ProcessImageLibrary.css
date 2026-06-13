@@ -1367,20 +1367,16 @@ textarea.ml-langtabs-pane {
    single right-aligned "+ New" link on the same row. */
 .ml-mgr-tabbar {
 	display: flex;
-	align-items: flex-end;
+	align-items: baseline;   /* "+ New" text sits on the tab-label baseline */
 	margin: 0 0 0.8rem;
 }
 .ml-mgr-tabs {
 	margin: 0;
 }
 /* "+ New" — a real link in the theme's link colour, pushed to the right of the
-   tab row and sitting on the tab baseline. */
+   tab row, its text baseline-aligned with the tab labels. */
 .ml-coll-new {
 	margin-left: auto;
-	padding-bottom: 0.45rem;
-	display: inline-flex;
-	align-items: center;
-	gap: 0.3rem;
 	white-space: nowrap;
 	cursor: pointer;
 }
