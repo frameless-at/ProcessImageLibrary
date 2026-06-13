@@ -4127,7 +4127,12 @@
 		function collDelArm(btn, li) {
 			collDelArmedBtn = btn;
 			btn.classList.add('ml-coll-armed');
-			collDelSetIcon(btn, 'fa-check', labels.collConfirmDelete || 'Click again to delete');
+			// A collection with subgroups is a cascade delete — warn that the
+			// subgroups go too (and reassure the images stay in the library).
+			var hasKids = li && collIsParent(collStoreArr(li.dataset.store === 'shared'), li.dataset.collId);
+			collDelSetIcon(btn, 'fa-check', hasKids
+				? (labels.collConfirmDeleteTree || 'Click again — this also deletes its subgroups. The images stay in the library.')
+				: (labels.collConfirmDelete || 'Click again to delete'));
 			if (li) li.classList.add('ml-coll-row-deleting');
 			collDelTimer = setTimeout(collDelDisarm, 4000);
 		}
@@ -4143,9 +4148,12 @@
 		function collDelete(isShared, id) {
 			collDelDisarm();
 			var arr = collStoreArr(isShared);
-			// Drop it, then re-flatten so children of a deleted parent are promoted
-			// to top level rather than vanishing.
-			var flat = collFlatten(arr.filter(function (c) { return c && c.id !== id; }));
+			// Cascade delete: remove the collection AND all its subgroups
+			// (descendants), like deleting a container in Lightroom / Apple Photos
+			// / Gmail. The images themselves stay in the library — only the
+			// groupings are removed.
+			var doomed = collSubtreeSet(arr, id);
+			var flat = collFlatten(arr.filter(function (c) { return c && !doomed[c.id]; }));
 			if (isShared) sharedCollections = flat; else collections = flat;
 			if (isShared) saveSharedPrefs(); else saveUserPrefs();
 			renderCollectionsManager();
@@ -4153,8 +4161,9 @@
 			announce(isShared
 				? (labels.sharedDeleted || 'Removed from the team')
 				: (labels.collectionDeleted || 'Collection deleted'));
-			// If we're currently viewing the deleted collection, drop ?coll and reload.
-			if (currentColl() === id) {
+			// If we're viewing the deleted collection (or any of its now-gone
+			// subgroups), drop ?coll and reload.
+			if (doomed[currentColl()]) {
 				var rest = location.search.replace(/^\?/, '').split('&')
 					.filter(function (p) { return p && !/^coll=/.test(p); }).join('&');
 				replaceFromQs(rest ? '?' + rest : '', true, true);
