@@ -1376,13 +1376,44 @@ textarea.ml-langtabs-pane {
 	cursor: pointer;
 }
 .ml-coll-new:hover { text-decoration: underline; }
-.ml-collections-list {
+/* Manager tab strip (Collections / Bookmarks) inside the dialog. Mirrors the
+   admin's uk-tab look without pulling in WireTabs for a <dialog>. */
+.ml-mgr-tabs {
+	display: flex;
+	gap: 0.25rem;
+	margin: 0 0 0.8rem;
+	border-bottom: 1px solid var(--pw-border-color, #ddd);
+}
+.ml-mgr-tab {
+	padding: 0.4rem 0.9rem;
+	background: none;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	margin-bottom: -1px;
+	color: inherit;
+	font: inherit;
+	cursor: pointer;
+	opacity: 0.6;
+}
+.ml-mgr-tab:hover { opacity: 0.85; }
+.ml-mgr-tab.uk-active {
+	opacity: 1;
+	border-bottom-color: var(--pw-primary, #3eb998);
+}
+.ml-collections-list,
+.ml-bookmarks-list {
 	list-style: none;
 	padding: 0;
 	margin: 0;
 	display: flex;
 	flex-direction: column;
 	gap: 0.1rem;
+}
+/* Bookmark-row type icon (folder vs filter bookmark) in the manager list. */
+.ml-coll-typeicon {
+	opacity: 0.7;
+	width: 1em;
+	text-align: center;
 }
 .ml-coll-row {
 	display: flex;
@@ -1869,13 +1900,16 @@ textarea.ml-langtabs-pane {
 	}
 }
 
-/* Shared tabs are distinguished by italics alone — same colour and weight as
-   the personal tabs, no extra icon. */
-.ml-bookmark--shared {
+/* Bookmarks are shown in italic to tell them apart from collections (which are
+   upright). Targets bookmark tabs AND their flyout items — the <li> carries
+   data-bookmark-id either way; the "Show all" tab and collection tabs (which
+   carry data-coll-id) are unaffected. */
+.ml-bookmarks-tabs li[data-bookmark-id] > a {
 	font-style: italic;
 }
-/* …except collection tabs: collections are all team now, so the italic
-   "shared" marker is meaningless for them (only shared BOOKMARKS keep it). */
+/* Legacy shared bookmarks were italic via this class; kept only so any
+   server-rendered .ml-bookmark--shared still reads consistently. Collections
+   stay upright. */
 .ml-bookmark--collection.ml-bookmark--shared {
 	font-style: normal;
 }

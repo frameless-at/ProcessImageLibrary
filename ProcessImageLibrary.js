@@ -3857,18 +3857,61 @@
 			// (empty qs) only groups children (rendered in a hover flyout) — its
 			// nested children are handled separately, so this renders top-level
 			// only. The × (delete) shows for managers only.
-			function addBookmarkLi(b) {
-				if (!b || !b.id || (b.parent || '') !== '') return;   // top-level only
+			function makeBmLink(b) {
 				var isFolder = !(b.qs || '');
-				var li = document.createElement('li');
-				li.dataset.bookmarkId = b.id;
 				var a = document.createElement('a');
 				a.className = 'ml-bookmark' + (isFolder ? ' ml-bookmark--folder' : '');
 				a.href = isFolder ? '#' : (location.pathname + (b.qs || ''));
 				a.dataset.qs = b.qs || '';
-				a.textContent = b.name;
+				a.appendChild(document.createTextNode(b.name || ''));
+				return a;
+			}
+			// Cascading flyout of a bookmark FOLDER's direct children — mirrors the
+			// collection flyout (same .ml-coll-flyout markup + CSS). Sub-folders get
+			// a caret + their own nested flyout; filter-bookmark leaves apply their qs.
+			function buildBmFlyout(parentId) {
+				var fly = document.createElement('ul');
+				fly.className = 'ml-coll-flyout';
+				collChildren(bookmarks, parentId).forEach(function (d) {
+					var fli = document.createElement('li');
+					fli.className = 'ml-coll-flyout-item';
+					fli.dataset.bookmarkId = d.id;
+					var kids = collIsParent(bookmarks, d.id);
+					if (kids) fli.classList.add('ml-coll-has-children', 'ml-coll-flyout-parent');
+					var fa = makeBmLink(d);
+					if (kids) {
+						fa.appendChild(document.createTextNode(' '));
+						var car = document.createElement('i');
+						car.className = 'fa fa-caret-right ml-coll-tab-caret';
+						car.setAttribute('aria-hidden', 'true');
+						fa.appendChild(car);
+					}
+					fli.appendChild(fa);
+					if (kids) fli.appendChild(buildBmFlyout(d.id));
+					fly.appendChild(fli);
+				});
+				return fly;
+			}
+			function addBookmarkLi(b) {
+				if (!b || !b.id || (b.parent || '') !== '') return;   // top-level only
+				var isFolder = !(b.qs || '');
+				var hasKids = collIsParent(bookmarks, b.id);
+				var li = document.createElement('li');
+				li.dataset.bookmarkId = b.id;
+				if (hasKids) li.classList.add('ml-coll-has-children');
+				var a = makeBmLink(b);
+				if (hasKids) {
+					a.appendChild(document.createTextNode(' '));
+					var car = document.createElement('i');
+					car.className = 'fa fa-caret-down ml-coll-tab-caret';
+					car.setAttribute('aria-hidden', 'true');
+					a.appendChild(car);
+				}
 				li.appendChild(a);
-				if (canManageShared) li.appendChild(makeDelBtn(labels.bookmarkDelete || 'Delete bookmark'));
+				// × only on a top-level FILTER bookmark (a leaf) → quick delete.
+				// Folders are managed (rename / delete / nest) in the manager dialog.
+				if (canManageShared && !isFolder && !hasKids) li.appendChild(makeDelBtn(labels.bookmarkDelete || 'Delete bookmark'));
+				if (hasKids) li.appendChild(buildBmFlyout(b.id));
 				ul.insertBefore(li, addLi);
 			}
 			// One collection link (icon-marked fa-clone). data-qs is the short
@@ -3975,10 +4018,23 @@
 		var collDelArmedBtn = null;    // delete-confirm armed button (one at a time)
 		var collDelTimer = null;
 		var collEditInput = null;      // inline-rename input while editing, else null
-		var collEditId = null, collEditShared = false, collEditBtn = null, collEditNameSpan = null;
+		var collEditId = null, collEditKind = 'coll', collEditBtn = null, collEditNameSpan = null;
 
-		function collStoreArr(isShared) { return isShared ? sharedCollections : collections; }
-		function collKey(isShared, id) { return (isShared ? 'shared:' : 'own:') + id; }
+		// The manager is generic over a "kind": 'coll' (team collections) and 'bm'
+		// (team bookmarks) are both single team stores with the SAME tree machinery
+		// (nest / sort / collapse / flatten). Only three things differ by kind:
+		//   - which array (mgrArr),
+		//   - what may be a PARENT (collections: any; bookmarks: only a folder, i.e.
+		//     an empty qs — filter bookmarks are always leaves),
+		//   - the row icon / "New" affordance.
+		// Both persist through the one team save (saveSharedPrefs sends both arrays).
+		function collStoreArr(kind) { return kind === 'bm' ? bookmarks : sharedCollections; }
+		function mgrSetArr(kind, next) { if (kind === 'bm') bookmarks = next; else sharedCollections = next; }
+		function mgrIsBm(kind) { return kind === 'bm'; }
+		// May `item` hold children? Collections always can; a bookmark only if it's
+		// a FOLDER (no qs). Used to gate nest / indent / drag-into for bookmarks.
+		function mgrCanParent(kind, item) { return kind === 'bm' ? !(item && (item.qs || '')) : true; }
+		function collKey(kind, id) { return kind + ':' + id; }
 		function collIndexOf(arr, id) {
 			for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].id === id) return i;
 			return -1;
@@ -4021,38 +4077,40 @@
 			arr.forEach(function (c) { if (c && !seen[c.id]) { c.parent = ''; seen[c.id] = true; out.push(c); } });
 			return out;
 		}
-		function collPersist(isShared) {
-			var arr = collStoreArr(isShared);
+		function collPersist(kind) {
+			var arr = collStoreArr(kind);
 			var flat = collFlatten(arr);
 			arr.length = 0; Array.prototype.push.apply(arr, flat);
-			if (isShared) saveSharedPrefs(); else saveUserPrefs();
+			saveSharedPrefs();   // both stores are team-wide; one save sends both
 			renderCollectionsManager();
 			rerenderBookmarksList();
 		}
-		// Make `id` a child of `parentId` (cycle-safe, depth-capped).
-		function collNest(isShared, id, parentId) {
-			var arr = collStoreArr(isShared);
+		// Make `id` a child of `parentId` (cycle-safe, depth-capped). For bookmarks
+		// the parent must be a FOLDER (filter bookmarks can't hold children).
+		function collNest(kind, id, parentId) {
+			var arr = collStoreArr(kind);
 			var c = collById(arr, id), p = collById(arr, parentId);
 			if (!c || !p || id === parentId) return;
+			if (!mgrCanParent(kind, p)) return;                                          // bookmarks: folders only
 			if (collIsDescendant(arr, parentId, id)) return;                              // no cycle
 			if (collDepth(arr, parentId) + 1 + collHeight(arr, id) > COLL_MAX_DEPTH - 1) return;  // depth cap
 			c.parent = parentId;
-			collPersist(isShared);
+			collPersist(kind);
 		}
 		// Indent: become a child of the previous sibling.
-		function collIndent(isShared, id) {
-			var arr = collStoreArr(isShared);
+		function collIndent(kind, id) {
+			var arr = collStoreArr(kind);
 			var prev = collPrevSibling(arr, id);
-			if (prev) collNest(isShared, id, prev.id);
+			if (prev) collNest(kind, id, prev.id);
 		}
 		// Outdent: rise one level (become a sibling of the current parent).
-		function collOutdent(isShared, id) {
-			var arr = collStoreArr(isShared);
+		function collOutdent(kind, id) {
+			var arr = collStoreArr(kind);
 			var c = collById(arr, id);
 			if (!c || (c.parent || '') === '') return;
 			var p = collById(arr, c.parent);
 			c.parent = p ? (p.parent || '') : '';
-			collPersist(isShared);
+			collPersist(kind);
 		}
 		function collPrevSibling(arr, id) {
 			var i = collIndexOf(arr, id);
@@ -4066,8 +4124,8 @@
 			return null;
 		}
 		// Reorder: swap with the adjacent sibling (subtrees move together).
-		function collMove(isShared, id, dir) {
-			var arr = collStoreArr(isShared);
+		function collMove(kind, id, dir) {
+			var arr = collStoreArr(kind);
 			var c = collById(arr, id);
 			if (!c) return;
 			var p = c.parent || '';
@@ -4082,11 +4140,11 @@
 			var out = [];
 			(function () { function walk(n) { out.push(n); (cm[n.id] || []).forEach(walk); } roots.forEach(walk); })();
 			arr.length = 0; Array.prototype.push.apply(arr, out);
-			collPersist(isShared);
+			collPersist(kind);
 		}
 		// Drag-place: make `id` a sibling of `targetId`, before / after its subtree.
-		function collPlace(isShared, id, targetId, after) {
-			var arr = collStoreArr(isShared);
+		function collPlace(kind, id, targetId, after) {
+			var arr = collStoreArr(kind);
 			var c = collById(arr, id), t = collById(arr, targetId);
 			if (!c || !t || id === targetId) return;
 			if (collIsDescendant(arr, targetId, id)) return;                          // not into own subtree
@@ -4103,7 +4161,7 @@
 				rest.splice.apply(rest, [at, 0].concat(blk));
 			}
 			arr.length = 0; Array.prototype.push.apply(arr, rest);
-			collPersist(isShared);
+			collPersist(kind);
 		}
 
 		function mkCollBtn(act, icon, title) {
@@ -4127,12 +4185,20 @@
 		function collDelArm(btn, li) {
 			collDelArmedBtn = btn;
 			btn.classList.add('ml-coll-armed');
-			// A collection with subgroups is a cascade delete — warn that the
-			// subgroups go too (and reassure the images stay in the library).
-			var hasKids = li && collIsParent(collStoreArr(li.dataset.store === 'shared'), li.dataset.collId);
-			collDelSetIcon(btn, 'fa-check', hasKids
-				? (labels.collConfirmDeleteTree || 'Click again — this also deletes its subgroups. The images stay in the library.')
-				: (labels.collConfirmDelete || 'Click again to delete'));
+			// Deleting a parent is a cascade — warn that what's nested goes too.
+			var kind = li ? (li.dataset.store || 'coll') : 'coll';
+			var hasKids = li && collIsParent(collStoreArr(kind), li.dataset.collId);
+			var msg;
+			if (kind === 'bm') {
+				msg = hasKids
+					? (labels.bmConfirmDeleteFolder || 'Click again — this also deletes the bookmarks inside the folder.')
+					: (labels.collConfirmDelete || 'Click again to delete');
+			} else {
+				msg = hasKids
+					? (labels.collConfirmDeleteTree || 'Click again — this also deletes its subgroups. The images stay in the library.')
+					: (labels.collConfirmDelete || 'Click again to delete');
+			}
+			collDelSetIcon(btn, 'fa-check', msg);
 			if (li) li.classList.add('ml-coll-row-deleting');
 			collDelTimer = setTimeout(collDelDisarm, 4000);
 		}
@@ -4145,25 +4211,25 @@
 			if (row) row.classList.remove('ml-coll-row-deleting');
 			collDelArmedBtn = null;
 		}
-		function collDelete(isShared, id) {
+		function collDelete(kind, id) {
 			collDelDisarm();
-			var arr = collStoreArr(isShared);
-			// Cascade delete: remove the collection AND all its subgroups
-			// (descendants), like deleting a container in Lightroom / Apple Photos
-			// / Gmail. The images themselves stay in the library — only the
-			// groupings are removed.
+			var arr = collStoreArr(kind);
+			// Cascade delete: remove the item AND everything nested under it
+			// (collections → subgroups; bookmark folders → the bookmarks inside),
+			// like deleting a container in Lightroom / Apple Photos / Gmail.
 			var doomed = collSubtreeSet(arr, id);
 			var flat = collFlatten(arr.filter(function (c) { return c && !doomed[c.id]; }));
-			if (isShared) sharedCollections = flat; else collections = flat;
-			if (isShared) saveSharedPrefs(); else saveUserPrefs();
+			mgrSetArr(kind, flat);
+			saveSharedPrefs();
 			renderCollectionsManager();
 			rerenderBookmarksList();
-			announce(isShared
-				? (labels.sharedDeleted || 'Removed from the team')
+			announce(kind === 'bm'
+				? (labels.bookmarkDeleted || 'Bookmark deleted')
 				: (labels.collectionDeleted || 'Collection deleted'));
-			// If we're viewing the deleted collection (or any of its now-gone
-			// subgroups), drop ?coll and reload.
-			if (doomed[currentColl()]) {
+			// Collections recall by ?coll=: if we're viewing a now-deleted one,
+			// drop it and reload. Bookmarks recall by qs, so syncBookmarkActive
+			// just drops the active state on the next render — nothing to do here.
+			if (kind !== 'bm' && doomed[currentColl()]) {
 				var rest = location.search.replace(/^\?/, '').split('&')
 					.filter(function (p) { return p && !/^coll=/.test(p); }).join('&');
 				replaceFromQs(rest ? '?' + rest : '', true, true);
@@ -4172,17 +4238,17 @@
 		// Inline rename for a manager row — same pattern as the tag manager: the
 		// name turns into a text input, the ✎ becomes a ✓. Enter / ✓ commits,
 		// Esc / blur cancels. Renaming a collection is just a name change.
-		function collEditStart(isShared, id, li, btn) {
+		function collEditStart(kind, id, li, btn) {
 			collDelDisarm();
 			collEditCancel();   // only one edit at a time
-			var c = collById(collStoreArr(isShared), id);
+			var c = collById(collStoreArr(kind), id);
 			var nameSpan = li && li.querySelector('.ml-coll-name');
 			if (!c || !nameSpan) return;
 			collEditInput = document.createElement('input');
 			collEditInput.type = 'text';
 			collEditInput.className = 'ml-coll-edit-input uk-input';
 			collEditInput.value = c.name || '';
-			collEditId = id; collEditShared = isShared; collEditBtn = btn; collEditNameSpan = nameSpan;
+			collEditId = id; collEditKind = kind; collEditBtn = btn; collEditNameSpan = nameSpan;
 			nameSpan.style.display = 'none';
 			nameSpan.parentNode.insertBefore(collEditInput, nameSpan);
 			collDelSetIcon(btn, 'fa-check', labels.save || 'Save');
@@ -4199,42 +4265,44 @@
 			if (collEditInput) { collEditInput.remove(); collEditInput = null; }
 			if (collEditNameSpan) { collEditNameSpan.style.display = ''; collEditNameSpan = null; }
 			if (collEditBtn) { collDelSetIcon(collEditBtn, 'fa-pencil', labels.collRename || 'Rename collection'); collEditBtn.classList.remove('ml-coll-confirm'); collEditBtn = null; }
-			collEditId = null; collEditShared = false;
+			collEditId = null; collEditKind = 'coll';
 		}
 		function collEditCancel() { collEditEnd(); }
 		function collEditCommit() {
 			if (!collEditInput) return;
 			var nt = (collEditInput.value || '').trim();
-			var isShared = collEditShared, id = collEditId;
+			var kind = collEditKind, id = collEditId;
 			collEditEnd();
 			if (nt === '') return;
-			var c = collById(collStoreArr(isShared), id);
+			var c = collById(collStoreArr(kind), id);
 			if (!c || c.name === nt) return;
 			c.name = nt;
-			if (isShared) saveSharedPrefs(); else saveUserPrefs();
+			saveSharedPrefs();
 			renderCollectionsManager();
 			rerenderBookmarksList();
 		}
-		function collAncestorCollapsed(arr, isShared, c) {
+		function collAncestorCollapsed(arr, kind, c) {
 			var anc = c.parent || '', g = 0;
 			while (anc && g++ < 64) {
-				if (collCollapsed[collKey(isShared, anc)]) return true;
+				if (collCollapsed[collKey(kind, anc)]) return true;
 				var pa = collById(arr, anc); anc = pa ? (pa.parent || '') : '';
 			}
 			return false;
 		}
-		function buildCollRow(arr, c, isShared) {
+		function buildCollRow(arr, c, kind) {
+			var isBm = mgrIsBm(kind);
+			var isFolder = isBm && !(c.qs || '');
 			var depth = collDepth(arr, c.id);
 			var hasKids = collIsParent(arr, c.id);
 			var li = document.createElement('li');
-			li.className = 'ml-coll-row' + (isShared ? ' ml-coll-row--shared' : '');
+			li.className = 'ml-coll-row' + (isFolder ? ' ml-coll-row--folder' : '');
 			li.draggable = true;
 			li.dataset.collId = c.id;
-			li.dataset.store = isShared ? 'shared' : 'own';
+			li.dataset.store = kind;
 			li.style.paddingLeft = (0.3 + depth * 1.4) + 'rem';
 			// Collapse caret for parents; a spacer keeps leaf names aligned.
 			if (hasKids) {
-				var collapsed = !!collCollapsed[collKey(isShared, c.id)];
+				var collapsed = !!collCollapsed[collKey(kind, c.id)];
 				var car = document.createElement('button');
 				car.type = 'button';
 				car.className = 'ml-coll-caret';
@@ -4249,70 +4317,72 @@
 				sp.setAttribute('aria-hidden', 'true');
 				li.appendChild(sp);
 			}
+			// A small type icon for bookmark rows: folder vs filter bookmark, so
+			// containers are obvious in the list. Collections carry no icon.
+			if (isBm) {
+				var ic = document.createElement('i');
+				ic.className = 'fa ' + (isFolder ? 'fa-folder-o' : 'fa-bookmark-o') + ' ml-coll-typeicon';
+				ic.setAttribute('aria-hidden', 'true');
+				li.appendChild(ic);
+			}
 			var name = document.createElement('span');
 			name.className = 'ml-coll-name';
 			name.textContent = c.name || '';
 			li.appendChild(name);
 			var btns = document.createElement('span');
 			btns.className = 'ml-coll-btns';
-			btns.appendChild(mkCollBtn('edit', 'fa-pencil', labels.collRename || 'Rename collection'));
+			btns.appendChild(mkCollBtn('edit', 'fa-pencil', labels.collRename || 'Rename'));
 			var sibs = arr.filter(function (x) { return (x.parent || '') === (c.parent || ''); });
 			var si = sibs.indexOf(c);
 			if (si > 0) btns.appendChild(mkCollBtn('up', 'fa-chevron-up', labels.collMoveUp || 'Move up'));
 			if (si >= 0 && si < sibs.length - 1) btns.appendChild(mkCollBtn('down', 'fa-chevron-down', labels.collMoveDown || 'Move down'));
+			// Indent under the previous sibling — only when it can be a parent
+			// (bookmarks: a folder) and the depth cap allows it.
 			var prev = collPrevSibling(arr, c.id);
-			if (prev && collDepth(arr, prev.id) + 1 + collHeight(arr, c.id) <= COLL_MAX_DEPTH - 1) {
+			if (prev && mgrCanParent(kind, prev)
+				&& collDepth(arr, prev.id) + 1 + collHeight(arr, c.id) <= COLL_MAX_DEPTH - 1) {
 				btns.appendChild(mkCollBtn('nest', 'fa-indent', labels.collNest || 'Indent'));
 			}
 			if (depth > 0) btns.appendChild(mkCollBtn('unnest', 'fa-outdent', labels.collUnnest || 'Outdent'));
-			var delB = mkCollBtn('del', 'fa-times', labels.collDelete || 'Delete collection');
+			var delB = mkCollBtn('del', 'fa-times', labels.collDelete || 'Delete');
 			delB.classList.add('ml-coll-del');
 			btns.appendChild(delB);
 			li.appendChild(btns);
 			return li;
 		}
+		// Render ONE store's rows into a list element (collapsed subtrees hidden),
+		// then (re)wire its drag-and-drop. Generic over kind.
+		function renderManagerList(list, arr, kind) {
+			if (!list) return;
+			list.innerHTML = '';
+			arr.forEach(function (c) {
+				if (!c || !c.id) return;
+				if (collAncestorCollapsed(arr, kind, c)) return;   // hidden under a collapsed parent
+				list.appendChild(buildCollRow(arr, c, kind));
+			});
+			if (!arr.length) {
+				var empty = document.createElement('li');
+				empty.className = 'ml-coll-empty';
+				empty.textContent = kind === 'bm'
+					? (labels.bmManageEmpty || 'No bookmarks yet.')
+					: (labels.collManageEmpty || 'No collections yet.');
+				list.appendChild(empty);
+			}
+			wireMgrDnD(list, kind);
+		}
 		function renderCollectionsManager() {
 			if (!collectionsDialog) return;
-			var list = collectionsDialog.querySelector('.ml-collections-list');
-			if (!list) return;
 			collDelDisarm();           // rows are about to be replaced
 			collDelArmedBtn = null;
 			collEditEnd();             // drop any in-flight rename state
-			list.innerHTML = '';
-			function section(arr, isShared) {
-				arr.forEach(function (c) {
-					if (!c || !c.id) return;
-					if (collAncestorCollapsed(arr, isShared, c)) return;   // hidden under a collapsed parent
-					list.appendChild(buildCollRow(arr, c, isShared));
-				});
-			}
-			var hasOwn = collections.length > 0;
-			var hasTeam = canManageShared && sharedCollections.length > 0;
-			section(collections, false);
-			if (hasTeam) {
-				// The "Team" heading only earns its place as a DIVIDER between the
-				// two stores; with team-only collections it'd be noise.
-				if (hasOwn) {
-					var sep = document.createElement('li');
-					sep.className = 'ml-coll-sep';
-					sep.textContent = labels.collManageTeam || 'Team';
-					list.appendChild(sep);
-				}
-				section(sharedCollections, true);
-			}
-			if (!hasOwn && !hasTeam) {
-				var empty = document.createElement('li');
-				empty.className = 'ml-coll-empty';
-				empty.textContent = labels.collManageEmpty || 'No collections yet.';
-				list.appendChild(empty);
-			}
-			wireCollManagerDnD();
+			renderManagerList(collectionsDialog.querySelector('.ml-collections-list'), sharedCollections, 'coll');
+			renderManagerList(collectionsDialog.querySelector('.ml-bookmarks-list'), bookmarks, 'bm');
 		}
-		function wireCollManagerDnD() {
-			if (!collectionsDialog) return;
-			var list = collectionsDialog.querySelector('.ml-collections-list');
+		// Drag-and-drop within ONE list (one store). `into` is gated by
+		// mgrCanParent so a bookmark can only ever drop INTO a folder.
+		function wireMgrDnD(list, kind) {
 			if (!list) return;
-			var dragId = null, dragShared = false;
+			var dragId = null;
 			function clearMarks() {
 				Array.prototype.forEach.call(list.querySelectorAll('.ml-coll-row'), function (r) {
 					r.classList.remove('ml-drop-before', 'ml-drop-after', 'ml-drop-into');
@@ -4321,20 +4391,19 @@
 			Array.prototype.forEach.call(list.querySelectorAll('.ml-coll-row'), function (li) {
 				li.addEventListener('dragstart', function (e) {
 					dragId = li.dataset.collId;
-					dragShared = li.dataset.store === 'shared';
 					li.classList.add('ml-dragging');
 					if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
 				});
 				li.addEventListener('dragend', function () { li.classList.remove('ml-dragging'); clearMarks(); dragId = null; });
 				li.addEventListener('dragover', function (e) {
 					if (!dragId || li.dataset.collId === dragId) return;
-					if ((li.dataset.store === 'shared') !== dragShared) return;          // same store only
-					var arr = collStoreArr(dragShared);
+					var arr = collStoreArr(kind);
 					var targetId = li.dataset.collId;
 					if (collIsDescendant(arr, targetId, dragId)) return;                 // not into own subtree
 					var rect = li.getBoundingClientRect();
 					var rel = (e.clientY - rect.top) / rect.height;
-					var canInto = collDepth(arr, targetId) + 1 + collHeight(arr, dragId) <= COLL_MAX_DEPTH - 1;
+					var canInto = mgrCanParent(kind, collById(arr, targetId))
+						&& collDepth(arr, targetId) + 1 + collHeight(arr, dragId) <= COLL_MAX_DEPTH - 1;
 					var canSibling = collDepth(arr, targetId) + collHeight(arr, dragId) <= COLL_MAX_DEPTH - 1;
 					var intent = (canInto && rel > 0.33 && rel < 0.67) ? 'into'
 						: (rel < 0.5 ? 'before' : 'after');
@@ -4347,30 +4416,34 @@
 				});
 				li.addEventListener('drop', function (e) {
 					if (!dragId || li.dataset.collId === dragId) return;
-					if ((li.dataset.store === 'shared') !== dragShared) return;
 					e.preventDefault();
 					var targetId = li.dataset.collId;
 					var intent = li.dataset.dropIntent || 'after';
 					clearMarks();
-					if (intent === 'into') collNest(dragShared, dragId, targetId);
-					else collPlace(dragShared, dragId, targetId, intent === 'after');
+					if (intent === 'into') collNest(kind, dragId, targetId);
+					else collPlace(kind, dragId, targetId, intent === 'after');
 				});
 			});
 		}
-		// Create an empty team collection at the top level and open it straight
-		// into inline rename (like making a new folder in Finder). An empty
-		// collection is a valid container: nest subgroups under it, or fill later.
-		function collNewEmpty() {
+		// Create an empty team container at the top level and open it straight into
+		// inline rename (like making a new folder in Finder). For collections an
+		// empty record is a valid container (nest subgroups / fill later); for
+		// bookmarks it's a folder (empty qs) that only groups child bookmarks.
+		function collNewEmpty(kind) {
 			if (!canManageShared) return;
-			var c = { id: newCollectionId(), name: labels.collNewName || 'New collection', keys: [], parent: '' };
-			sharedCollections.unshift(c);
+			var arr = collStoreArr(kind);
+			var c = (kind === 'bm')
+				? { id: newCollectionId(), name: labels.bmNewFolderName || 'New folder', qs: '', parent: '' }
+				: { id: newCollectionId(), name: labels.collNewName || 'New collection', keys: [], parent: '' };
+			arr.unshift(c);
 			saveSharedPrefs();
 			renderCollectionsManager();
 			rerenderBookmarksList();
-			var list = collectionsDialog && collectionsDialog.querySelector('.ml-collections-list');
+			var listSel = (kind === 'bm') ? '.ml-bookmarks-list' : '.ml-collections-list';
+			var list = collectionsDialog && collectionsDialog.querySelector(listSel);
 			var row = list && list.querySelector('.ml-coll-row[data-coll-id="' + c.id + '"]');
 			var editBtn = row && row.querySelector('.ml-coll-move[data-act="edit"]');
-			if (editBtn) collEditStart(true, c.id, row, editBtn);
+			if (editBtn) collEditStart(kind, c.id, row, editBtn);
 		}
 		function openCollectionsManager() {
 			renderCollectionsManager();
@@ -4383,47 +4456,62 @@
 			if (collectionsDialog.contains(document.activeElement)
 				&& document.activeElement !== collectionsDialog) document.activeElement.blur();
 		}
-		// One-time wiring: row controls (delegated), open / close.
+		// Switch the manager between the Collections and Bookmarks panes.
+		function mgrShowPane(pane) {
+			if (!collectionsDialog) return;
+			collDelDisarm(); collEditCancel();
+			Array.prototype.forEach.call(collectionsDialog.querySelectorAll('.ml-mgr-tab'), function (t) {
+				t.classList.toggle('uk-active', t.dataset.pane === pane);
+			});
+			Array.prototype.forEach.call(collectionsDialog.querySelectorAll('.ml-mgr-pane'), function (p) {
+				p.hidden = (p.dataset.pane !== pane);
+			});
+		}
+		// One-time wiring: tabs, row controls (delegated over BOTH lists),
+		// new-container buttons, open / close.
 		if (collectionsDialog) {
 			var collList = collectionsDialog.querySelector('.ml-collections-list');
 			if (collList) {
-				collList.addEventListener('click', function (e) {
+				collectionsDialog.addEventListener('click', function (e) {
 					var btn = e.target.closest && e.target.closest('.ml-coll-move, .ml-coll-caret');
 					if (!btn) return;
 					e.preventDefault();
 					var li = btn.closest('li');
 					if (!li) return;
-					var isShared = li.dataset.store === 'shared';
+					var kind = li.dataset.store || 'coll';
 					var id = li.dataset.collId;
 					var act = btn.dataset.act;
 					if (act === 'edit') {
 						// Inline rename: first ✎ starts editing (✎ → ✓), ✓ commits.
 						if (collEditInput && collEditBtn === btn) collEditCommit();
-						else collEditStart(isShared, id, li, btn);
+						else collEditStart(kind, id, li, btn);
 						return;
 					}
 					if (act === 'del') {
 						// Inline delete confirm — same as the tag manager: first × arms
 						// (turns red ✓), second × confirms; auto-disarms after a few sec.
-						if (btn === collDelArmedBtn) { collDelDisarm(); collDelete(isShared, id); }
+						if (btn === collDelArmedBtn) { collDelDisarm(); collDelete(kind, id); }
 						else { collDelDisarm(); collDelArm(btn, li); }
 						return;
 					}
 					collDelDisarm();   // any other control cancels a pending delete
 					collEditCancel();  // …and a pending rename
-					if (act === 'up') collMove(isShared, id, 'up');
-					else if (act === 'down') collMove(isShared, id, 'down');
-					else if (act === 'nest') collIndent(isShared, id);
-					else if (act === 'unnest') collOutdent(isShared, id);
+					if (act === 'up') collMove(kind, id, 'up');
+					else if (act === 'down') collMove(kind, id, 'down');
+					else if (act === 'nest') collIndent(kind, id);
+					else if (act === 'unnest') collOutdent(kind, id);
 					else if (act === 'toggle') {
-						var k = collKey(isShared, id);
+						var k = collKey(kind, id);
 						if (collCollapsed[k]) delete collCollapsed[k]; else collCollapsed[k] = true;
 						renderCollectionsManager();   // manager-local, no persist
 					}
 				});
 			}
 			collectionsDialog.addEventListener('click', function (e) {
-				if (e.target.closest && e.target.closest('.ml-coll-new')) { e.preventDefault(); collNewEmpty(); return; }
+				var mtab = e.target.closest && e.target.closest('.ml-mgr-tab');
+				if (mtab) { e.preventDefault(); mgrShowPane(mtab.dataset.pane); return; }
+				var nu = e.target.closest && e.target.closest('.ml-coll-new');
+				if (nu) { e.preventDefault(); collNewEmpty(nu.dataset.kind === 'bm' ? 'bm' : 'coll'); return; }
 				if (e.target === collectionsDialog) collectionsDialog.close();
 				if (e.target.closest && e.target.closest('.ml-collections-close')) collectionsDialog.close();
 			});
@@ -4679,6 +4767,10 @@
 					else addSelectionToCollection(tCid);
 					return;
 				}
+				// A bookmark FOLDER (data-bookmark-id, empty qs) has no filter — its
+				// only job is to reveal its children on hover, so a click does
+				// nothing (clicking through to qs='' would wrongly reset to "show all").
+				if (tLi && tLi.dataset.bookmarkId && (tab.dataset.qs || '') === '') return;
 				var qs = tab.dataset.qs || '';
 				applyBookmarkToForm(qs);
 				// Bookmark switches the filter set → clear the selection.

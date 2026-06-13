@@ -1634,18 +1634,35 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function renderCollectionsDialog(): string {
 		$san = $this->wire('sanitizer');
-		$title = $san->entities($this->_('Manage collections'));
-		$hint  = $san->entities($this->_('Drag to reorder. Drop a collection onto another to make it a subgroup — or use the arrow / indent buttons.'));
+		$title = $san->entities($this->_('Manage bookmarks & collections'));
 		$close = $san->entities($this->_('Close'));
-		$newLabel = $san->entities($this->_('New collection'));
+		$tabColl = $san->entities($this->_('Collections'));
+		$tabBm   = $san->entities($this->_('Bookmarks'));
+		$collHint = $san->entities($this->_('Drag to reorder. Drop a collection onto another to make it a subgroup — or use the arrow / indent buttons.'));
+		$bmHint   = $san->entities($this->_('Drag to reorder. Drop a bookmark into a folder to group it — only folders can hold others. Create folders with the button below.'));
+		$newColl   = $san->entities($this->_('New collection'));
+		$newFolder = $san->entities($this->_('New folder'));
 		$out  = '<dialog class="ml-collections-dialog">';
 		$out .= '<header>' . $title . '</header>';
-		$out .= '<p class="ml-columns-hint">' . $hint . '</p>';
-		// Create an empty collection (a container you then nest subgroups under,
-		// or fill later). Opens straight into inline rename.
-		$out .= '<button type="button" class="ml-coll-new">'
-			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newLabel . '</button>';
+		// Two tabs: Collections (default) and Bookmarks. Each pane carries its own
+		// hint, "new" button and list; the JS wires reorder/nest/rename/delete
+		// generically over both, picking the store from each row's data-store.
+		$out .= '<div class="ml-mgr-tabs" role="tablist">';
+		$out .= '<button type="button" class="ml-mgr-tab uk-active" data-pane="coll">' . $tabColl . '</button>';
+		$out .= '<button type="button" class="ml-mgr-tab" data-pane="bm">' . $tabBm . '</button>';
+		$out .= '</div>';
+		$out .= '<div class="ml-mgr-pane" data-pane="coll">';
+		$out .= '<p class="ml-columns-hint">' . $collHint . '</p>';
+		$out .= '<button type="button" class="ml-coll-new" data-kind="coll">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newColl . '</button>';
 		$out .= '<ul class="ml-collections-list"></ul>';
+		$out .= '</div>';
+		$out .= '<div class="ml-mgr-pane" data-pane="bm" hidden>';
+		$out .= '<p class="ml-columns-hint">' . $bmHint . '</p>';
+		$out .= '<button type="button" class="ml-coll-new" data-kind="bm">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newFolder . '</button>';
+		$out .= '<ul class="ml-bookmarks-list"></ul>';
+		$out .= '</div>';
 		$out .= '<footer>';
 		$out .= '<button type="button" class="ml-collections-close uk-button uk-button-secondary">' . $close . '</button>';
 		$out .= '</footer>';
@@ -6034,6 +6051,10 @@ class ProcessImageLibrary extends Process {
 				'bookmarkDeleted'  => $this->_('Bookmark deleted'),
 				'bookmarkDelete'   => $this->_('Delete bookmark'),
 				'bookmarkEmpty'    => $this->_('Apply some filters first.'),
+				// Bookmarks-in-manager: folder grouping.
+				'bmNewFolderName'  => $this->_('New folder'),
+				'bmManageEmpty'    => $this->_('No bookmarks yet.'),
+				'bmConfirmDeleteFolder' => $this->_('Click again — this also deletes the bookmarks inside the folder.'),
 				// Collection labels — saving a checkbox selection as a named set.
 				'collectionSave'    => $this->_('Save collection'),
 				'collectionHint'    => $this->_('Saves the %d selected image(s) as a named collection.'),
@@ -6061,7 +6082,7 @@ class ProcessImageLibrary extends Process {
 				'collNewName'       => $this->_('New collection'),
 				'collManageEmpty'   => $this->_('No collections yet.'),
 				'collManageTeam'    => $this->_('Team'),
-				'collectionsManage'      => $this->_('Manage collections'),
+				'collectionsManage'      => $this->_('Manage bookmarks & collections'),
 				'collectionsManageShort' => $this->_('Manage'),
 				// Shared (team-wide) bookmarks + collections — the manager-only
 				// "share with team" toggle in the save dialog + its toasts.
@@ -6266,7 +6287,7 @@ class ProcessImageLibrary extends Process {
 		// drag-and-drop manager. Managers only (they create/curate team
 		// collections); shown even with none so the first one can be created.
 		if ($canManageShared) {
-			$manageTitle = $san->entities($this->_('Manage collections'));
+			$manageTitle = $san->entities($this->_('Manage bookmarks & collections'));
 			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
 				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
 				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
