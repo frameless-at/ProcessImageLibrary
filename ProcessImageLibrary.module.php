@@ -1544,6 +1544,7 @@ class ProcessImageLibrary extends Process {
 			'modified'    => $this->_('Modified'),
 			'variations'  => $this->_('Variations'),
 			'usedIn'      => $this->_('Used in'),
+			'collections' => $this->_('Collections'),
 		];
 		foreach ($customCols as $name) {
 			$cols['custom:' . $name] = $name;
@@ -6639,6 +6640,7 @@ class ProcessImageLibrary extends Process {
 			['modified',    $this->_('Modified'),    'modified'],
 			['variations',  $this->_('Variations'),  'variationsCount'],
 			['usedIn',      $this->_('Used in'),     'usageCount'],
+			['collections', $this->_('Collections'), null],
 		];
 		if (!$showTagsCol) {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
@@ -6676,6 +6678,23 @@ class ProcessImageLibrary extends Process {
 			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters);
 		}
 		$out .= '</tr></thead><tbody>';
+
+		// Collections column: index every team collection's row-keys once, so each
+		// row can list (and link) the collections it belongs to in O(1). Direct
+		// membership only — the leaf collection that actually holds the image, not
+		// its parent containers. Cheap (no per-image queries), so it's not gated.
+		$collByKey = [];
+		foreach ($this->getSharedPrefs()['collections'] as $coll) {
+			$cid = (string) ($coll['id'] ?? '');
+			if ($cid === '') continue;
+			foreach (($coll['keys'] ?? []) as $k) {
+				$collByKey[(string) $k][] = ['id' => $cid, 'name' => (string) ($coll['name'] ?? '')];
+			}
+		}
+		// Field-editor link base for the Field column (resolved field id per name,
+		// cached across rows). $fields->get() is itself cached, but skip the repeat.
+		$fieldEditBase = $this->wire('config')->urls->admin . 'setup/field/edit?id=';
+		$fieldIdCache  = [];
 
 		// The slice arrives collapsed into per-image units (buildDisplayUnits):
 		// a duplicated image's copies sit consecutively, head first. Only the
@@ -6859,7 +6878,22 @@ class ProcessImageLibrary extends Process {
 			$fieldLabel = !empty($row['repeaterField'])
 				? $san->entities((string) $row['repeaterField']) . '.' . $san->entities((string) $row['fieldName'])
 				: $san->entities((string) $row['fieldName']);
-			$out .= '<td data-col="field"><code>' . $fieldLabel . '</code></td>';
+			// Link the field name to PW's field editor (resolve + cache the id).
+			$fname = (string) $row['fieldName'];
+			if (!array_key_exists($fname, $fieldIdCache)) {
+				$f = $this->wire('fields')->get($fname);
+				$fieldIdCache[$fname] = ($f && $f->id) ? (int) $f->id : 0;
+			}
+			$fid = $fieldIdCache[$fname];
+			$out .= '<td data-col="field"><code>';
+			if ($fid) {
+				$out .= '<a href="' . $san->entities($fieldEditBase . $fid) . '" title="'
+					. $san->entities(sprintf($this->_('Edit the “%s” field'), $fname)) . '">'
+					. $fieldLabel . '</a>';
+			} else {
+				$out .= $fieldLabel;
+			}
+			$out .= '</code></td>';
 			// Filename cell — inline-editable, but only the stem; the
 			// extension stays locked and rides along with the rename
 			// on the server. Stem + ext are split server-side so the JS
@@ -6940,6 +6974,22 @@ class ProcessImageLibrary extends Process {
 					. ' title="' . $san->entities(sprintf(
 						$this->_('Embedded on %d page(s) — click to list'), $usageCount
 					)) . '">' . $usageCount . '</a>';
+			} else {
+				$out .= '<span class="ml-usage-none" aria-hidden="true">–</span>';
+			}
+			$out .= '</td>';
+
+			// Collections this image directly belongs to — each links to its
+			// ?coll= recall view. A dash means it's in no collection.
+			$out .= '<td class="ml-cell-collections" data-col="collections">';
+			$memberOf = $collByKey[$selKey] ?? [];
+			if ($memberOf) {
+				$links = [];
+				foreach ($memberOf as $m) {
+					$links[] = '<a href="?coll=' . rawurlencode($m['id']) . '">'
+						. $san->entities($m['name']) . '</a>';
+				}
+				$out .= implode(', ', $links);
 			} else {
 				$out .= '<span class="ml-usage-none" aria-hidden="true">–</span>';
 			}
