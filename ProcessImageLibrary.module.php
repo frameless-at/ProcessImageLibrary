@@ -6208,7 +6208,9 @@ class ProcessImageLibrary extends Process {
 			return '<li' . ($cat === $initCat ? ' class="uk-active"' : '') . ' data-cat="' . $cat . '">'
 				. '<a href="#">' . $san->entities($label) . '</a></li>';
 		};
-		$out  = '<ul class="uk-tab ml-bar-cats" role="tablist">';
+		// Wrapper positions the mobile items dropdown under the category tabs.
+		$out  = '<div class="ml-bookmarks-bar">';
+		$out .= '<ul class="uk-tab ml-bar-cats" role="tablist">';
 		$out .= $catTab('all', $this->_('Show all'));
 		$out .= $catTab('bm', $this->_('Bookmarks'));
 		$out .= $catTab('coll', $this->_('Collections'));
@@ -6309,6 +6311,7 @@ class ProcessImageLibrary extends Process {
 			. '</a></li>';
 
 		$out .= '</ul>';
+		$out .= '</div>';
 		return $out;
 	}
 

@@ -1790,10 +1790,14 @@ textarea.ml-langtabs-pane {
 	margin-top: 0.35rem;
 	margin-bottom: 0;
 }
-/* Mobile category switcher (Show all / Bookmarks / Collections) — desktop shows
-   the full strip, so it's hidden there. Reuses the admin uk-tab styling. */
+/* Mobile category switcher (Show all / Bookmarks / Collections). Desktop shows
+   the full strip, so the switcher is hidden there. Reuses the admin uk-tab
+   styling. */
 .ml-bar-cats {
 	display: none;
+}
+.ml-bookmarks-bar {
+	position: relative;   /* anchors the mobile items dropdown */
 }
 @media (max-width: 640px) {
 	.ml-bar-cats {
@@ -1804,13 +1808,73 @@ textarea.ml-langtabs-pane {
 	.ml-bm-showall {
 		display: none;
 	}
-	/* Show only the active category's items. Manage (.ml-collections-manage) and
-	   New (.ml-bookmarks-add) carry no data-* marker, so they always stay. */
-	.ml-bookmarks-tabs.ml-bar-cat-all li[data-bookmark-id],
-	.ml-bookmarks-tabs.ml-bar-cat-all li[data-coll-id],
+	/* The item strip becomes a DROPDOWN panel under the category tabs — shown
+	   only while open (a Bookmarks/Collections tab was tapped). So the bar itself
+	   stays just the three tabs; no second tab row. */
+	.ml-bookmarks-tabs {
+		position: absolute;
+		top: 100%;
+		left: 0;
+		right: 0;
+		z-index: 70;
+		display: none;
+		flex-direction: column;
+		align-items: stretch;
+		margin: 0.2rem 0 0;
+		padding: 0.25rem 0;
+		background: var(--pw-inputs-background, #fff);
+		border: 1px solid var(--pw-border-color, #ddd);
+		border-radius: 4px;
+		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+		max-height: 60vh;
+		overflow-y: auto;
+	}
+	.ml-bookmarks-bar.ml-bar-open .ml-bookmarks-tabs {
+		display: flex;
+	}
+	/* Only the active category's items appear in the dropdown. Manage + New carry
+	   no data-* marker, so they always stay (as the last rows). */
 	.ml-bookmarks-tabs.ml-bar-cat-bm li[data-coll-id],
 	.ml-bookmarks-tabs.ml-bar-cat-coll li[data-bookmark-id] {
 		display: none;
+	}
+	/* Full-width rows; drop the desktop 30px trailing gutter + the caret (the
+	   sub-items are expanded inline below instead of in a hover flyout). */
+	.ml-bookmarks-tabs > li {
+		width: 100%;
+	}
+	.ml-bookmarks-tabs > li > a {
+		display: block;
+		margin-right: 0;
+		padding: 0.5rem 0.85rem;
+	}
+	.ml-bookmarks-tabs .ml-coll-tab-caret {
+		display: none;
+	}
+	/* Nested flyouts: no hover on touch, so render them inline + indented. */
+	.ml-coll-flyout {
+		position: static;
+		display: block;
+		width: auto;
+		margin: 0;
+		padding: 0;
+		border: 0;
+		box-shadow: none;
+		background: none;
+	}
+	.ml-coll-flyout .ml-bookmark {
+		padding-left: 1.7rem;
+	}
+	.ml-coll-flyout .ml-coll-flyout .ml-bookmark {
+		padding-left: 2.8rem;
+	}
+	.ml-collections-manage,
+	.ml-bookmarks-add {
+		width: 100%;
+	}
+	.ml-collections-manage > a {
+		top: 0;
+		padding: 0.5rem 0.85rem;
 	}
 }
 /* Uniform 30 px gap between every tab so the bookmark trash button
