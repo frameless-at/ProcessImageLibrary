@@ -1846,7 +1846,7 @@ textarea.ml-langtabs-pane {
 	.ml-bookmarks-tabs > li > a {
 		display: block;
 		margin-right: 0;
-		padding: 0.5rem 0.85rem;
+		padding: 0.5rem 1rem 0.5rem 1.1rem;
 	}
 	.ml-bookmarks-tabs .ml-coll-tab-caret {
 		display: none;
@@ -1863,18 +1863,30 @@ textarea.ml-langtabs-pane {
 		background: none;
 	}
 	.ml-coll-flyout .ml-bookmark {
-		padding-left: 1.7rem;
+		padding-left: 2.2rem;
 	}
 	.ml-coll-flyout .ml-coll-flyout .ml-bookmark {
-		padding-left: 2.8rem;
+		padding-left: 3.3rem;
 	}
-	.ml-collections-manage,
+	/* "New" stays in the dropdown as a full-width row. */
 	.ml-bookmarks-add {
 		width: 100%;
 	}
-	.ml-collections-manage > a {
-		top: 0;
-		padding: 0.5rem 0.85rem;
+	.ml-bookmarks-add > a {
+		padding: 0.5rem 1.1rem;
+	}
+	/* Strip Manage gear is NOT in the dropdown; the tab-row gear handles it. */
+	.ml-collections-manage {
+		display: none;
+	}
+	.ml-bar-manage {
+		margin-left: auto;
+	}
+	.ml-bar-manage > a {
+		display: inline-flex;
+		align-items: center;
+		padding: 0.4rem 0.6rem;
+		color: var(--pw-muted-color, #888);
 	}
 }
 /* Uniform 30 px gap between every tab so the bookmark trash button

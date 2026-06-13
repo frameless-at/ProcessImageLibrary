@@ -6214,6 +6214,13 @@ class ProcessImageLibrary extends Process {
 		$out .= $catTab('all', $this->_('Show all'));
 		$out .= $catTab('bm', $this->_('Bookmarks'));
 		$out .= $catTab('coll', $this->_('Collections'));
+		// Manage gear lives on the tab row here (mobile), not inside the items
+		// dropdown. Desktop hides this whole row and uses the strip's own gear.
+		if ($canManageShared) {
+			$mTitle = $this->_('Manage bookmarks & collections');
+			$out .= '<li class="ml-bar-manage"><a href="#" role="button" title="' . $mTitle . '" aria-label="' . $mTitle . '">'
+				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
+		}
 		$out .= '</ul>';
 
 		$out .= '<ul class="WireTabs uk-tab ml-bookmarks-tabs ml-bar-cat-' . $initCat . '">';
