@@ -1641,27 +1641,25 @@ class ProcessImageLibrary extends Process {
 		$close = $san->entities($this->_('Close'));
 		$tabColl = $san->entities($this->_('Collections'));
 		$tabBm   = $san->entities($this->_('Bookmarks'));
-		$newColl   = $san->entities($this->_('New collection'));
-		$newFolder = $san->entities($this->_('New folder'));
+		$newLabel = $san->entities($this->_('New'));
 		$out  = '<dialog class="ml-collections-dialog">';
 		$out .= '<header>' . $title . '</header>';
-		// Two tabs: Collections (default) and Bookmarks — reusing the admin's own
-		// uk-tab markup (same as the bookmarks bar) so they pick up the theme's
-		// tab styling instead of a bespoke look. Each pane carries its own "new"
-		// link and list; the JS wires reorder/nest/rename/delete generically over
-		// both, picking the store from each row's data-store.
+		// Tab bar: the two tabs (reusing the admin's own uk-tab markup, same as the
+		// bookmarks bar) plus a single right-aligned "+ New" link. New creates a
+		// collection or a folder depending on which tab is active (the JS reads the
+		// active tab); the panes below just hold the lists.
+		$out .= '<div class="ml-mgr-tabbar">';
 		$out .= '<ul class="uk-tab ml-mgr-tabs">';
 		$out .= '<li class="uk-active" data-pane="coll"><a href="#">' . $tabColl . '</a></li>';
 		$out .= '<li data-pane="bm"><a href="#">' . $tabBm . '</a></li>';
 		$out .= '</ul>';
+		$out .= '<a href="#" role="button" class="ml-coll-new">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newLabel . '</a>';
+		$out .= '</div>';
 		$out .= '<div class="ml-mgr-pane" data-pane="coll">';
-		$out .= '<a href="#" role="button" class="ml-coll-new" data-kind="coll">'
-			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newColl . '</a>';
 		$out .= '<ul class="ml-collections-list"></ul>';
 		$out .= '</div>';
 		$out .= '<div class="ml-mgr-pane" data-pane="bm" hidden>';
-		$out .= '<a href="#" role="button" class="ml-coll-new" data-kind="bm">'
-			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newFolder . '</a>';
 		$out .= '<ul class="ml-bookmarks-list"></ul>';
 		$out .= '</div>';
 		$out .= '<footer>';

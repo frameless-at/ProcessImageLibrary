@@ -4518,7 +4518,14 @@
 				var mtab = e.target.closest && e.target.closest('.ml-mgr-tabs > li');
 				if (mtab) { e.preventDefault(); mgrShowPane(mtab.dataset.pane); return; }
 				var nu = e.target.closest && e.target.closest('.ml-coll-new');
-				if (nu) { e.preventDefault(); collNewEmpty(nu.dataset.kind === 'bm' ? 'bm' : 'coll'); return; }
+				if (nu) {
+					e.preventDefault();
+					// "+ New" lives on the tab bar now → create in whichever store the
+					// active tab shows.
+					var activeTab = collectionsDialog.querySelector('.ml-mgr-tabs > li.uk-active');
+					collNewEmpty(activeTab && activeTab.dataset.pane === 'bm' ? 'bm' : 'coll');
+					return;
+				}
 				if (e.target === collectionsDialog) collectionsDialog.close();
 				if (e.target.closest && e.target.closest('.ml-collections-close')) collectionsDialog.close();
 			});
