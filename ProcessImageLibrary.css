@@ -1376,6 +1376,17 @@ textarea.ml-langtabs-pane {
 .ml-columns-list .ml-col-move:focus-visible {
 	opacity: 1;
 }
+/* Touch devices have no hover to reveal these row controls (collections /
+   bookmarks reorder + delete, and the column picker's reorder arrows), so show
+   them ALWAYS on touch. Otherwise the reveal relies on focus, and after a
+   reorder re-renders the list the focus — and thus the visible icon — lands on
+   whatever element slid into the moved row's old slot, not the moved one. */
+@media (hover: none) {
+	.ml-coll-move,
+	.ml-columns-list .ml-col-move {
+		opacity: 1;
+	}
+}
 
 /* Collections manager — drag-and-drop tree of collections (one level deep).
    Mirrors the column-picker list; rows are draggable, children are indented,
