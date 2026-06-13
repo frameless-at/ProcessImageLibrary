@@ -3795,7 +3795,11 @@
 					// "Show all" (no data-bookmark-id) matches the empty filter.
 					var qs = a.dataset.qs || '';
 					if (qs === '') {
-						if (!li.dataset.bookmarkId && current === '' && coll === '') li.classList.add('uk-active');
+						// Only the REAL "Show all" activates on the empty filter — not a
+						// folder bookmark (data-bookmark-id) and not the mobile category
+						// parent tabs (ml-bar-category), which also have an empty qs.
+						if (!li.dataset.bookmarkId && !li.classList.contains('ml-bar-category')
+							&& current === '' && coll === '') li.classList.add('uk-active');
 					} else if (qs === current && coll === '') {
 						li.classList.add('uk-active');
 						bookmarkMatched = true;        // current URL IS a saved filter

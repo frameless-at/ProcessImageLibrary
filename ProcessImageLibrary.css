@@ -1593,9 +1593,14 @@ textarea.ml-langtabs-pane {
 /* A flyout item that has a submenu pushes its caret to the right edge. */
 .ml-coll-flyout-parent > a.ml-bookmark { justify-content: space-between; }
 .ml-coll-flyout-parent > a .ml-coll-tab-caret { margin-left: 0.75rem; }
-.ml-coll-flyout-item > a:hover,
 .ml-coll-flyout-item.uk-active > a {
 	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+}
+/* Hover tint desktop-only — on touch :hover sticks to the last-tapped item. */
+@media (hover: hover) {
+	.ml-coll-flyout-item > a:hover {
+		background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+	}
 }
 
 /* Visually-hidden live region — kept in the DOM and announced by
@@ -1845,6 +1850,11 @@ textarea.ml-langtabs-pane {
 		padding-left: 0.9rem;
 		min-width: 0;
 		max-width: none;
+	}
+	/* A nested item's side-pointing caret turns down when expanded inline. (The
+	   top-level category carets already point down, so they're left alone.) */
+	.ml-coll-flyout-item.ml-flyout-open > a > .ml-coll-tab-caret {
+		transform: rotate(90deg);
 	}
 }
 /* Uniform 30 px gap between every tab so the bookmark trash button
