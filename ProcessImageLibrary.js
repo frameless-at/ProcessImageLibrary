@@ -4034,6 +4034,20 @@
 		var collDelTimer = null;
 		var collEditInput = null;      // inline-rename input while editing, else null
 		var collEditId = null, collEditKind = 'coll', collEditBtn = null, collEditNameSpan = null;
+		// The ACTIVE manager row (last acted on / just reordered). Drives the row
+		// highlight + control reveal deterministically — exactly one row, no
+		// reliance on hover (sticks on touch) or focus (jumps to the old slot
+		// after a reorder rebuild). Stored so it survives the list re-render.
+		var collActiveKind = null, collActiveId = null;
+		function setMgrActive(kind, id) {
+			collActiveKind = kind; collActiveId = id;
+			if (!collectionsDialog) return;
+			Array.prototype.forEach.call(collectionsDialog.querySelectorAll('.ml-coll-row--active'),
+				function (r) { r.classList.remove('ml-coll-row--active'); });
+			var list = collectionsDialog.querySelector(kind === 'bm' ? '.ml-bookmarks-list' : '.ml-collections-list');
+			var row = list && list.querySelector('.ml-coll-row[data-coll-id="' + id + '"]');
+			if (row) row.classList.add('ml-coll-row--active');
+		}
 
 		// The manager is generic over a "kind": 'coll' (team collections) and 'bm'
 		// (team bookmarks) are both single team stores with the SAME tree machinery
@@ -4310,7 +4324,8 @@
 			var depth = collDepth(arr, c.id);
 			var hasKids = collIsParent(arr, c.id);
 			var li = document.createElement('li');
-			li.className = 'ml-coll-row' + (isFolder ? ' ml-coll-row--folder' : '');
+			li.className = 'ml-coll-row' + (isFolder ? ' ml-coll-row--folder' : '')
+				+ ((kind === collActiveKind && c.id === collActiveId) ? ' ml-coll-row--active' : '');
 			li.draggable = true;
 			li.dataset.collId = c.id;
 			li.dataset.store = kind;
@@ -4468,6 +4483,7 @@
 			if (editBtn) collEditStart(kind, c.id, row, editBtn);
 		}
 		function openCollectionsManager() {
+			collActiveKind = null; collActiveId = null;   // fresh open → no active row
 			renderCollectionsManager();
 			if (!collectionsDialog) return;
 			if (typeof collectionsDialog.showModal === 'function') collectionsDialog.showModal();
@@ -4496,13 +4512,25 @@
 			if (collList) {
 				collectionsDialog.addEventListener('click', function (e) {
 					var btn = e.target.closest && e.target.closest('.ml-coll-move, .ml-coll-caret');
-					if (!btn) return;
+					if (!btn) {
+						// Tapping a row body (not a control, not the rename input) makes it
+						// the active row, so its controls reveal — touch has no hover to do
+						// that, and the controls only show for the active row there.
+						if (e.target.closest && e.target.closest('.ml-coll-edit-input')) return;
+						var rowEl = e.target.closest && e.target.closest('.ml-coll-row');
+						if (rowEl && rowEl.dataset.collId) setMgrActive(rowEl.dataset.store || 'coll', rowEl.dataset.collId);
+						return;
+					}
 					e.preventDefault();
 					var li = btn.closest('li');
 					if (!li) return;
 					var kind = li.dataset.store || 'coll';
 					var id = li.dataset.collId;
 					var act = btn.dataset.act;
+					// This row becomes the active one (highlight + controls). For
+					// reorders the list re-renders right after; buildCollRow re-applies
+					// the class from collActiveId, so the highlight follows the moved row.
+					setMgrActive(kind, id);
 					if (act === 'edit') {
 						// Inline rename: first ✎ starts editing (✎ → ✓), ✓ commits.
 						if (collEditInput && collEditBtn === btn) collEditCommit();
