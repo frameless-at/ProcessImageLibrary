@@ -4527,6 +4527,17 @@
 						if (collCollapsed[k]) delete collCollapsed[k]; else collCollapsed[k] = true;
 						renderCollectionsManager();   // manager-local, no persist
 					}
+					// After a reorder the list is rebuilt; keep focus on the MOVED row at
+					// its new position so its highlight + controls follow it (otherwise the
+					// browser re-focuses by pointer position -> the row now in the old slot).
+					if (act === 'up' || act === 'down' || act === 'nest' || act === 'unnest') {
+						requestAnimationFrame(function () {
+							var mlist = collectionsDialog.querySelector(kind === 'bm' ? '.ml-bookmarks-list' : '.ml-collections-list');
+							var mrow = mlist && mlist.querySelector('.ml-coll-row[data-coll-id="' + id + '"]');
+							var mbtn = mrow && (mrow.querySelector('.ml-coll-move[data-act="' + act + '"]') || mrow.querySelector('.ml-coll-move'));
+							if (mbtn) mbtn.focus();
+						});
+					}
 				});
 			}
 			collectionsDialog.addEventListener('click', function (e) {

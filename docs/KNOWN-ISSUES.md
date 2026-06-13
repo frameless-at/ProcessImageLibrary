@@ -1,8 +1,16 @@
 # Known issues
 
-## Safari: reorder arrows stick visible after a mouse click (columns & collections managers)
+## Safari: reorder arrows stick visible after a mouse click (columns picker)
 
-**Status:** open · **Browsers:** Safari only (Chrome/Firefox OK)
+**Status:** open for the COLUMNS picker · resolved for the collections /
+bookmarks manager · **Browsers:** Safari only (Chrome/Firefox OK)
+
+> Update: the collections / bookmarks **manager** now drives its row reveal from
+> `.ml-coll-row:focus-within` and, after an up/down/nest/unnest reorder,
+> deferred-focuses the MOVED row's button (rAF) so the highlight + controls
+> follow the moved element to its new position instead of the row that slid into
+> its old slot. The "sticky" focus is now the intended behaviour there. The
+> Columns picker still uses the old `:focus-visible` pattern below.
 
 The hover-revealed reorder arrows in the Columns picker (`.ml-col-move`) and
 the Collections manager (`.ml-coll-move`) are shown via the same pattern as the
