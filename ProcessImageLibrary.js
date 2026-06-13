@@ -3845,6 +3845,36 @@
 			return document.querySelector('.ml-bookmarks-tabs');
 		}
 
+		// Mobile category switcher (Show all / Bookmarks / Collections): the class
+		// on the strip (ml-bar-cat-*) drives which items CSS shows; this also marks
+		// the active category tab. Desktop hides the switcher, so it's a no-op there.
+		function setBarCat(cat) {
+			var ul = bookmarksContainer();
+			if (ul) {
+				ul.classList.remove('ml-bar-cat-all', 'ml-bar-cat-bm', 'ml-bar-cat-coll');
+				ul.classList.add('ml-bar-cat-' + cat);
+			}
+			var cats = document.querySelector('.ml-bar-cats');
+			if (cats) {
+				Array.prototype.forEach.call(cats.querySelectorAll('li'), function (li) {
+					li.classList.toggle('uk-active', li.dataset.cat === cat);
+				});
+			}
+		}
+		document.addEventListener('click', function (e) {
+			var catLi = e.target.closest && e.target.closest('.ml-bar-cats li');
+			if (!catLi || !catLi.dataset.cat) return;
+			e.preventDefault();
+			var cat = catLi.dataset.cat;
+			setBarCat(cat);
+			// "Show all" doubles as the reset action; the other two only switch view.
+			if (cat === 'all') {
+				applyBookmarkToForm('');
+				replaceFromQs('', true, true);
+				syncBookmarkActive();
+			}
+		});
+
 		function rerenderBookmarksList() {
 			var ul = bookmarksContainer();
 			if (!ul) return;

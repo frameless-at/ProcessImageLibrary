@@ -1790,6 +1790,29 @@ textarea.ml-langtabs-pane {
 	margin-top: 0.35rem;
 	margin-bottom: 0;
 }
+/* Mobile category switcher (Show all / Bookmarks / Collections) — desktop shows
+   the full strip, so it's hidden there. Reuses the admin uk-tab styling. */
+.ml-bar-cats {
+	display: none;
+}
+@media (max-width: 640px) {
+	.ml-bar-cats {
+		display: flex;
+		margin: 0.35rem 0 0;
+	}
+	/* The desktop "Show all" chip is replaced by its category tab. */
+	.ml-bm-showall {
+		display: none;
+	}
+	/* Show only the active category's items. Manage (.ml-collections-manage) and
+	   New (.ml-bookmarks-add) carry no data-* marker, so they always stay. */
+	.ml-bookmarks-tabs.ml-bar-cat-all li[data-bookmark-id],
+	.ml-bookmarks-tabs.ml-bar-cat-all li[data-coll-id],
+	.ml-bookmarks-tabs.ml-bar-cat-bm li[data-coll-id],
+	.ml-bookmarks-tabs.ml-bar-cat-coll li[data-bookmark-id] {
+		display: none;
+	}
+}
 /* Uniform 30 px gap between every tab so the bookmark trash button
    has room to sit in the gap rather than overlapping a neighbour. */
 .ml-bookmarks-tabs > li > a {
