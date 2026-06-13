@@ -1535,14 +1535,16 @@ textarea.ml-langtabs-pane {
 	display: inline-block;
 	text-decoration: none;
 }
-/* Bar + flyout links are tabs / menu items — never underlined, including the
-   sticky :hover a touch tap leaves behind (which underlined the text next to
-   the caret). */
-.ml-bookmarks-tabs a.ml-bookmark,
-.ml-bookmarks-tabs a.ml-bookmark:hover,
-.ml-coll-flyout a.ml-bookmark,
-.ml-coll-flyout a.ml-bookmark:hover {
-	text-decoration: none;
+/* On TOUCH only: kill the sticky :hover underline a tap leaves on bar/flyout
+   links (the text next to the caret). Desktop keeps its real :hover / :active
+   feedback - this is gated to (hover: none) so it never touches mouse devices. */
+@media (hover: none) {
+	.ml-bookmarks-tabs a.ml-bookmark,
+	.ml-bookmarks-tabs a.ml-bookmark:hover,
+	.ml-coll-flyout a.ml-bookmark,
+	.ml-coll-flyout a.ml-bookmark:hover {
+		text-decoration: none;
+	}
 }
 .ml-coll-flyout {
 	position: absolute;
