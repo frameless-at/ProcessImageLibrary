@@ -280,15 +280,10 @@ class ProcessImageLibrary extends Process {
 					$pageSize = $ps;
 				}
 			}
-			if (isset($raw['bookmarks']) && is_array($raw['bookmarks'])) {
-				foreach ($raw['bookmarks'] as $b) {
-					if (!is_array($b)) continue;
-					$name = (string) ($b['name'] ?? '');
-					$qs   = (string) ($b['qs']   ?? '');
-					if ($name === '') continue;
-					$bookmarks[] = ['name' => $name, 'qs' => $qs];
-				}
-			}
+			// Bookmarks are TEAM-wide now too (one store, getSharedPrefs), just
+			// like collections — there's no personal-vs-shared split any more, so
+			// we don't read personal bookmarks here. Any legacy personal ones are
+			// folded into the team store once by migrateLegacyBookmarks().
 			// Collections are TEAM-wide now (one store, getSharedPrefs); there is
 			// no personal collections store any more, so we don't read them here.
 			// Any legacy personal collections in $user->meta are simply ignored.
@@ -328,7 +323,7 @@ class ProcessImageLibrary extends Process {
 	 * the per-user prefs for bookmarks/collections, but visible to every
 	 * user with library access and editable only by canManageShared().
 	 *
-	 * @return array{bookmarks:array<int,array{name:string,qs:string}>,collections:array<int,array{id:string,name:string,keys:array<int,string>}>}
+	 * @return array{bookmarks:array<int,array{id:string,name:string,qs:string,parent:string}>,collections:array<int,array{id:string,name:string,keys:array<int,string>}>}
 	 */
 	protected function getSharedPrefs(): array {
 		$cfg = $this->wire('modules')->getConfig($this);
@@ -337,11 +332,8 @@ class ProcessImageLibrary extends Process {
 		if (is_array($cfg)) {
 			if (isset($cfg['sharedBookmarks']) && is_array($cfg['sharedBookmarks'])) {
 				foreach ($cfg['sharedBookmarks'] as $b) {
-					if (!is_array($b)) continue;
-					$name = (string) ($b['name'] ?? '');
-					$qs   = (string) ($b['qs']   ?? '');
-					if ($name === '') continue;
-					$bookmarks[] = ['name' => $name, 'qs' => $qs];
+					$clean = $this->sanitizeBookmark($b);
+					if ($clean !== null) $bookmarks[] = $clean;
 				}
 			}
 			if (isset($cfg['sharedCollections']) && is_array($cfg['sharedCollections'])) {
@@ -352,6 +344,52 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 		return ['bookmarks' => $bookmarks, 'collections' => $collections];
+	}
+
+	/**
+	 * One-time fold of a user's legacy PERSONAL bookmarks into the team-wide
+	 * shared store (bookmarks lost their personal/shared split). Runs on render,
+	 * guarded by a per-user meta flag so it happens exactly once. De-duped by
+	 * name+canonical-qs against what's already shared; each migrated bookmark
+	 * gets a fresh id + empty parent. Afterwards the user's personal bookmarks
+	 * are cleared so they don't linger or re-migrate.
+	 */
+	protected function migrateLegacyBookmarks(): void {
+		$user = $this->wire('user');
+		if ($user->meta('imageLibraryBmMigrated')) return;
+
+		$raw = $user->meta('imageLibraryPrefs');
+		if (!is_array($raw)) $raw = $user->meta('mediaLibraryPrefs');
+		$personal = (is_array($raw) && isset($raw['bookmarks']) && is_array($raw['bookmarks']))
+			? $raw['bookmarks'] : [];
+		if (!$personal) { $user->meta('imageLibraryBmMigrated', 1); return; }
+
+		$cfg = $this->wire('modules')->getConfig($this);
+		if (!is_array($cfg)) $cfg = [];
+		$shared = (isset($cfg['sharedBookmarks']) && is_array($cfg['sharedBookmarks']))
+			? $cfg['sharedBookmarks'] : [];
+
+		$seen = [];
+		foreach ($shared as $b) {
+			if (!is_array($b)) continue;
+			$seen[((string) ($b['name'] ?? '')) . '|' . $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''))] = true;
+		}
+		$added = false;
+		foreach ($personal as $b) {
+			$clean = $this->sanitizeBookmark($b);
+			if ($clean === null) continue;
+			$k = $clean['name'] . '|' . $clean['qs'];
+			if (isset($seen[$k])) continue;
+			$seen[$k] = true;
+			$shared[] = $clean;
+			$added = true;
+		}
+		if ($added) {
+			$cfg['sharedBookmarks'] = $shared;
+			$this->wire('modules')->saveConfig($this, $cfg);
+		}
+		if (is_array($raw)) { $raw['bookmarks'] = []; $user->meta('imageLibraryPrefs', $raw); }
+		$user->meta('imageLibraryBmMigrated', 1);
 	}
 
 	/** The whitelist of persisted result-layout modes (table vs masonry).
@@ -1451,6 +1489,7 @@ class ProcessImageLibrary extends Process {
 		$this->wire('modules')->get('JqueryUI');
 		// Bookmarks stay in the picker too — saved filter sets are the fastest
 		// way into a large library when you're hunting for one image to insert.
+		$this->migrateLegacyBookmarks();   // one-time fold of personal bookmarks → team store
 		$prefs = $this->getUserPrefs();
 		$shared = $this->getSharedPrefs();
 		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks'], $prefs['collections'], $shared['bookmarks'], $shared['collections']);
@@ -4056,22 +4095,9 @@ class ProcessImageLibrary extends Process {
 				$clean['pageSize'] = $ps;
 			}
 		}
-		if (isset($data['bookmarks']) && is_array($data['bookmarks'])) {
-			foreach ($data['bookmarks'] as $b) {
-				if (!is_array($b)) continue;
-				$name = $sanitizer->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
-				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
-				if ($name === '') continue;
-				$clean['bookmarks'][] = ['name' => $name, 'qs' => $qs];
-			}
-		}
-		if (isset($data['collections']) && is_array($data['collections'])) {
-			foreach ($data['collections'] as $c) {
-				$col = $this->sanitizeCollection($c);
-				if ($col !== null) $clean['collections'][] = $col;
-				if (count($clean['collections']) >= self::COLLECTION_MAX) break;
-			}
-		}
+		// Bookmarks + collections are TEAM-wide now (executeSharedPrefs); the
+		// per-user prefs blob no longer stores them, so we deliberately ignore
+		// any bookmarks/collections in this payload and keep them empty.
 		if (isset($data['thumbScale'])) {
 			$ts = (float) $data['thumbScale'];
 			if ($ts >= self::THUMB_SCALE_MIN && $ts <= self::THUMB_SCALE_MAX) {
@@ -4121,11 +4147,8 @@ class ProcessImageLibrary extends Process {
 		$collections = [];
 		if (isset($data['bookmarks']) && is_array($data['bookmarks'])) {
 			foreach ($data['bookmarks'] as $b) {
-				if (!is_array($b)) continue;
-				$name = $sanitizer->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
-				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
-				if ($name === '') continue;
-				$bookmarks[] = ['name' => $name, 'qs' => $qs];
+				$clean = $this->sanitizeBookmark($b);
+				if ($clean !== null) $bookmarks[] = $clean;
 				if (count($bookmarks) >= self::COLLECTION_MAX) break;
 			}
 		}
@@ -4839,6 +4862,39 @@ class ProcessImageLibrary extends Process {
 	 * @param mixed $c
 	 * @return array{id:string,name:string,keys:array<int,string>}|null
 	 */
+	/** A fresh alphanumeric id for a bookmark / folder (stable handle for
+	 *  nesting). Hex from uniqid(), dot stripped, capped — same charset the
+	 *  client's id generator emits. */
+	protected function newBookmarkId(): string {
+		return substr(str_replace('.', '', uniqid('', true)), 0, 12);
+	}
+
+	/**
+	 * Validate one raw bookmark into a clean record, or null if unusable.
+	 * A bookmark is now {id, name, qs, parent}: a FILTER bookmark carries a
+	 * canonical qs (a saved filter, always a leaf), while a FOLDER is an empty
+	 * container (qs === '') that only groups children — and is the only thing
+	 * allowed to be a parent. id is generated when missing so legacy records
+	 * (which had none) get a stable handle. Single team store, like collections.
+	 *
+	 * @param mixed $b
+	 * @return array{id:string,name:string,qs:string,parent:string}|null
+	 */
+	protected function sanitizeBookmark($b): ?array {
+		if (!is_array($b)) return null;
+		$name = $this->wire('sanitizer')->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
+		if ($name === '') return null;
+		$id = preg_replace('/[^a-z0-9]/i', '', (string) ($b['id'] ?? '')) ?? '';
+		if ($id === '') $id = $this->newBookmarkId();
+		$qs = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
+		// Parent folder id for nesting; a bookmark can never be its own parent.
+		// Structural validity (parent is a folder, depth cap) is enforced by the
+		// manager UI; array order is the display order.
+		$parent = preg_replace('/[^a-z0-9]/i', '', (string) ($b['parent'] ?? '')) ?? '';
+		if ($parent === $id) $parent = '';
+		return ['id' => $id, 'name' => $name, 'qs' => $qs, 'parent' => $parent];
+	}
+
 	protected function sanitizeCollection($c): ?array {
 		if (!is_array($c)) return null;
 		$id   = preg_replace('/[^a-z0-9]/i', '', (string) ($c['id'] ?? '')) ?? '';
@@ -6104,10 +6160,10 @@ class ProcessImageLibrary extends Process {
 	 * JS so the tab navigates via the existing AJAX filter swap
 	 * pipeline (replaceFromQs).
 	 *
-	 * @param array<int,array{name:string,qs:string}> $bookmarks
-	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $collections
-	 * @param array<int,array{name:string,qs:string}> $sharedBookmarks
-	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $sharedCollections
+	 * @param array<int,array{name:string,qs:string}> $bookmarks  legacy personal (migrated/empty)
+	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $collections  legacy personal (empty)
+	 * @param array<int,array{id:string,name:string,qs:string,parent:string}> $sharedBookmarks  THE team bookmark store
+	 * @param array<int,array{id:string,name:string,keys:array<int,string>,parent:string}> $sharedCollections  THE team collection store
 	 */
 	protected function renderBookmarksBar(array $filters, array $bookmarks, array $collections = [], array $sharedBookmarks = [], array $sharedCollections = []): string {
 		$san  = $this->wire('sanitizer');
@@ -6138,19 +6194,28 @@ class ProcessImageLibrary extends Process {
 		// renders for users who may manage the team store.
 		$bookmarkMatched = false;
 
-		$renderBookmark = function (array $b, int $idx, bool $shared) use ($san, $page, $currentCanon, $currentColl, $delTitle, $canManageShared, &$bookmarkMatched): string {
-			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
-			$href  = $page->url . $canon;
-			$isActive = ($canon !== '' && $canon === $currentCanon && $currentColl === '');
+		// Bookmarks are team-wide now (no personal/shared split, no italic). A
+		// FILTER bookmark carries a qs and applies it on click; a FOLDER (empty
+		// qs) only groups children — its nested children live in a hover flyout
+		// the JS builds (rerenderBookmarksList on init), so here we render
+		// top-level entries only. The × (delete) shows for managers only.
+		$renderBookmark = function (array $b) use ($san, $page, $currentCanon, $currentColl, $delTitle, $canManageShared, &$bookmarkMatched): string {
+			$bid = (string) ($b['id'] ?? '');
+			if ($bid === '') return '';
+			if (((string) ($b['parent'] ?? '')) !== '') return '';   // top-level only
+			$canon = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
+			$isFolder = ($canon === '');
+			$href  = $isFolder ? '#' : ($page->url . $canon);
+			$isActive = (!$isFolder && $canon === $currentCanon && $currentColl === '');
 			if ($isActive) $bookmarkMatched = true;
-			$cls = 'ml-bookmark' . ($shared ? ' ml-bookmark--shared' : '');
-			return '<li' . ($isActive ? ' class="uk-active"' : '') . ($shared ? ' data-shared="1"' : '') . ' data-bookmark-idx="' . $idx . '">'
+			$cls = 'ml-bookmark' . ($isFolder ? ' ml-bookmark--folder' : '');
+			return '<li' . ($isActive ? ' class="uk-active"' : '') . ' data-bookmark-id="' . $san->entities($bid) . '">'
 				. '<a class="' . $cls . '"'
 				. ' href="' . $san->entities($href) . '"'
 				. ' data-qs="' . $san->entities($canon) . '">'
 				. $san->entities((string) $b['name'])
 				. '</a>'
-				. ((!$shared || $canManageShared)
+				. ($canManageShared
 					? '<button type="button" class="ml-bookmark-del"'
 						. ' aria-label="' . $delTitle . '" title="' . $delTitle . '">'
 						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
@@ -6182,17 +6247,15 @@ class ProcessImageLibrary extends Process {
 				. '</li>';
 		};
 
-		// Bookmarks first (personal, then team) …
-		foreach ($bookmarks as $idx => $b)       $out .= $renderBookmark($b, (int) $idx, false);
-		foreach ($sharedBookmarks as $idx => $b) $out .= $renderBookmark($b, (int) $idx, true);
-		// … then collections (personal, then team).
-		foreach ($collections as $c)       $out .= $renderCollection($c, false);
+		// Bookmarks first (team store), then collections (team store). The legacy
+		// personal arrays ($bookmarks/$collections) are migrated/empty now.
+		foreach ($sharedBookmarks as $b)   $out .= $renderBookmark($b);
 		foreach ($sharedCollections as $c) $out .= $renderCollection($c, true);
 
 		// Add button — opens the name-dialog. Server-side it's hidden unless a
 		// non-saved filter is active; the JS additionally reveals it whenever a
 		// checkbox selection exists (→ "save as collection").
-		$addHidden = ($currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
+		$addHidden = (!$canManageShared || $currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
 		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
 			. ' title="' . $addTitle . '">'
 			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
