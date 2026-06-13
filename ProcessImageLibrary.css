@@ -1193,7 +1193,7 @@ textarea.ml-langtabs-pane {
 	opacity: 1;
 }
 .ml-tag-chip.ml-tag-deleting > label {
-	color: #c33;
+	font-weight: 700;
 	text-decoration: line-through;
 }
 .ml-tag-manage.ml-tag-confirm-del {
@@ -1465,7 +1465,7 @@ textarea.ml-langtabs-pane {
 .ml-coll-row-deleting .ml-coll-move { opacity: 1; }
 .ml-coll-row-deleting .ml-coll-name {
 	text-decoration: line-through;
-	color: #c33;
+	font-weight: 700;
 }
 /* Drop indicators set during dragover. */
 .ml-coll-row.ml-drop-before { box-shadow: inset 0 2px 0 0 var(--pw-primary, #3480e3); }
@@ -1507,6 +1507,9 @@ textarea.ml-langtabs-pane {
 	font-size: 0.85em;
 	opacity: 0.6;
 	margin-left: 0.1rem;
+	/* Never let the parent link's hover underline run under the caret icon. */
+	display: inline-block;
+	text-decoration: none;
 }
 .ml-coll-flyout {
 	position: absolute;
