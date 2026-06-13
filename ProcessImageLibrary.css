@@ -1569,10 +1569,13 @@ textarea.ml-langtabs-pane {
 	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
 	display: none;
 }
-/* Cascading: a flyout (or sub-flyout) shows while its parent item is hovered.
-   The flyout is a DOM descendant of that item, so hovering anywhere inside —
-   including a deeper sub-flyout — keeps the whole chain open (no gaps). */
-.ml-coll-has-children:hover > .ml-coll-flyout { display: block; }
+/* Cascading: a flyout (or sub-flyout) shows while its parent item is hovered
+   (desktop) or while it's tap-opened (.ml-flyout-open, touch — no hover there).
+   The flyout is a DOM descendant of that item, so the whole chain stays open. */
+@media (hover: hover) {
+	.ml-coll-has-children:hover > .ml-coll-flyout { display: block; }
+}
+.ml-coll-has-children.ml-flyout-open > .ml-coll-flyout { display: block; }
 /* A NESTED flyout (under a flyout item) opens to the SIDE; the top-level one
    stays directly below its tab (inherited top:100%/left:0). */
 .ml-coll-flyout-item > .ml-coll-flyout {
@@ -1809,103 +1812,39 @@ textarea.ml-langtabs-pane {
 	margin-top: 0.35rem;
 	margin-bottom: 0;
 }
-/* Mobile category switcher (Show all / Bookmarks / Collections). Desktop shows
-   the full strip, so the switcher is hidden there. Reuses the admin uk-tab
-   styling. */
-.ml-bar-cats {
-	display: none;
-}
-.ml-bookmarks-bar {
-	position: relative;   /* anchors the mobile items dropdown */
-}
+/* Mobile bar: "Bookmarks" / "Collections" are flyout-PARENT tabs whose flyout
+   holds the real items one level deeper (same .ml-coll-flyout optics as desktop,
+   tap-driven via .ml-flyout-open). Desktop keeps the flat strip. */
 @media (max-width: 640px) {
-	.ml-bar-cats {
-		display: flex;
-		margin: 0.35rem 0 0;
-	}
-	/* The desktop "Show all" chip is replaced by its category tab. */
-	.ml-bm-showall {
-		display: none;
-	}
-	/* The item strip becomes a DROPDOWN panel under the category tabs — shown
-	   only while open (a Bookmarks/Collections tab was tapped). So the bar itself
-	   stays just the three tabs; no second tab row. */
 	.ml-bookmarks-tabs {
-		position: absolute;
+		position: relative;
+	}
+	.ml-bookmarks-tabs > li.ml-coll-has-children {
+		position: static;
+	}
+	/* The top-level category flyout drops below the whole strip, left-aligned,
+	   capped to the viewport. */
+	.ml-bookmarks-tabs > li.ml-coll-has-children > .ml-coll-flyout {
 		top: 100%;
 		left: 0;
-		right: 0;
-		z-index: 70;
-		display: none;
-		flex-direction: column;
-		align-items: stretch;
-		margin: 0.2rem 0 0;
-		padding: 0.25rem 0;
-		background: var(--pw-inputs-background, #fff);
-		border: 1px solid var(--pw-border-color, #ddd);
-		border-radius: 4px;
-		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
-		max-height: 60vh;
+		right: auto;
+		min-width: 13rem;
+		max-width: 96vw;
+		max-height: 70vh;
 		overflow-y: auto;
 	}
-	.ml-bookmarks-bar.ml-bar-open .ml-bookmarks-tabs {
-		display: flex;
-	}
-	/* Only the active category's items appear in the dropdown. Manage + New carry
-	   no data-* marker, so they always stay (as the last rows). */
-	.ml-bookmarks-tabs.ml-bar-cat-bm li[data-coll-id],
-	.ml-bookmarks-tabs.ml-bar-cat-coll li[data-bookmark-id] {
-		display: none;
-	}
-	/* Full-width rows; drop the desktop 30px trailing gutter + the caret (the
-	   sub-items are expanded inline below instead of in a hover flyout). */
-	.ml-bookmarks-tabs > li {
-		width: 100%;
-	}
-	.ml-bookmarks-tabs > li > a {
-		display: block;
-		margin-right: 0;
-		padding: 0.5rem 1rem 0.5rem 1.1rem;
-	}
-	.ml-bookmarks-tabs .ml-coll-tab-caret {
-		display: none;
-	}
-	/* Nested flyouts: no hover on touch, so render them inline + indented. */
-	.ml-coll-flyout {
+	/* A side cascade can't fit a phone, so nested flyouts open inline (accordion),
+	   indented under their parent item. */
+	.ml-coll-flyout-item > .ml-coll-flyout {
 		position: static;
-		display: block;
-		width: auto;
-		margin: 0;
-		padding: 0;
+		top: auto;
+		left: auto;
 		border: 0;
 		box-shadow: none;
 		background: none;
-	}
-	.ml-coll-flyout .ml-bookmark {
-		padding-left: 2.2rem;
-	}
-	.ml-coll-flyout .ml-coll-flyout .ml-bookmark {
-		padding-left: 3.3rem;
-	}
-	/* "New" stays in the dropdown as a full-width row. */
-	.ml-bookmarks-add {
-		width: 100%;
-	}
-	.ml-bookmarks-add > a {
-		padding: 0.5rem 1.1rem;
-	}
-	/* Strip Manage gear is NOT in the dropdown; the tab-row gear handles it. */
-	.ml-collections-manage {
-		display: none;
-	}
-	.ml-bar-manage {
-		margin-left: auto;
-	}
-	.ml-bar-manage > a {
-		display: inline-flex;
-		align-items: center;
-		padding: 0.4rem 0.6rem;
-		color: var(--pw-muted-color, #888);
+		padding-left: 0.9rem;
+		min-width: 0;
+		max-width: none;
 	}
 }
 /* Uniform 30 px gap between every tab so the bookmark trash button

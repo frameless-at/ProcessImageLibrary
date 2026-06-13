@@ -6084,6 +6084,8 @@ class ProcessImageLibrary extends Process {
 				'collManageTeam'    => $this->_('Team'),
 				'collectionsManage'      => $this->_('Manage bookmarks & collections'),
 				'collectionsAssign'      => $this->_('Assign to collections'),
+				'barBookmarks'           => $this->_('Bookmarks'),
+				'barCollections'         => $this->_('Collections'),
 				'collectionsAssignN'     => $this->_('Assign %d images to collections'),
 				'collectionsManageShort' => $this->_('Manage'),
 				// Shared (team-wide) bookmarks + collections — the manager-only
@@ -6201,38 +6203,12 @@ class ProcessImageLibrary extends Process {
 		$delTitle = $san->entities($this->_('Delete bookmark'));
 		$collDelTitle = $san->entities($this->_('Delete collection'));
 
-		// Mobile category switcher (hidden on desktop via CSS): three tabs —
-		// "Show all", "Bookmarks", "Collections" — that pick which set the narrow
-		// strip shows, since fitting bookmarks + collections in one row is too
-		// tight on phones. The active class on the <ul> (ml-bar-cat-*) drives the
-		// per-category show/hide in CSS; the JS keeps it + the active tab in sync.
-		$initCat = $currentColl !== '' ? 'coll' : ($currentCanon !== '' ? 'bm' : 'all');
-		$catTab = function (string $cat, string $label) use ($initCat, $san): string {
-			return '<li' . ($cat === $initCat ? ' class="uk-active"' : '') . ' data-cat="' . $cat . '">'
-				. '<a href="#">' . $san->entities($label) . '</a></li>';
-		};
-		// Wrapper positions the mobile items dropdown under the category tabs.
-		$out  = '<div class="ml-bookmarks-bar">';
-		$out .= '<ul class="uk-tab ml-bar-cats" role="tablist">';
-		$out .= $catTab('all', $this->_('Show all'));
-		$out .= $catTab('bm', $this->_('Bookmarks'));
-		$out .= $catTab('coll', $this->_('Collections'));
-		// Manage gear lives on the tab row here (mobile), not inside the items
-		// dropdown. Desktop hides this whole row and uses the strip's own gear.
-		if ($canManageShared) {
-			$mTitle = $this->_('Manage bookmarks & collections');
-			$out .= '<li class="ml-bar-manage"><a href="#" role="button" title="' . $mTitle . '" aria-label="' . $mTitle . '">'
-				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
-		}
-		$out .= '</ul>';
+		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
 
-		$out .= '<ul class="WireTabs uk-tab ml-bookmarks-tabs ml-bar-cat-' . $initCat . '">';
-
-		// Baseline "Show all" tab first — empty querystring, active iff nothing
-		// filter-shaped AND no collection is currently set. On mobile it's hidden
-		// (the "Show all" category tab takes its place via .ml-bm-showall).
-		$allActiveCls = ($currentCanon === '' && $currentColl === '') ? ' uk-active' : '';
-		$out .= '<li class="ml-bm-showall' . $allActiveCls . '">'
+		// Baseline "Show all" tab first - empty querystring, active iff nothing
+		// filter-shaped AND no collection is currently set.
+		$allActive = ($currentCanon === '' && $currentColl === '') ? ' class="uk-active"' : '';
+		$out .= '<li' . $allActive . '>'
 			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
 			. $allLabel . '</a></li>';
 
@@ -6321,7 +6297,6 @@ class ProcessImageLibrary extends Process {
 			. '</a></li>';
 
 		$out .= '</ul>';
-		$out .= '</div>';
 		return $out;
 	}
 
