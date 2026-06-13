@@ -5982,8 +5982,8 @@ class ProcessImageLibrary extends Process {
 				'collectionDelete'  => $this->_('Delete collection'),
 				// Add-button label swaps to this while a selection exists, and the
 				// per-collection "+" adds the selection to that existing set.
-				'bookmarkAdd'       => $this->_('Add bookmark'),
-				'collectionAdd'     => $this->_('Add collection'),
+				'bookmarkAdd'       => $this->_('New'),
+				'collectionAdd'     => $this->_('New'),
 				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
 				'collectionRemoved' => $this->_('Removed %d image(s) from the collection'),
 				'collectionParentReadonly' => $this->_('This group shows its subgroups combined — add or remove images in a subgroup.'),
@@ -6112,7 +6112,7 @@ class ProcessImageLibrary extends Process {
 		$currentCanon = $this->canonicalizeBookmarkQs(http_build_query($this->bookmarkFilterPayload($filters)));
 		$currentColl  = (string) ($filters['coll'] ?? '');
 		$addTitle = $san->entities($this->_('Save current filter as bookmark'));
-		$addLabel = $san->entities($this->_('Add bookmark'));
+		$addLabel = $san->entities($this->_('New'));
 		$allLabel = $san->entities($this->_('Show all'));
 		$delTitle = $san->entities($this->_('Delete bookmark'));
 		$collDelTitle = $san->entities($this->_('Delete collection'));
