@@ -4460,8 +4460,8 @@
 		function mgrShowPane(pane) {
 			if (!collectionsDialog) return;
 			collDelDisarm(); collEditCancel();
-			Array.prototype.forEach.call(collectionsDialog.querySelectorAll('.ml-mgr-tab'), function (t) {
-				t.classList.toggle('uk-active', t.dataset.pane === pane);
+			Array.prototype.forEach.call(collectionsDialog.querySelectorAll('.ml-mgr-tabs > li'), function (li) {
+				li.classList.toggle('uk-active', li.dataset.pane === pane);
 			});
 			Array.prototype.forEach.call(collectionsDialog.querySelectorAll('.ml-mgr-pane'), function (p) {
 				p.hidden = (p.dataset.pane !== pane);
@@ -4508,7 +4508,7 @@
 				});
 			}
 			collectionsDialog.addEventListener('click', function (e) {
-				var mtab = e.target.closest && e.target.closest('.ml-mgr-tab');
+				var mtab = e.target.closest && e.target.closest('.ml-mgr-tabs > li');
 				if (mtab) { e.preventDefault(); mgrShowPane(mtab.dataset.pane); return; }
 				var nu = e.target.closest && e.target.closest('.ml-coll-new');
 				if (nu) { e.preventDefault(); collNewEmpty(nu.dataset.kind === 'bm' ? 'bm' : 'coll'); return; }

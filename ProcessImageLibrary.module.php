@@ -1634,7 +1634,10 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function renderCollectionsDialog(): string {
 		$san = $this->wire('sanitizer');
-		$title = $san->entities($this->_('Manage bookmarks & collections'));
+		// Literal "&" — these static UI strings are NOT run through entities();
+		// the output pipeline already encodes once, so pre-encoding here would
+		// double it into "&amp;". Same convention as the usedInTitle label.
+		$title = $this->_('Manage bookmarks & collections');
 		$close = $san->entities($this->_('Close'));
 		$tabColl = $san->entities($this->_('Collections'));
 		$tabBm   = $san->entities($this->_('Bookmarks'));
@@ -1644,13 +1647,15 @@ class ProcessImageLibrary extends Process {
 		$newFolder = $san->entities($this->_('New folder'));
 		$out  = '<dialog class="ml-collections-dialog">';
 		$out .= '<header>' . $title . '</header>';
-		// Two tabs: Collections (default) and Bookmarks. Each pane carries its own
-		// hint, "new" button and list; the JS wires reorder/nest/rename/delete
+		// Two tabs: Collections (default) and Bookmarks — reusing the admin's own
+		// uk-tab markup (same as the bookmarks bar) so they pick up the theme's
+		// tab styling instead of a bespoke look. Each pane carries its own hint,
+		// "new" button and list; the JS wires reorder/nest/rename/delete
 		// generically over both, picking the store from each row's data-store.
-		$out .= '<div class="ml-mgr-tabs" role="tablist">';
-		$out .= '<button type="button" class="ml-mgr-tab uk-active" data-pane="coll">' . $tabColl . '</button>';
-		$out .= '<button type="button" class="ml-mgr-tab" data-pane="bm">' . $tabBm . '</button>';
-		$out .= '</div>';
+		$out .= '<ul class="uk-tab ml-mgr-tabs">';
+		$out .= '<li class="uk-active" data-pane="coll"><a href="#">' . $tabColl . '</a></li>';
+		$out .= '<li data-pane="bm"><a href="#">' . $tabBm . '</a></li>';
+		$out .= '</ul>';
 		$out .= '<div class="ml-mgr-pane" data-pane="coll">';
 		$out .= '<p class="ml-columns-hint">' . $collHint . '</p>';
 		$out .= '<button type="button" class="ml-coll-new" data-kind="coll">'
@@ -6287,7 +6292,7 @@ class ProcessImageLibrary extends Process {
 		// drag-and-drop manager. Managers only (they create/curate team
 		// collections); shown even with none so the first one can be created.
 		if ($canManageShared) {
-			$manageTitle = $san->entities($this->_('Manage bookmarks & collections'));
+			$manageTitle = $this->_('Manage bookmarks & collections');   // literal &, no entities (see renderCollectionsDialog)
 			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
 				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
 				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
