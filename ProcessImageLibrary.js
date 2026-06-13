@@ -4619,6 +4619,10 @@
 				announce(isCollection
 					? (labels.collectionSaved || 'Collection saved')
 					: (labels.bookmarkSaved || 'Bookmark saved'));
+				// Jump straight into the manager (on the matching tab) so the user
+				// can place / sort the just-added entry right away.
+				openCollectionsManager();
+				mgrShowPane(isCollection ? 'coll' : 'bm');
 			}
 			saveBtn.addEventListener('click', commit);
 			input.addEventListener('keydown', function (e) {
