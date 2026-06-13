@@ -4641,7 +4641,7 @@
 				if (e.target.closest && e.target.closest('.ml-collections-close')) collectionsDialog.close();
 			});
 			document.addEventListener('click', function (e) {
-				var open = e.target.closest && e.target.closest('.ml-collections-manage a, .ml-collections-manage');
+				var open = e.target.closest && e.target.closest('.ml-collections-manage a, .ml-collections-manage, .ml-bar-manage a, .ml-bar-manage');
 				if (!open) return;
 				e.preventDefault();
 				openCollectionsManager();
