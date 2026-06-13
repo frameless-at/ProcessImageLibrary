@@ -1554,6 +1554,15 @@ textarea.ml-langtabs-pane {
 	display: inline-block;
 	text-decoration: none;
 }
+/* Bar + flyout links are tabs / menu items — never underlined, including the
+   sticky :hover a touch tap leaves behind (which underlined the text next to
+   the caret). */
+.ml-bookmarks-tabs a.ml-bookmark,
+.ml-bookmarks-tabs a.ml-bookmark:hover,
+.ml-coll-flyout a.ml-bookmark,
+.ml-coll-flyout a.ml-bookmark:hover {
+	text-decoration: none;
+}
 .ml-coll-flyout {
 	position: absolute;
 	top: 100%;
@@ -1821,20 +1830,15 @@ textarea.ml-langtabs-pane {
    holds the real items one level deeper (same .ml-coll-flyout optics as desktop,
    tap-driven via .ml-flyout-open). Desktop keeps the flat strip. */
 @media (max-width: 640px) {
-	.ml-bookmarks-tabs {
+	/* Each category flyout drops below ITS OWN tab (not all at the strip's left).
+	   The tab is the positioning context; cap size to the viewport. */
+	.ml-bookmarks-tabs > li.ml-coll-has-children {
 		position: relative;
 	}
-	.ml-bookmarks-tabs > li.ml-coll-has-children {
-		position: static;
-	}
-	/* The top-level category flyout drops below the whole strip, left-aligned,
-	   capped to the viewport. */
 	.ml-bookmarks-tabs > li.ml-coll-has-children > .ml-coll-flyout {
-		top: 100%;
 		left: 0;
-		right: auto;
-		min-width: 13rem;
-		max-width: 96vw;
+		min-width: 12rem;
+		max-width: 86vw;
 		max-height: 70vh;
 		overflow-y: auto;
 	}
