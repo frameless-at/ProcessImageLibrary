@@ -4651,6 +4651,7 @@
 				// Jump straight into the manager (on the matching tab) so the user
 				// can place / sort the just-added entry right away.
 				openCollectionsManager();
+				if (isCollection) repaintCollCells(selKeys);
 				mgrShowPane(isCollection ? 'coll' : 'bm');
 			}
 			saveBtn.addEventListener('click', commit);
@@ -4837,7 +4838,8 @@
 			coll.keys = Array.from(new Set(coll.keys.concat(selKeys)));
 			var added = coll.keys.length - before;
 			if (found.shared) saveSharedPrefs(); else saveUserPrefs();
-			clearSelectionConfirm();
+			repaintCollCells(selKeys);
+				clearSelectionConfirm();
 			announce((labels.collectionUpdated || 'Added %d image(s) to the collection')
 				.replace('%d', String(added)));
 		}
