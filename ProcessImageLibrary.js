@@ -3788,14 +3788,29 @@
 					}
 				}
 			});
-			// Nested (flyout) collection items: mark the active one, and light up
-			// its parent tab so the active group is visible while the flyout is closed.
+			// Nested (flyout) items: mark the active one and light up its parent tab
+			// so the active entry is visible while the flyout is closed. Handles both
+			// nested collections (by ?coll= id) AND nested filter bookmarks (by qs) —
+			// the latter must also count as a bookmark match so the bar's "New" link
+			// hides exactly like it does for a top-level bookmark.
 			document.querySelectorAll('.ml-coll-flyout-item').forEach(function (fli) {
-				var on = fli.dataset.collId === coll && coll !== '';
-				fli.classList.toggle('uk-active', on);
-				if (on) {
-					var parentTab = fli.closest('.ml-bookmarks-tabs > li');
-					if (parentTab) parentTab.classList.add('uk-active');
+				if (fli.dataset.collId) {
+					var on = fli.dataset.collId === coll && coll !== '';
+					fli.classList.toggle('uk-active', on);
+					if (on) {
+						var parentTab = fli.closest('.ml-bookmarks-tabs > li');
+						if (parentTab) parentTab.classList.add('uk-active');
+					}
+				} else if (fli.dataset.bookmarkId) {
+					var fa = fli.querySelector('a.ml-bookmark');
+					var fqs = fa ? (fa.dataset.qs || '') : '';
+					var bon = (fqs !== '' && fqs === current && coll === '');
+					fli.classList.toggle('uk-active', bon);
+					if (bon) {
+						bookmarkMatched = true;
+						var pTab = fli.closest('.ml-bookmarks-tabs > li');
+						if (pTab) pTab.classList.add('uk-active');
+					}
 				}
 			});
 
