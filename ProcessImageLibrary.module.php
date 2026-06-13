@@ -6084,6 +6084,7 @@ class ProcessImageLibrary extends Process {
 				'collManageTeam'    => $this->_('Team'),
 				'collectionsManage'      => $this->_('Manage bookmarks & collections'),
 				'collectionsAssign'      => $this->_('Assign to collections'),
+				'collectionsAssignN'     => $this->_('Assign %d images to collections'),
 				'collectionsManageShort' => $this->_('Manage'),
 				// Shared (team-wide) bookmarks + collections — the manager-only
 				// "share with team" toggle in the save dialog + its toasts.
