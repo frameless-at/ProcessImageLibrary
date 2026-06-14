@@ -426,7 +426,9 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 	 * Built-in column keys + their labels, plus an auto-discovered
 	 * entry per custom subfield across all image fields. Mirrors
 	 * renderColumnsListMarkup() so the config UI lists exactly the
-	 * same togglable columns the frontend exposes.
+	 * same togglable columns the frontend exposes — except 'usedIn',
+	 * which getDefaultHiddenColumns() force-hides by default (the
+	 * where-used lookup is expensive, so it's strictly user opt-in).
 	 *
 	 * @return array<string,string>
 	 */
@@ -443,6 +445,7 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			'created'     => $this->_('Uploaded'),
 			'modified'    => $this->_('Modified'),
 			'variations'  => $this->_('Variations'),
+			'collections' => $this->_('Collections'),
 		];
 		$instance = $this->wire('modules')->get('ProcessImageLibrary');
 		if ($instance instanceof ProcessImageLibrary) {
