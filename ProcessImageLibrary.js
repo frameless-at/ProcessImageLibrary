@@ -4838,8 +4838,8 @@
 			// collection's own keys OR any of its sub-collections (recall shows the
 			// union). So CHECK adds to the collection's OWN keys; UNCHECK removes from
 			// the collection AND every sub-collection (you can't be in a child but not
-			// its parent) - hence we rebuild the list so the cascade is visible. A pure
-			// container (a parent with no own images) stays a read-only header.
+			// its parent) - hence we rebuild the list so the cascade is visible. Every
+			// collection - parent or leaf, empty or filled - is checkable.
 			function renderAssignList() {
 				wrap.innerHTML = '';
 				if (!sharedCollections.length) {
@@ -4853,14 +4853,6 @@
 					if (!c || !c.id) return;
 					var pad = (0.2 + collDepth(sharedCollections, c.id) * 1.1) + 'rem';
 					c.keys = c.keys || [];
-					if (collIsParent(sharedCollections, c.id) && c.keys.length === 0) {
-						var hd = document.createElement('div');
-						hd.className = 'ml-coll-assign-parent';
-						hd.style.paddingLeft = pad;
-						hd.appendChild(document.createTextNode(c.name || ''));
-						wrap.appendChild(hd);
-						return;
-					}
 					var subtreeSet = collSubtreeSet(sharedCollections, c.id);
 					var subtree = sharedCollections.filter(function (sc) { return sc && subtreeSet[sc.id]; });
 					var inCount = keys.filter(function (k) {
@@ -4943,12 +4935,21 @@
 			var found = findCollection(collId);
 			if (!found || !selKeys.length) return;
 			if (found.shared && !canManageShared) return;   // read-only for non-managers
-			var coll = found.coll;
+			var store = found.shared ? sharedCollections : collections;
 			var dropSet = {};
 			selKeys.forEach(function (k) { dropSet[k] = true; });
-			var was = coll.keys.length;
-			coll.keys = coll.keys.filter(function (k) { return !dropSet[k]; });
-			var removed = was - coll.keys.length;
+			// Folder model: removing from a collection also removes from every
+			// sub-collection (you can't stay in a child but not the parent).
+			var subtreeSet = collSubtreeSet(store, collId);
+			var removedKeys = {};
+			store.forEach(function (sc) {
+				if (!sc || !subtreeSet[sc.id]) return;
+				sc.keys = (sc.keys || []).filter(function (k) {
+					if (dropSet[k]) { removedKeys[k] = true; return false; }
+					return true;
+				});
+			});
+			var removed = Object.keys(removedKeys).length;
 			selKeys.forEach(function (k) {
 				// k is wrapped in quotes here, so the raw value is correct (row
 				// keys never contain a double-quote).
@@ -5035,12 +5036,9 @@
 				// fall through to normal recall so the click still does something.
 				var curatable = !(tLi && tLi.dataset.shared === '1') || canManageShared;
 				if (tCid && hasSelNow && curatable) {
-					// A parent collection is a read-only union of its subgroups —
-					// curate the leaves, not the group.
-					if (collIsParent(collections, tCid) || collIsParent(sharedCollections, tCid)) {
-						announce(labels.collectionParentReadonly || 'Curate the subgroups, not the group.');
-						return;
-					}
+					// Folder model: a collection holds its own images AND may have
+					// sub-collections, so a parent is curatable like any other. ADD
+					// writes its own keys; REMOVE cascades to the subgroups.
 					if (tLi.classList.contains('uk-active')) removeSelectionFromCollection(tCid);
 					else addSelectionToCollection(tCid);
 					return;

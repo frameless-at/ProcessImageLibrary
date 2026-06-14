@@ -882,16 +882,11 @@ textarea.ml-cell-input {
 	opacity: 0.5;
 	font-size: 0.85em;
 }
-/* Assign popover: a read-only parent (union) row, just a label above its
-   checkable leaves. The leaf rows reuse .ml-popup-checklist styling. */
+/* Assign popover: every collection is a checkable row (folder model), indented
+   by depth. Rows reuse .ml-popup-checklist styling. */
 .ml-coll-assign-list {
 	max-height: 50vh;
 	overflow-y: auto;
-}
-.ml-coll-assign-parent {
-	padding: 0.2rem 0;
-	font-weight: 600;
-	opacity: 0.65;
 }
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
@@ -1961,20 +1956,14 @@ textarea.ml-langtabs-pane {
 .ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared].uk-active > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
-/* A PARENT collection (has subgroups) is a read-only union — no curate cursor;
-   curate the leaves instead. Higher specificity + later source order than the
-   +/− rules above so it wins for both own and team parents, active or not. */
-.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a,
-.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a {
-	cursor: not-allowed;
-}
+/* Folder model: a parent collection holds its own images and is curatable like
+   any leaf, so it keeps the +/− curate cursor — no read-only exception. */
 /* Touch devices have no cursor, so the curate +/− affordance is shown as a
    glyph BEFORE the collection name instead. Mirrors the curate-cursor cascade
    above one-for-one: "+" to ADD the selection, "−" to REMOVE it from the
-   active tab; non-manager shared tabs and read-only parents get no glyph.
-   Inherits the tab's own colour (no bespoke colour). Selectors and source
-   order match the cursor rules so the glyph always agrees with what a click
-   does. */
+   active tab; only non-manager shared tabs get no glyph. Inherits the tab's
+   own colour (no bespoke colour). Selectors and source order match the cursor
+   rules so the glyph always agrees with what a click does. */
 @media (hover: none) {
 	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] > a::before {
 		content: "+";
@@ -1999,10 +1988,6 @@ textarea.ml-langtabs-pane {
 	}
 	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared].uk-active > a::before {
 		content: "\2212";
-	}
-	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a::before,
-	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a::before {
-		content: "";
 	}
 }
 
