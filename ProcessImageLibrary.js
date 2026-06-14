@@ -5206,12 +5206,25 @@
 		(function wireColumnReorderButtons() {
 			var list = document.querySelector('.ml-columns-list');
 			if (!list) return;
+			// Touch reveal: exactly one active row shows its arrows (deterministic,
+			// no sticky hover/focus). The <li> moves on reorder, so the class follows.
+			function setColActive(li) {
+				Array.prototype.forEach.call(list.querySelectorAll('.ml-col-item--active'),
+					function (r) { r.classList.remove('ml-col-item--active'); });
+				if (li) li.classList.add('ml-col-item--active');
+			}
 			list.addEventListener('click', function (e) {
 				var btn = e.target.closest && e.target.closest('.ml-col-move');
-				if (!btn) return;
+				if (!btn) {
+					if (e.target.closest && e.target.closest('.ml-col-toggle')) return;
+					var row = e.target.closest && e.target.closest('.ml-col-item');
+					if (row) setColActive(row);
+					return;
+				}
 				e.preventDefault();
 				var li = btn.closest('li');
 				if (!li) return;
+				setColActive(li);
 				var dir = btn.dataset.dir;
 				if (dir === 'up' && li.previousElementSibling) {
 					list.insertBefore(li, li.previousElementSibling);

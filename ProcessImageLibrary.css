@@ -1372,9 +1372,26 @@ textarea.ml-langtabs-pane {
 	opacity: 0;
 	transition: opacity 0.12s ease-out;
 }
-.ml-columns-list li:hover .ml-col-move,
+@media (hover: hover) {
+	.ml-columns-list li:hover .ml-col-move {
+		opacity: 1;
+	}
+}
 .ml-columns-list .ml-col-move:focus-visible {
 	opacity: 1;
+}
+/* Touch: no hover (and a tap's :hover sticks to the old screen slot after a
+   reorder). Reveal the arrows for the ACTIVE row only (JS-driven, follows the
+   moved <li>); hidden arrows are non-interactive so a tap on an inactive row's
+   arrow area just activates it. */
+@media (hover: none) {
+	.ml-columns-list .ml-col-move {
+		pointer-events: none;
+	}
+	.ml-columns-list li.ml-col-item--active .ml-col-move {
+		opacity: 1;
+		pointer-events: auto;
+	}
 }
 
 /* Collections manager — drag-and-drop tree of collections (one level deep).
