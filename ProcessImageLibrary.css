@@ -1342,11 +1342,7 @@ textarea.ml-langtabs-pane {
 	gap: 0.4rem;
 	cursor: pointer;
 	padding: 0.2rem 0.3rem;
-	border-radius: 2px;
 	min-width: 0;
-}
-.ml-columns-list label:hover {
-	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
 }
 .ml-col-move,
 .ml-coll-move {
