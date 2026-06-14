@@ -3892,7 +3892,9 @@
 				var li = a.parentElement;
 				if (li && li.classList.contains('ml-coll-has-children')) {
 					e.preventDefault();
-					e.stopImmediatePropagation();
+					// A parent COLLECTION (?coll= qs) must still recall its union when
+					// tapped; only folders / the category tabs (no qs) block recall.
+					if ((a.dataset.qs || '') === '') e.stopImmediatePropagation();
 					if (li.classList.contains('ml-flyout-open')) {
 						Array.prototype.forEach.call(li.querySelectorAll('.ml-flyout-open'),
 							function (d) { d.classList.remove('ml-flyout-open'); });
