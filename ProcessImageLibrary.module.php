@@ -492,6 +492,9 @@ class ProcessImageLibrary extends Process {
 		// (see renderResultsHtml), the same way custom-subfield sorts are.
 		'variationsCount' => 'int',
 		'usageCount'      => 'int',
+		// Collections column — text sort by the (comma-joined) collection names a
+		// row belongs to, populated on the full set just-in-time like the counts.
+		'collectionNames' => 'string',
 	];
 
 	const DEFAULT_SORT = 'pageTitle';
@@ -1709,6 +1712,13 @@ class ProcessImageLibrary extends Process {
 			unset($r);
 		} elseif ($sort === 'variationsCount') {
 			$this->hydrateVariationCounts($rows);
+		} elseif ($sort === 'collectionNames') {
+			$byKey = $this->collectionNamesByKey();
+			foreach ($rows as &$r) {
+				$key = $this->rowKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename']);
+				$r['collectionNames'] = $byKey[$key] ?? '';
+			}
+			unset($r);
 		}
 		$this->applySort($rows, $sort, $dir);
 
@@ -4950,6 +4960,28 @@ class ProcessImageLibrary extends Process {
 	 *
 	 * @return array<int,string>
 	 */
+	/**
+	 * Map each image row-key to the comma-joined names of the collections that
+	 * DIRECTLY contain it (store order, same as the Collections column display).
+	 * Drives the text sort for that column. Cheap: one pass over the team store.
+	 *
+	 * @return array<string,string>
+	 */
+	protected function collectionNamesByKey(): array {
+		$out = [];
+		foreach ($this->getSharedPrefs()['collections'] as $coll) {
+			$name = (string) ($coll['name'] ?? '');
+			if ($name === '') continue;
+			foreach (($coll['keys'] ?? []) as $k) {
+				$out[(string) $k][] = $name;
+			}
+		}
+		foreach ($out as $k => $names) {
+			$out[$k] = implode(', ', $names);
+		}
+		return $out;
+	}
+
 	protected function resolveCollectionKeys(string $id): array {
 		$id = preg_replace('/[^a-z0-9]/i', '', $id) ?? '';
 		if ($id === '') return [];
@@ -6638,7 +6670,7 @@ class ProcessImageLibrary extends Process {
 			['modified',    $this->_('Modified'),    'modified'],
 			['variations',  $this->_('Variations'),  'variationsCount'],
 			['usedIn',      $this->_('Used in'),     'usageCount'],
-			['collections', $this->_('Collections'), null],
+			['collections', $this->_('Collections'), 'collectionNames'],
 		];
 		if (!$showTagsCol) {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
