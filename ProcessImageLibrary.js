@@ -3921,132 +3921,83 @@
 				del.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
 				return del;
 			}
-			// One top-level bookmark <li>. Bookmarks are team-wide now (no italic /
-			// data-shared). A FILTER bookmark applies its qs on click; a FOLDER
-			// (empty qs) only groups children (rendered in a hover flyout) — its
-			// nested children are handled separately, so this renders top-level
-			// only. The × (delete) shows for managers only.
-			function makeBmLink(b) {
-				var isFolder = !(b.qs || '');
+			// --- Unified bar builders -------------------------------------------
+			// Bookmarks and collections render near-identically (link + optional
+			// caret + cascading flyout), so one set of kind-parameterized builders
+			// drives both. kind = 'bm' | 'coll'. For 'coll', arr is the source store
+			// (collections vs sharedCollections) and isShared toggles the shared
+			// marker; bookmarks always live in the global `bookmarks` array.
+			// One bar link. A 'coll' link recalls ?coll=<id>; a 'bm' link applies its
+			// own qs (or is a # folder when qs is empty).
+			function barLink(item, kind, isShared) {
 				var a = document.createElement('a');
-				a.className = 'ml-bookmark' + (isFolder ? ' ml-bookmark--folder' : '');
-				a.href = isFolder ? '#' : (location.pathname + (b.qs || ''));
-				a.dataset.qs = b.qs || '';
-				a.appendChild(document.createTextNode(b.name || ''));
-				return a;
-			}
-			// Cascading flyout of a bookmark FOLDER's direct children — mirrors the
-			// collection flyout (same .ml-coll-flyout markup + CSS). Sub-folders get
-			// a caret + their own nested flyout; filter-bookmark leaves apply their qs.
-			function buildBmFlyout(parentId) {
-				var fly = document.createElement('ul');
-				fly.className = 'ml-coll-flyout';
-				collChildren(bookmarks, parentId).forEach(function (d) {
-					var fli = document.createElement('li');
-					fli.className = 'ml-coll-flyout-item';
-					fli.dataset.bookmarkId = d.id;
-					var kids = collIsParent(bookmarks, d.id);
-					if (kids) fli.classList.add('ml-coll-has-children', 'ml-coll-flyout-parent');
-					var fa = makeBmLink(d);
-					if (kids) {
-						fa.appendChild(document.createTextNode(' '));
-						var car = document.createElement('i');
-						car.className = 'fa fa-caret-right ml-coll-tab-caret';
-						car.setAttribute('aria-hidden', 'true');
-						fa.appendChild(car);
-					}
-					fli.appendChild(fa);
-					if (kids) fli.appendChild(buildBmFlyout(d.id));
-					fly.appendChild(fli);
-				});
-				return fly;
-			}
-			function addBookmarkLi(b) {
-				if (!b || !b.id || (b.parent || '') !== '') return;   // top-level only
-				var isFolder = !(b.qs || '');
-				var hasKids = collIsParent(bookmarks, b.id);
-				var li = document.createElement('li');
-				li.dataset.bookmarkId = b.id;
-				if (hasKids) li.classList.add('ml-coll-has-children');
-				var a = makeBmLink(b);
-				if (hasKids) {
-					a.appendChild(document.createTextNode(' '));
-					var car = document.createElement('i');
-					car.className = 'fa fa-caret-down ml-coll-tab-caret';
-					car.setAttribute('aria-hidden', 'true');
-					a.appendChild(car);
+				if (kind === 'coll') {
+					a.className = 'ml-bookmark ml-bookmark--collection' + (isShared ? ' ml-bookmark--shared' : '');
+					var qs = '?coll=' + encodeURIComponent(item.id);
+					a.href = location.pathname + qs;
+					a.dataset.qs = qs;
+				} else {
+					var isFolder = !(item.qs || '');
+					a.className = 'ml-bookmark' + (isFolder ? ' ml-bookmark--folder' : '');
+					a.href = isFolder ? '#' : (location.pathname + (item.qs || ''));
+					a.dataset.qs = item.qs || '';
 				}
-				li.appendChild(a);
-				// × only on a top-level FILTER bookmark (a leaf) → quick delete.
-				// Folders are managed (rename / delete / nest) in the manager dialog.
-				if (canManageShared && !isFolder && !hasKids) li.appendChild(makeDelBtn(labels.bookmarkDelete || 'Delete bookmark'));
-				if (hasKids) li.appendChild(buildBmFlyout(b.id));
-				ul.insertBefore(li, addLi);
-			}
-			// One collection link (icon-marked fa-clone). data-qs is the short
-			// ?coll=<id> recall link the AJAX swap applies; data-coll-id on the
-			// <li> drives curate + active state.
-			function makeCollLink(c, isShared, withIcon) {
-				var a = document.createElement('a');
-				a.className = 'ml-bookmark ml-bookmark--collection' + (isShared ? ' ml-bookmark--shared' : '');
-				var qs = '?coll=' + encodeURIComponent(c.id);
-				a.href = location.pathname + qs;
-				a.dataset.qs = qs;
-				if (withIcon) a.innerHTML = '<i class="fa fa-clone" aria-hidden="true"></i> ';
-				a.appendChild(document.createTextNode(c.name || ''));
+				a.appendChild(document.createTextNode(item.name || ''));
 				return a;
 			}
-			// Recursive cascading flyout: a <ul> of a collection's DIRECT children;
-			// a child that itself has children gets a caret + its own nested flyout
-			// (shown on hover, positioned to the side via CSS) — so the 3rd level
-			// only appears once you hover into the 2nd.
-			function buildCollFlyout(arr, parentId, isShared) {
+			// Append a caret (dir = 'right' for nested flyouts, 'down' for top tabs).
+			function barCaret(a, dir) {
+				a.appendChild(document.createTextNode(' '));
+				var car = document.createElement('i');
+				car.className = 'fa fa-caret-' + dir + ' ml-coll-tab-caret';
+				car.setAttribute('aria-hidden', 'true');
+				a.appendChild(car);
+			}
+			// Stamp the recall/curate id attrs onto an <li> (collId/shared vs bookmarkId).
+			function barLiId(li, item, kind, isShared) {
+				if (kind === 'coll') {
+					li.dataset.collId = item.id;
+					if (isShared) li.dataset.shared = '1';
+				} else {
+					li.dataset.bookmarkId = item.id;
+				}
+			}
+			// Recursive cascading flyout: a <ul> of an item's DIRECT children. A child
+			// that itself has children gets a right caret + its own nested flyout
+			// (shown deeper on hover) — so level 3 only appears once you hover level 2.
+			function buildBarFlyout(arr, parentId, kind, isShared) {
 				var fly = document.createElement('ul');
 				fly.className = 'ml-coll-flyout';
 				collChildren(arr, parentId).forEach(function (d) {
 					var fli = document.createElement('li');
 					fli.className = 'ml-coll-flyout-item';
-					fli.dataset.collId = d.id;
-					if (isShared) fli.dataset.shared = '1';
-					var grand = collIsParent(arr, d.id);
-					if (grand) fli.classList.add('ml-coll-has-children', 'ml-coll-flyout-parent');
-					var fa = makeCollLink(d, isShared, false);
-					if (grand) {
-						fa.appendChild(document.createTextNode(' '));
-						var car = document.createElement('i');
-						car.className = 'fa fa-caret-right ml-coll-tab-caret';
-						car.setAttribute('aria-hidden', 'true');
-						fa.appendChild(car);
-					}
+					barLiId(fli, d, kind, isShared);
+					var kids = collIsParent(arr, d.id);
+					if (kids) fli.classList.add('ml-coll-has-children', 'ml-coll-flyout-parent');
+					var fa = barLink(d, kind, isShared);
+					if (kids) barCaret(fa, 'right');
 					fli.appendChild(fa);
-					if (grand) fli.appendChild(buildCollFlyout(arr, d.id, isShared));
+					if (kids) fli.appendChild(buildBarFlyout(arr, d.id, kind, isShared));
 					fly.appendChild(fli);
 				});
 				return fly;
 			}
-			// A top-level collection tab. Only depth-0 collections get a tab; their
-			// descendants live in a hover flyout (1 level shown, the rest on hover),
-			// indented by relative depth. Children carry their own data-coll-id so
-			// recall / curate / delete keep working unchanged.
-			function addCollectionTab(c, isShared, arr) {
-				if (!c || !c.id || (c.parent || '') !== '') return;   // top-level only
-				var hasKids = collIsParent(arr, c.id);
+			// One top-level tab. Only depth-0 entries get a tab; descendants live in a
+			// hover flyout. The × quick-delete shows only on a top-level FILTER
+			// bookmark leaf — collections and folders are managed in the dialog.
+			function addBarTab(item, kind, arr, isShared) {
+				if (!item || !item.id || (item.parent || '') !== '') return;   // top-level only
+				var hasKids = collIsParent(arr, item.id);
 				var li = document.createElement('li');
-				li.dataset.collId = c.id;
-				if (isShared) li.dataset.shared = '1';
+				barLiId(li, item, kind, isShared);
 				if (hasKids) li.classList.add('ml-coll-has-children');
-				var a = makeCollLink(c, isShared, false);
-				if (hasKids) {
-					a.appendChild(document.createTextNode(' '));
-					var car = document.createElement('i');
-					car.className = 'fa fa-caret-down ml-coll-tab-caret';
-					car.setAttribute('aria-hidden', 'true');
-					a.appendChild(car);
-				}
+				var a = barLink(item, kind, isShared);
+				if (hasKids) barCaret(a, 'down');
 				li.appendChild(a);
-				// No × on the strip — deleting collections lives in the manager
-				// dialog now (like the tag manager). The strip is for navigating.
-				if (hasKids) li.appendChild(buildCollFlyout(arr, c.id, isShared));
+				if (kind === 'bm' && canManageShared && (item.qs || '') && !hasKids) {
+					li.appendChild(makeDelBtn(labels.bookmarkDelete || 'Delete bookmark'));
+				}
+				if (hasKids) li.appendChild(buildBarFlyout(arr, item.id, kind, isShared));
 				ul.insertBefore(li, addLi);
 			}
 			// Ordered by TYPE: all bookmarks first, then all collections. Both are
@@ -4071,12 +4022,12 @@
 				ul.insertBefore(li, addLi);
 			}
 			if (isMobileBar()) {
-				addCategoryTab(labels.barBookmarks || 'Bookmarks', buildBmFlyout(''), collChildren(bookmarks, '').length > 0);
-				addCategoryTab(labels.barCollections || 'Collections', buildCollFlyout(sharedCollections, '', true), collChildren(sharedCollections, '').length > 0);
+				addCategoryTab(labels.barBookmarks || 'Bookmarks', buildBarFlyout(bookmarks, '', 'bm', false), collChildren(bookmarks, '').length > 0);
+				addCategoryTab(labels.barCollections || 'Collections', buildBarFlyout(sharedCollections, '', 'coll', true), collChildren(sharedCollections, '').length > 0);
 			} else {
-				bookmarks.forEach(function (b) { addBookmarkLi(b); });
-				collections.forEach(function (c) { addCollectionTab(c, false, collections); });
-				sharedCollections.forEach(function (c) { addCollectionTab(c, true, sharedCollections); });
+				bookmarks.forEach(function (b) { addBarTab(b, 'bm', bookmarks, false); });
+				collections.forEach(function (c) { addBarTab(c, 'coll', collections, false); });
+				sharedCollections.forEach(function (c) { addBarTab(c, 'coll', sharedCollections, true); });
 			}
 			// "Manage" — icon-only, sitting right after the bookmarks/collections
 			// and BEFORE the "New" (Add) link, not floated to the far right.
