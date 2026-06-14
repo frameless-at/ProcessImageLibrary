@@ -4876,53 +4876,65 @@
 			dialog.appendChild(header);
 			var wrap = document.createElement('div');
 			wrap.className = 'ml-popup-checklist ml-coll-assign-list';
-			if (!sharedCollections.length) {
-				var none = document.createElement('p');
-				none.className = 'ml-popup-hint';
-				none.textContent = labels.collManageEmpty || 'No collections yet.';
-				wrap.appendChild(none);
-			}
-			sharedCollections.forEach(function (c) {
-				if (!c || !c.id) return;
-				var pad = (0.2 + collDepth(sharedCollections, c.id) * 1.1) + 'rem';
-				c.keys = c.keys || [];
-				// A PURE container (a parent holding NONE of its own images) is a
-				// read-only union - curate its sub-collections. A parent that DOES have
-				// its own images (it was a leaf before gaining sub-collections) stays a
-				// checkbox so its direct membership can still be toggled - otherwise the
-				// column shows it (e.g. "E1") but the editor couldn't.
-				if (collIsParent(sharedCollections, c.id) && c.keys.length === 0) {
-					var hd = document.createElement('div');
-					hd.className = 'ml-coll-assign-parent';
-					hd.style.paddingLeft = pad;
-					hd.appendChild(document.createTextNode(c.name || ''));
-					wrap.appendChild(hd);
+			// Membership is by UNION: a row is "in" a collection if it's in that
+			// collection's own keys OR any of its sub-collections (recall shows the
+			// union). So CHECK adds to the collection's OWN keys; UNCHECK removes from
+			// the collection AND every sub-collection (you can't be in a child but not
+			// its parent) - hence we rebuild the list so the cascade is visible. A pure
+			// container (a parent with no own images) stays a read-only header.
+			function renderAssignList() {
+				wrap.innerHTML = '';
+				if (!sharedCollections.length) {
+					var none = document.createElement('p');
+					none.className = 'ml-popup-hint';
+					none.textContent = labels.collManageEmpty || 'No collections yet.';
+					wrap.appendChild(none);
 					return;
 				}
-				var inCount = keys.filter(function (k) { return c.keys.indexOf(k) !== -1; }).length;
-				var lbl = document.createElement('label');
-				lbl.className = 'ml-popup-checklist-item';
-				lbl.style.paddingLeft = pad;
-				var cb = document.createElement('input');
-				cb.type = 'checkbox';
-				cb.className = 'uk-checkbox';
-				cb.checked = inCount === keys.length;
-				cb.indeterminate = inCount > 0 && inCount < keys.length;
-				cb.addEventListener('change', function () {
-					cb.indeterminate = false;
-					if (cb.checked) {
-						keys.forEach(function (k) { if (c.keys.indexOf(k) === -1) c.keys.push(k); });
-					} else {
-						c.keys = c.keys.filter(function (k) { return keys.indexOf(k) === -1; });
+				sharedCollections.forEach(function (c) {
+					if (!c || !c.id) return;
+					var pad = (0.2 + collDepth(sharedCollections, c.id) * 1.1) + 'rem';
+					c.keys = c.keys || [];
+					if (collIsParent(sharedCollections, c.id) && c.keys.length === 0) {
+						var hd = document.createElement('div');
+						hd.className = 'ml-coll-assign-parent';
+						hd.style.paddingLeft = pad;
+						hd.appendChild(document.createTextNode(c.name || ''));
+						wrap.appendChild(hd);
+						return;
 					}
-					saveSharedPrefs();
-					repaintCollCells(keys);
-					rerenderBookmarksList();
+					var subtreeSet = collSubtreeSet(sharedCollections, c.id);
+					var subtree = sharedCollections.filter(function (sc) { return sc && subtreeSet[sc.id]; });
+					var inCount = keys.filter(function (k) {
+						return subtree.some(function (sc) { return (sc.keys || []).indexOf(k) !== -1; });
+					}).length;
+					var lbl = document.createElement('label');
+					lbl.className = 'ml-popup-checklist-item';
+					lbl.style.paddingLeft = pad;
+					var cb = document.createElement('input');
+					cb.type = 'checkbox';
+					cb.className = 'uk-checkbox';
+					cb.checked = inCount === keys.length;
+					cb.indeterminate = inCount > 0 && inCount < keys.length;
+					cb.addEventListener('change', function () {
+						if (cb.checked) {
+							keys.forEach(function (k) { if (c.keys.indexOf(k) === -1) c.keys.push(k); });
+						} else {
+							subtree.forEach(function (sc) {
+								sc.keys = (sc.keys || []).filter(function (k) { return keys.indexOf(k) === -1; });
+							});
+						}
+						saveSharedPrefs();
+						repaintCollCells(keys);
+						rerenderBookmarksList();
+						renderAssignList();
+					});
+					lbl.appendChild(cb);
+					lbl.appendChild(document.createTextNode(' ' + (c.name || '')));
+					wrap.appendChild(lbl);
 				});
-				lbl.appendChild(cb);
-				lbl.appendChild(document.createTextNode(' ' + (c.name || '')));
-				wrap.appendChild(lbl);
-			});
+			}
+			renderAssignList();
 			dialog.appendChild(wrap);
 			var footer = document.createElement('footer');
 			var closeBtn = document.createElement('button');
