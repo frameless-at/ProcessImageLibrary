@@ -6066,7 +6066,6 @@ class ProcessImageLibrary extends Process {
 				'collectionAdd'     => $this->_('New'),
 				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
 				'collectionRemoved' => $this->_('Removed %d image(s) from the collection'),
-				'collectionParentReadonly' => $this->_('This group shows its subgroups combined — add or remove images in a subgroup.'),
 				// Collections manager (drag-and-drop reorder + nesting) row controls.
 				'collMoveUp'        => $this->_('Move up'),
 				'collMoveDown'      => $this->_('Move down'),
