@@ -3878,9 +3878,12 @@
 				var li = a.parentElement;
 				if (li && li.classList.contains('ml-coll-has-children')) {
 					e.preventDefault();
-					// A parent COLLECTION (?coll= qs) must still recall its union when
-					// tapped; only folders / the category tabs (no qs) block recall.
-					if ((a.dataset.qs || '') === '') e.stopImmediatePropagation();
+					// A parent COLLECTION (?coll= qs) recalls its union when its NAME is
+					// tapped; tapping the CARET only opens the sub-collections (no recall
+					// / curate, so you can still drill in to assign). Folders / category
+					// tabs (no qs) never recall.
+					var onCaret = !!(e.target.closest && e.target.closest('.ml-coll-tab-caret'));
+					if ((a.dataset.qs || '') === '' || onCaret) e.stopImmediatePropagation();
 					if (li.classList.contains('ml-flyout-open')) {
 						Array.prototype.forEach.call(li.querySelectorAll('.ml-flyout-open'),
 							function (d) { d.classList.remove('ml-flyout-open'); });
