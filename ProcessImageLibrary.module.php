@@ -4961,18 +4961,20 @@ class ProcessImageLibrary extends Process {
 	 * @return array<int,string>
 	 */
 	/**
-	 * Map each image row-key to the comma-joined names of the collections that
-	 * DIRECTLY contain it (store order, same as the Collections column display).
-	 * Drives the text sort for that column. Cheap: one pass over the team store.
+	 * Map each image row-key to the comma-joined names of the collections it
+	 * appears under — UNION membership (own keys + sub-collections), in display
+	 * order, same as the Collections column. Drives the text sort for that column.
 	 *
 	 * @return array<string,string>
 	 */
 	protected function collectionNamesByKey(): array {
 		$out = [];
-		foreach ($this->getSharedPrefs()['collections'] as $coll) {
+		$list = $this->getSharedPrefs()['collections'];
+		foreach ($list as $coll) {
 			$name = (string) ($coll['name'] ?? '');
-			if ($name === '') continue;
-			foreach (($coll['keys'] ?? []) as $k) {
+			$cid  = (string) ($coll['id'] ?? '');
+			if ($name === '' || $cid === '') continue;
+			foreach ($this->collectionUnionKeys($cid, $list) as $k) {
 				$out[(string) $k][] = $name;
 			}
 		}
@@ -6710,14 +6712,17 @@ class ProcessImageLibrary extends Process {
 		$out .= '</tr></thead><tbody>';
 
 		// Collections column: index every team collection's row-keys once, so each
-		// row can list (and link) the collections it belongs to in O(1). Direct
-		// membership only — the leaf collection that actually holds the image, not
-		// its parent containers. Cheap (no per-image queries), so it's not gated.
+		// row can list (and link) the collections it appears under in O(1). UNION
+		// membership — a row in a sub-collection also appears under its parent(s)
+		// (recall shows the union), so list the whole union, not just direct keys.
+		// Stored in display (pre-order) order, so parents come before their
+		// children. Cheap (no per-image queries), so it's not gated.
 		$collByKey = [];
-		foreach ($this->getSharedPrefs()['collections'] as $coll) {
+		$collList = $this->getSharedPrefs()['collections'];
+		foreach ($collList as $coll) {
 			$cid = (string) ($coll['id'] ?? '');
 			if ($cid === '') continue;
-			foreach (($coll['keys'] ?? []) as $k) {
+			foreach ($this->collectionUnionKeys($cid, $collList) as $k) {
 				$collByKey[(string) $k][] = ['id' => $cid, 'name' => (string) ($coll['name'] ?? '')];
 			}
 		}

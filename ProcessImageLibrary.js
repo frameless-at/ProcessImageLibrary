@@ -4810,8 +4810,15 @@
 			var listSpan = td.querySelector('.ml-coll-cell-list');
 			if (!listSpan) return;
 			var key = rowKey(td);
+			// UNION membership (own keys OR any sub-collection), display order -
+			// matches the server-rendered cell. A parent shows once a row sits in
+			// any of its sub-collections.
 			var members = sharedCollections.filter(function (c) {
-				return c && c.keys && c.keys.indexOf(key) !== -1;
+				if (!c || !c.id) return false;
+				var sub = collSubtreeSet(sharedCollections, c.id);
+				return sharedCollections.some(function (sc) {
+					return sc && sub[sc.id] && sc.keys && sc.keys.indexOf(key) !== -1;
+				});
 			});
 			listSpan.innerHTML = '';
 			if (members.length) {
