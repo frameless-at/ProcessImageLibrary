@@ -1622,9 +1622,10 @@ textarea.ml-langtabs-pane {
 	white-space: nowrap;
 	margin: 0;
 }
-/* A flyout item that has a submenu pushes its caret to the right edge. */
-.ml-coll-flyout-parent > a.ml-bookmark { justify-content: space-between; }
-.ml-coll-flyout-parent > a .ml-coll-tab-caret { margin-left: 0.75rem; }
+/* A flyout item with a submenu: name stays LEFT, caret pushed to the right edge
+   via margin-left:auto. (justify-content:space-between would centre the name
+   when a curate glyph also sits in the row.) */
+.ml-coll-flyout-parent > a .ml-coll-tab-caret { margin-left: auto; }
 .ml-coll-flyout-item.uk-active > a {
 	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
 }
@@ -1977,8 +1978,12 @@ textarea.ml-langtabs-pane {
 @media (hover: none) {
 	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] > a::before {
 		content: "+";
-		margin-right: 0.45rem;
-		font-size: 1.3em;
+		display: inline-block;
+		flex: 0 0 auto;
+		width: 1em;
+		margin-right: 0.4rem;
+		text-align: center;
+		font-size: 1.2em;
 		font-weight: 700;
 		line-height: 1;
 	}
@@ -1987,7 +1992,6 @@ textarea.ml-langtabs-pane {
 	}
 	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a::before {
 		content: "";
-		margin-right: 0;
 	}
 	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a::before {
 		content: "+";
@@ -1999,7 +2003,6 @@ textarea.ml-langtabs-pane {
 	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a::before,
 	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id].ml-coll-has-children > a::before {
 		content: "";
-		margin-right: 0;
 	}
 }
 
