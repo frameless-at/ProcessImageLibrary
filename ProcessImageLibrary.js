@@ -4885,7 +4885,13 @@
 			sharedCollections.forEach(function (c) {
 				if (!c || !c.id) return;
 				var pad = (0.2 + collDepth(sharedCollections, c.id) * 1.1) + 'rem';
-				if (collIsParent(sharedCollections, c.id)) {
+				c.keys = c.keys || [];
+				// A PURE container (a parent holding NONE of its own images) is a
+				// read-only union - curate its sub-collections. A parent that DOES have
+				// its own images (it was a leaf before gaining sub-collections) stays a
+				// checkbox so its direct membership can still be toggled - otherwise the
+				// column shows it (e.g. "E1") but the editor couldn't.
+				if (collIsParent(sharedCollections, c.id) && c.keys.length === 0) {
 					var hd = document.createElement('div');
 					hd.className = 'ml-coll-assign-parent';
 					hd.style.paddingLeft = pad;
@@ -4893,7 +4899,6 @@
 					wrap.appendChild(hd);
 					return;
 				}
-				c.keys = c.keys || [];
 				var inCount = keys.filter(function (k) { return c.keys.indexOf(k) !== -1; }).length;
 				var lbl = document.createElement('label');
 				lbl.className = 'ml-popup-checklist-item';
