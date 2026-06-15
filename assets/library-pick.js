@@ -80,7 +80,14 @@
 			);
 			function onModalMsg(e) {
 				if (e.origin !== location.origin) return;       // same-origin only
-				if (!e.data || e.data.mlPicked !== true) return;
+				if (!e.data) return;
+				// Cancel: just close, no field reload.
+				if (e.data.mlCancel === true) {
+					window.removeEventListener('message', onModalMsg);
+					try { $iframe.dialog('close'); } catch (err) { /* already closed */ }
+					return;
+				}
+				if (e.data.mlPicked !== true) return;
 				window.removeEventListener('message', onModalMsg);
 				try { $iframe.dialog('close'); } catch (err) { /* already closed */ }
 				reloadField(btn);
@@ -131,7 +138,9 @@
 		}
 		function onMsg(e) {
 			if (e.source !== iframe.contentWindow) return;
-			if (!e.data || e.data.mlPicked !== true) return;
+			if (!e.data) return;
+			if (e.data.mlCancel === true) { teardown(); return; }
+			if (e.data.mlPicked !== true) return;
 			teardown();
 			reloadField(btn);
 		}

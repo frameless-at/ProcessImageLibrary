@@ -250,7 +250,14 @@ window.MLImageLibrary = (function () {
 
 		function onMessage(e) {
 			if (e.origin !== location.origin) return;            // same-origin only
-			if (!e.data || !e.data.mlInsert) return;
+			if (!e.data) return;
+			// Cancel: dismiss the picker without inserting anything.
+			if (e.data.mlCancel === true) {
+				cleanup();
+				try { $iframe.dialog('close'); } catch (err) { /* already closed */ }
+				return;
+			}
+			if (!e.data.mlInsert) return;
 			var items = (e.data.items || []).filter(function (it) { return it && it.url; });
 			cleanup();
 			try { $iframe.dialog('close'); } catch (err) { /* already closed */ }

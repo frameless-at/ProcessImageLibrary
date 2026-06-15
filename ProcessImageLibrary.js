@@ -158,6 +158,16 @@
 			}
 
 			root.addEventListener('click', function (e) {
+				// Cancel just dismisses the modal the picker is embedded in — tell
+				// the opener (library-pick.js / insert-common.js) to close it.
+				var cancelBtn = e.target.closest && e.target.closest('.ml-pick-cancel');
+				if (cancelBtn) {
+					e.preventDefault();
+					if (window.parent && window.parent !== window) {
+						window.parent.postMessage({ mlCancel: true }, location.origin);
+					}
+					return;
+				}
 				var btn = e.target.closest && e.target.closest('.ml-pick-confirm');
 				if (!btn) return;
 				e.preventDefault();

@@ -1816,6 +1816,9 @@ class ProcessImageLibrary extends Process {
 			. '<button type="button" class="ml-pick-confirm uk-button uk-button-primary" disabled>'
 			. $san->entities($this->_('Use selected')) . ' <span class="ml-pick-count">(0)</span>'
 			. '</button>'
+			. '<button type="button" class="ml-pick-cancel uk-button uk-button-secondary">'
+			. $san->entities($this->_('Cancel'))
+			. '</button>'
 			. '</div>';
 	}
 
