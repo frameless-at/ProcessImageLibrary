@@ -1862,7 +1862,9 @@ textarea.ml-langtabs-pane {
 		overflow-y: auto;
 	}
 	/* A side cascade can't fit a phone, so nested flyouts open inline (accordion),
-	   indented under their parent item. */
+	   indented under their parent item. width:auto (not the base max-content) so
+	   every level fills the flyout's full width — entries stay the same width and
+	   all carets line up on the same right edge, with text indented per level. */
 	.ml-coll-flyout-item > .ml-coll-flyout {
 		position: static;
 		top: auto;
@@ -1871,6 +1873,7 @@ textarea.ml-langtabs-pane {
 		box-shadow: none;
 		background: none;
 		padding-left: 0.9rem;
+		width: auto;
 		min-width: 0;
 		max-width: none;
 	}
