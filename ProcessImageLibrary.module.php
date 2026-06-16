@@ -5294,24 +5294,28 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Parse a free-text query into REQUIRED and EXCLUDED terms for a tokenised,
-	 * case-insensitive substring search:
-	 *   - whitespace separates terms; every plain / +term must match (AND)
-	 *   - a term prefixed with - is EXCLUDED (the row must NOT contain it)
+	 * Parse a free-text query into REQUIRED, EXCLUDED and OPTIONAL terms for a
+	 * tokenised, case-insensitive substring search (classic search-engine rules):
+	 *   - a plain word is OPTIONAL — if any optional terms exist, at least one
+	 *     must match (so "red rose" = red OR rose)
+	 *   - a +word is REQUIRED — every one must match ("red +rose" = rose must
+	 *     match AND, from the optional group, red too, i.e. both)
+	 *   - a -word is EXCLUDED — the row must NOT contain it
 	 *   - a "quoted phrase" (optionally signed) matches its words contiguously
 	 * Lone signs and empty quotes are ignored. Terms are lower-cased so the
 	 * caller matches them against a lower-cased haystack.
 	 *
-	 * @return array{0:array<int,string>,1:array<int,string>} [required, excluded]
+	 * @return array{0:array<int,string>,1:array<int,string>,2:array<int,string>} [required, excluded, optional]
 	 */
 	protected function parseSearchTerms(string $q): array {
 		$q = trim($q);
-		if ($q === '') return [[], []];
+		if ($q === '') return [[], [], []];
 		$required = [];
 		$excluded = [];
+		$optional = [];
 		// Token = optional +/- sign, then a "quoted phrase" or a run of non-space.
 		if (!preg_match_all('/([+-]?)(?:"([^"]*)"|(\S+))/u', $q, $matches, PREG_SET_ORDER)) {
-			return [[], []];
+			return [[], [], []];
 		}
 		foreach ($matches as $tok) {
 			$sign = $tok[1];
@@ -5319,10 +5323,15 @@ class ProcessImageLibrary extends Process {
 			$term = ($tok[2] !== '') ? $tok[2] : ($tok[3] ?? '');
 			$term = mb_strtolower(trim($term));
 			if ($term === '') continue;
-			if ($sign === '-') $excluded[] = $term;
-			else $required[] = $term;
+			if ($sign === '-')      $excluded[] = $term;
+			elseif ($sign === '+')  $required[] = $term;
+			else                    $optional[] = $term;
 		}
-		return [array_values(array_unique($required)), array_values(array_unique($excluded))];
+		return [
+			array_values(array_unique($required)),
+			array_values(array_unique($excluded)),
+			array_values(array_unique($optional)),
+		];
 	}
 
 	/**
@@ -5352,8 +5361,8 @@ class ProcessImageLibrary extends Process {
 			}));
 		}
 
-		[$reqTerms, $excTerms] = $this->parseSearchTerms((string) $filters['q']);
-		$hasQ     = $reqTerms !== [] || $excTerms !== [];
+		[$reqTerms, $excTerms, $optTerms] = $this->parseSearchTerms((string) $filters['q']);
+		$hasQ     = $reqTerms !== [] || $excTerms !== [] || $optTerms !== [];
 		$tplName  = (string) ($filters['template'] ?? '');
 		$field    = $filters['field'];
 		$noDesc   = $filters['no_desc'];
@@ -5380,7 +5389,7 @@ class ProcessImageLibrary extends Process {
 		}
 
 		$filtered = array_values(array_filter($rows, function ($r) use (
-			$hasQ, $reqTerms, $excTerms, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
+			$hasQ, $reqTerms, $excTerms, $optTerms, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
 		) {
 			if ($dupes && !isset($dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']])) return false;
 			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
@@ -5414,12 +5423,20 @@ class ProcessImageLibrary extends Process {
 					. $this->normalizeDescription($r['pageTitle'] ?? '') . ' '
 					. $customHay
 				);
-				// AND over required terms, NONE of the excluded terms.
+				// + terms ALL required; - terms NONE allowed; plain terms are an
+				// OR group — if any exist, at least one must match.
 				foreach ($reqTerms as $t) {
 					if (mb_strpos($hay, $t) === false) return false;
 				}
 				foreach ($excTerms as $t) {
 					if (mb_strpos($hay, $t) !== false) return false;
+				}
+				if ($optTerms) {
+					$anyOpt = false;
+					foreach ($optTerms as $t) {
+						if (mb_strpos($hay, $t) !== false) { $anyOpt = true; break; }
+					}
+					if (!$anyOpt) return false;
 				}
 			}
 			return true;
@@ -6464,9 +6481,9 @@ class ProcessImageLibrary extends Process {
 		$q->name        = 'q';
 		$q->label       = $this->_('Search');
 		$q->placeholder = $this->_('Page title, description, tags, filename, customs');
-		// Searches all of the above. Multiple words = all must match; -word
-		// excludes; "quote a phrase" to match it whole.
-		$q->notes       = $this->_('Multiple words: all must match. Use -word to exclude, "quotes" for an exact phrase.');
+		// Searches all of the above. Plain words are OR (any match); +word is
+		// required, -word excludes, "quote a phrase" to match it whole.
+		$q->notes       = $this->_('Multiple words match any (OR). Use +word to require, -word to exclude, "quotes" for an exact phrase.');
 		$q->value       = $filters['q'];
 		$q->columnWidth = $this->pickerMode ? 100 : 33;
 		$outer->add($q);
