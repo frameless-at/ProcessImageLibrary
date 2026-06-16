@@ -120,8 +120,7 @@ trait ImageLibraryUsage {
 			$pid = (int) ($r['pageId'] ?? 0);
 			$bn  = (string) ($r['basename'] ?? '');
 			if (!$pid || $bn === '') continue;
-			$dot  = strrpos($bn, '.');
-			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			$stem = $this->basenameStem($bn);
 			if ($stem === '') continue;
 			$idx[$pid][$stem] = true;
 		}

@@ -568,8 +568,7 @@ trait ImageLibraryHashing {
 		$stemsByField = [];
 		foreach (array_keys($present) as $key) {
 			[$fn, $bn] = array_pad(explode("\0", $key, 2), 2, '');
-			$dot  = strrpos($bn, '.');
-			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			$stem = $this->basenameStem($bn);
 			if ($stem !== '') $stemsByField[$fn][$stem] = true;
 		}
 		$isKept = function (string $fn, string $bn) use ($present, $stemsByField): bool {
@@ -997,8 +996,7 @@ trait ImageLibraryHashing {
 			if ($orig === null) continue;
 			$dir  = dirname($orig) . '/';
 			$obn  = basename($orig);                       // foo.jpg
-			$dot  = strrpos($obn, '.');
-			$stem = $dot === false ? $obn : substr($obn, 0, $dot);   // foo
+			$stem = $this->basenameStem($obn);   // foo
 			if ($stem === '') continue;
 			// Variation files share the original's stem: "<stem>.*".
 			foreach (glob($dir . $stem . '.*', GLOB_NOSORT) ?: [] as $path) {

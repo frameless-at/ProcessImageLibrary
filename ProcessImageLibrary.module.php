@@ -2047,7 +2047,7 @@ class ProcessImageLibrary extends Process {
 	protected function flatUsedTags(array $rows): array {
 		$set = [];
 		foreach ($rows as $row) {
-			$tags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			$tags = $this->splitImageTags((string) ($row['tags'] ?? ''));
 			foreach ($tags as $t) $set[$t] = true;
 		}
 		$keys = array_keys($set);
@@ -2058,7 +2058,7 @@ class ProcessImageLibrary extends Process {
 	protected function collectUsedTagsByField(array $rows): array {
 		$byField = [];
 		foreach ($rows as $row) {
-			$tags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			$tags = $this->splitImageTags((string) ($row['tags'] ?? ''));
 			if (!$tags) continue;
 			$f = (string) $row['fieldName'];
 			if (!isset($byField[$f])) $byField[$f] = [];
@@ -3131,8 +3131,7 @@ class ProcessImageLibrary extends Process {
 			$pid = (int) $item['pageId'];
 			$bn  = (string) $item['basename'];
 			if (!$pid || $bn === '') continue;
-			$dot  = strrpos($bn, '.');
-			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			$stem = $this->basenameStem($bn);
 			if ($stem === '') continue;
 			$key = $pid . ':' . $bn;
 			$byKey[$key] = [];
@@ -3924,13 +3923,13 @@ class ProcessImageLibrary extends Process {
 					}
 					if ($mode === 'add') {
 						// Union with the row's existing tags, dedup.
-						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$existing = $this->splitImageTags((string) $img->tags);
 						$tokens   = array_values(array_unique(array_merge($existing, $tokens)));
 					} elseif ($mode === 'remove') {
 						// Set difference: drop every token the user
 						// listed from the row's existing tag set. No-op
 						// for rows that don't carry any of them.
-						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$existing = $this->splitImageTags((string) $img->tags);
 						$drop     = array_flip($tokens);
 						$tokens   = array_values(array_filter($existing, function ($t) use ($drop) {
 							return !isset($drop[$t]);
@@ -4612,7 +4611,7 @@ class ProcessImageLibrary extends Process {
 		$out = [];
 		foreach ($this->loadRows() as $r) {
 			if (($r['fieldName'] ?? '') !== $fieldName) continue;
-			foreach (preg_split('/\s+/', (string) ($r['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $t) {
+			foreach ($this->splitImageTags((string) ($r['tags'] ?? '')) as $t) {
 				if (mb_strtolower($t) === $tagLc) {
 					$out[(int) $r['pageId']][] = (string) $r['basename'];
 					break;
@@ -4823,6 +4822,18 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function hashKey(int $pageId, string $fieldName, string $basename): string {
 		return $pageId . "\0" . $fieldName . "\0" . $basename;
+	}
+
+	/**
+	 * Split a Pageimage tags string into tokens. Image tags are WHITESPACE-
+	 * separated (a single tag may itself contain a comma), so this is
+	 * deliberately NOT splitTags() — that also splits on commas for the
+	 * comma-separated filter-input form.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function splitImageTags(string $tags): array {
+		return preg_split('/\s+/', $tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
 	}
 
 	/** Hard caps so a malicious / runaway payload can't bloat $user->meta. */
@@ -6594,7 +6605,7 @@ class ProcessImageLibrary extends Process {
 		if (!$tags) return $rows;
 		$wanted = array_fill_keys($tags, true);
 		return array_values(array_filter($rows, function ($row) use ($wanted) {
-			$rowTags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			$rowTags = $this->splitImageTags((string) ($row['tags'] ?? ''));
 			foreach ($rowTags as $t) {
 				if (isset($wanted[$t])) return true;   // any match → keep
 			}
