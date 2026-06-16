@@ -73,6 +73,15 @@ src/*.php (3215), assets/*.js (871).
 
 ## P2 — High-impact DRY (shared helpers, low risk)
 
+> **Progress (done):** P2.1 PHP `hashKey()` (18 NUL-key sites unified);
+> P2.2 `beginJsonPost()` (15 POST endpoints); stem via `basenameStem()` +
+> `splitImageTags()` (10 sites); P2.3a JS `postForm()` (11 POST sites);
+> CSS `--ml-*` tokens (mono/danger/confirm/tint-hover).
+> **Deferred:** the JS **dialog builder** (6 bespoke `<dialog>` constructions
+> with their own focus/teardown) — too risky to unify blind without a runtime
+> pass; do it with manual modal testing. JS key helpers (`keyOf/parseKey`)
+> partially covered by `rowElsByKey()`; full consolidation still open.
+
 1. **Identity-key helpers.** The NUL-joined key
    `pageId."\0".field."\0".basename` is hand-built ~12× in `module.php` and
    ~13× across the traits (~25 total), with inconsistent `(int)`/`(string)`
