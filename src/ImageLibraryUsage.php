@@ -260,6 +260,26 @@ trait ImageLibraryUsage {
 	}
 
 	/**
+	 * Re-index the where-used rows for a set of referencing pages after an embed
+	 * rewrite (rename). Those pages were saved with a FIELD-ONLY save, which does
+	 * NOT fire Pages::saved, so autoIndexUsageOnPageSave never ran for them and
+	 * the index would keep the old stem (the row's "Used in" then shows nothing
+	 * for the new basename). Build the stem index once and reuse it across the
+	 * set. MUST be called AFTER the row cache is cleared, so the stem index
+	 * reflects the new basename(s).
+	 *
+	 * @param array<int,int> $refPageIds
+	 */
+	protected function reindexUsageForRefPages(array $refPageIds): void {
+		$refPageIds = array_values(array_unique(array_map('intval', $refPageIds)));
+		if (!$refPageIds) return;
+		$stemIndex = $this->buildImageStemIndex();
+		foreach ($refPageIds as $rid) {
+			$this->reindexPageUsage($rid, $stemIndex);
+		}
+	}
+
+	/**
 	 * All language slot values of a textarea field as plain strings (one
 	 * entry per language for multilang, a single entry otherwise). Mirrors
 	 * the multilang handling in fieldValueMatches / rewriteTextareaField.

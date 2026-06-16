@@ -2806,6 +2806,11 @@ class ProcessImageLibrary extends Process {
 		}
 		$this->wire('cache')->deleteFor($this);
 
+		// The embed rewrite saved the referencing pages with a field-only save
+		// (no Pages::saved hook), so refresh their where-used rows now — after the
+		// cache clear above, so the stem index sees the new basename.
+		$this->reindexUsageForRefPages($result['embedsRefPageIds'] ?? []);
+
 		$finalBasename = (string) $result['basename'];
 		$finalDot      = strrpos($finalBasename, '.');
 
@@ -3437,9 +3442,10 @@ class ProcessImageLibrary extends Process {
 		// stem. Rewrite them so they survive the rename. A rewrite failure
 		// must never roll back a rename that already succeeded on disk.
 		$embedRefs = [];
+		$refPageIds = [];
 		try {
 			$embedRefs = $this->rewriteEmbeddedReferences(
-				$img, $page, $oldBasename, (string) $img->basename
+				$img, $page, $oldBasename, (string) $img->basename, $refPageIds
 			);
 		} catch (\Throwable $e) {
 			$this->wire('log')->error(
@@ -3449,11 +3455,12 @@ class ProcessImageLibrary extends Process {
 		}
 
 		return [
-			'ok'              => true,
-			'basename'        => (string) $img->basename,
-			'unchanged'       => false,
-			'embedsRewritten' => count($embedRefs),
-			'embedsRefs'      => $embedRefs,
+			'ok'               => true,
+			'basename'         => (string) $img->basename,
+			'unchanged'        => false,
+			'embedsRewritten'  => count($embedRefs),
+			'embedsRefs'       => $embedRefs,
+			'embedsRefPageIds' => array_keys($refPageIds),
 		];
 	}
 
@@ -3491,7 +3498,7 @@ class ProcessImageLibrary extends Process {
 	 *
 	 * @return array<int,array{pageId:int,pageTitle:string,fieldName:string,editUrl:string}>
 	 */
-	protected function rewriteEmbeddedReferences(Pageimage $img, Page $ownerPage, string $oldBasename, string $newBasename): array {
+	protected function rewriteEmbeddedReferences(Pageimage $img, Page $ownerPage, string $oldBasename, string $newBasename, array &$refPageIds = []): array {
 		$oldDot  = strrpos($oldBasename, '.');
 		$oldStem = $oldDot === false ? $oldBasename : substr($oldBasename, 0, $oldDot);
 		$oldExt  = $oldDot === false ? '' : substr($oldBasename, $oldDot + 1);
@@ -3547,6 +3554,10 @@ class ProcessImageLibrary extends Process {
 				try {
 					if ($this->rewriteTextareaField($refPage, $name, $directRe, $crossRe, $newStem)) {
 						$refPage->save($name);
+						// Field-only save doesn't fire Pages::saved, so the usage
+						// reindex hook won't run for this page — collect its raw id
+						// so the caller can reindex it after the row cache is fresh.
+						$refPageIds[(int) $refPage->id] = true;
 						// The cross-page copy is an independent file PW regenerates
 						// from the source — once the source is renamed it can't, so
 						// the embed breaks. Rename the copy on the editing page to
@@ -3883,6 +3894,10 @@ class ProcessImageLibrary extends Process {
 		// instead of clearing it. Only populated by the rename branch
 		// (other subfields don't change basename).
 		$renamed = [];
+		// Raw referencing-page ids whose embeds were rewritten by a rename in
+		// this batch — reindexed once after the cache clear (field-only saves
+		// skip the Pages::saved usage hook).
+		$renamedRefPageIds = [];
 		$failed      = [];
 		$tagsCfg     = $this->getTagsConfig();
 		// New tags entered on mode-3 ("predefined + own") fields during this
@@ -3938,6 +3953,9 @@ class ProcessImageLibrary extends Process {
 					}
 					if (empty($renameResult['unchanged'])) {
 						$fieldsTouched[$fn] = true;
+					}
+					foreach ($renameResult['embedsRefPageIds'] ?? [] as $rid) {
+						$renamedRefPageIds[(int) $rid] = true;
 					}
 					$succeeded++;
 					$newBn = (string) $renameResult['basename'];
@@ -4073,6 +4091,10 @@ class ProcessImageLibrary extends Process {
 		if ($succeeded > 0) {
 			$this->wire('cache')->deleteFor($this);
 		}
+
+		// Refresh where-used rows for pages whose embeds a rename rewrote — after
+		// the cache clear so the stem index reflects the new basenames.
+		$this->reindexUsageForRefPages(array_keys($renamedRefPageIds));
 
 		// Promote any new mode-3 tags into their fields' predefined lists, so
 		// they're offered on every image. Hand the updated lists back keyed by
