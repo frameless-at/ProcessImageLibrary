@@ -35,3 +35,24 @@ first row no longer reveals on open. The remaining case is *after a click*.
 buttons — drive the reveal from JS (`mouseenter`/`mouseleave`) and/or explicitly
 `blur()` the button at the end of each reorder click handler. Keyboard
 accessibility must be preserved (tabbing to a button should still reveal it).
+
+## Collections column not repainted after deleting a collection in the manager
+
+**Status:** open · reported 2026-06-16
+
+**Repro:** open the Collection Manager, delete a collection that some images
+belong to. The deleted collection's link stays in those images' **Collections**
+column cells until a full page reload; the bar / nav update correctly.
+
+**Expected:** the deleted collection should disappear from every affected row's
+Collections cell immediately, the same way it does after an assign / curate
+flow.
+
+**Likely cause:** the manager-delete path updates the store + re-renders the
+bar but does not repaint the Collections column. The assign/batch flows call
+`repaintCollCells(keys)` (JS) for exactly this; the collection-delete handler in
+the manager needs to repaint too — most simply by repainting ALL visible
+Collections cells (the delete can touch any subset of on-screen rows), or by
+repainting the union of keys that were in the deleted collection (+ its
+descendants, since cascade-delete removes subgroups). See `repaintCollCells`
+and the collections-manager delete handler in `ProcessImageLibrary.js`.

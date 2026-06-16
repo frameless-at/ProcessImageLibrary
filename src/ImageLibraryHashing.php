@@ -135,9 +135,10 @@ trait ImageLibraryHashing {
 				'SELECT page_id, field_name, basename FROM `' . self::METALOCK_TABLE . '`'
 			);
 			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-				$out[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']] = true;
+				$out[$this->hashKey((int) $r['page_id'], (string) $r['field_name'], (string) $r['basename'])] = true;
 			}
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: loadLockSet query failed: ' . $e->getMessage());
 		}
 		return $out;
 	}
@@ -184,6 +185,7 @@ trait ImageLibraryHashing {
 				];
 			}
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: loadClusterMembers query failed: ' . $e->getMessage());
 		}
 		return $out;
 	}
@@ -216,11 +218,12 @@ trait ImageLibraryHashing {
 				);
 				$rows->execute($hashes);
 				while ($r = $rows->fetch(\PDO::FETCH_ASSOC)) {
-					$keys[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']]
+					$keys[$this->hashKey((int) $r['page_id'], (string) $r['field_name'], (string) $r['basename'])]
 						= (string) $r['content_hash'];
 				}
 			}
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: loadDuplicateKeyHashes query failed: ' . $e->getMessage());
 		}
 		return $keys;
 	}
@@ -243,6 +246,7 @@ trait ImageLibraryHashing {
 			);
 			$stmt->execute([$filemtime, $pageId, $fieldName, $basename]);
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: refreshStoredMtime failed: ' . $e->getMessage());
 		}
 	}
 
@@ -564,8 +568,7 @@ trait ImageLibraryHashing {
 		$stemsByField = [];
 		foreach (array_keys($present) as $key) {
 			[$fn, $bn] = array_pad(explode("\0", $key, 2), 2, '');
-			$dot  = strrpos($bn, '.');
-			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			$stem = $this->basenameStem($bn);
 			if ($stem !== '') $stemsByField[$fn][$stem] = true;
 		}
 		$isKept = function (string $fn, string $bn) use ($present, $stemsByField): bool {
@@ -611,7 +614,7 @@ trait ImageLibraryHashing {
 		// Version-inclusive: version-copy files are legitimately deduped, so
 		// their fingerprint rows must NOT be pruned as orphans.
 		foreach ($this->loadImageRowsAll() as $r) {
-			$live[(int) $r['pageId'] . "\0" . (string) $r['fieldName'] . "\0" . (string) $r['basename']] = true;
+			$live[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] = true;
 		}
 		// Safety: an empty live set means discovery/cache hiccuped, NOT that the
 		// whole library vanished. Pruning against it would wipe every fingerprint
@@ -624,7 +627,7 @@ trait ImageLibraryHashing {
 			$stale = [];
 			while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
 				$pid = (int) $r['page_id']; $fn = (string) $r['field_name']; $bn = (string) $r['basename'];
-				if (isset($live[$pid . "\0" . $fn . "\0" . $bn])) continue;     // live original
+				if (isset($live[$this->hashKey($pid, $fn, $bn)])) continue;     // live original
 				$stale[] = [$pid, $fn, $bn];
 			}
 			if ($stale) {
@@ -732,10 +735,14 @@ trait ImageLibraryHashing {
 				if (!$file->isFile() || $file->isLink()) continue;
 				if ($out['files'] >= $max) { $out['truncated'] = true; break; }
 
-				$size  = (int) $file->getSize();
-				$inode = (int) $file->getInode();
-				$dev   = (int) @stat($file->getPathname())['dev'];
-				$nlink = (int) @stat($file->getPathname())['nlink'];
+				// One stat() for size/inode/dev/nlink; skip files that vanished
+				// mid-walk (stat() === false) instead of reading false['dev'].
+				$st = @stat($file->getPathname());
+				if ($st === false) continue;
+				$size  = (int) ($st['size'] ?? 0);
+				$inode = (int) ($st['ino'] ?? 0);
+				$dev   = (int) ($st['dev'] ?? 0);
+				$nlink = (int) ($st['nlink'] ?? 0);
 				$key   = $dev . ':' . $inode;
 
 				$out['files']++;
@@ -989,8 +996,7 @@ trait ImageLibraryHashing {
 			if ($orig === null) continue;
 			$dir  = dirname($orig) . '/';
 			$obn  = basename($orig);                       // foo.jpg
-			$dot  = strrpos($obn, '.');
-			$stem = $dot === false ? $obn : substr($obn, 0, $dot);   // foo
+			$stem = $this->basenameStem($obn);   // foo
 			if ($stem === '') continue;
 			// Variation files share the original's stem: "<stem>.*".
 			foreach (glob($dir . $stem . '.*', GLOB_NOSORT) ?: [] as $path) {

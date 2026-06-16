@@ -16,9 +16,11 @@
  * The shape deliberately mirrors the deduplication engine (ImageLibraryHashing):
  * a lazily-created DB table, a budgeted first scan that converges over a few
  * passes, prune-then-add maintenance on save, and an hourly LazyCron reconcile.
- * It reuses the same reference grammar pwimage embeds use — both the direct
- * same-page form and the cross-page "Insert from library" copy tagged with
- * -pid<sourceId> — so it covers exactly what the rename / delete preflight does.
+ * It reads the grammar pwimage embeds use: the inserted variation always lives
+ * in the SOURCE image's own files folder (/files/<sourcePid>/), optionally
+ * tagged "-is" (inserted into rich text) and "-pid<editorPid>" (the page that
+ * USES a cross-page insert, NOT the source). So the directory id identifies the
+ * source image; this covers exactly what the rename / delete preflight does.
  *
  * Composed into ProcessImageLibrary via `use`. Relies on the host class for:
  *   - $this->loadImageRowsAll()   (full storage-truth row enumeration)
@@ -104,8 +106,9 @@ trait ImageLibraryUsage {
 	/**
 	 * Build the source-image stem index: for every managed image, which
 	 * stems live on which storage page. Keyed by the STORAGE page id (the
-	 * row's pageId stays storage-truth even for repeater items — that's the
-	 * id the embed's "/files/<pid>/" path and "-pid<id>" marker point at).
+	 * row's pageId stays storage-truth even for repeater items, and that is
+	 * the id the embed's "/files/<pid>/" directory points at; the "-pid<id>"
+	 * marker, when present, is the consuming page, not this index's key).
 	 *
 	 *     [ storagePageId => [ stem => true, … ] ]
 	 *
@@ -117,8 +120,7 @@ trait ImageLibraryUsage {
 			$pid = (int) ($r['pageId'] ?? 0);
 			$bn  = (string) ($r['basename'] ?? '');
 			if (!$pid || $bn === '') continue;
-			$dot  = strrpos($bn, '.');
-			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			$stem = $this->basenameStem($bn);
 			if ($stem === '') continue;
 			$idx[$pid][$stem] = true;
 		}
@@ -127,15 +129,14 @@ trait ImageLibraryUsage {
 
 	/**
 	 * Extract the set of LIBRARY images a chunk of rich-text references.
-	 * Parses every "/site/assets/files/<pid>/<filename>" token and resolves
-	 * it to a source image key:
-	 *   - direct, same page:  source pid = the URL's <pid>
-	 *   - cross-page insert:  source pid = the filename's "-pid<id>" marker
-	 *     (pwimage copies a sized variation onto the EDITING page and records
-	 *     the origin as -pid<id>, so the URL pid is the editing page, not the
-	 *     image's). Multi-dot crop variations and -hidpi are handled because
-	 *     we key on the stem (everything before the first dot) matched against
-	 *     the known stems of that storage page — longest match wins.
+	 * Parses every "/site/assets/files/<pid>/<filename>" token and resolves it
+	 * to a source image key. pwimage stores the inserted variation in the SOURCE
+	 * image's own folder, so the URL <pid> is the source image's page for both
+	 * same-page and cross-page inserts; the optional "-pid<id>" marker records
+	 * the EDITING page that uses a cross-page insert (NOT the source), so it is
+	 * only tried as a fallback. Multi-dot crop variations and -hidpi are handled
+	 * because we key on the stem (everything before the first dot) matched
+	 * against the known stems of that storage page (longest match wins).
 	 * Tokens that don't resolve to a known managed image are ignored, so the
 	 * index only ever holds references to actual library images.
 	 *
@@ -254,6 +255,26 @@ trait ImageLibraryUsage {
 			}
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: reindex page usage failed for ' . $pageId . ': ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Re-index the where-used rows for a set of referencing pages after an embed
+	 * rewrite (rename). Those pages were saved with a FIELD-ONLY save, which does
+	 * NOT fire Pages::saved, so autoIndexUsageOnPageSave never ran for them and
+	 * the index would keep the old stem (the row's "Used in" then shows nothing
+	 * for the new basename). Build the stem index once and reuse it across the
+	 * set. MUST be called AFTER the row cache is cleared, so the stem index
+	 * reflects the new basename(s).
+	 *
+	 * @param array<int,int> $refPageIds
+	 */
+	protected function reindexUsageForRefPages(array $refPageIds): void {
+		$refPageIds = array_values(array_unique(array_map('intval', $refPageIds)));
+		if (!$refPageIds) return;
+		$stemIndex = $this->buildImageStemIndex();
+		foreach ($refPageIds as $rid) {
+			$this->reindexPageUsage($rid, $stemIndex);
 		}
 	}
 
@@ -454,6 +475,7 @@ trait ImageLibraryUsage {
 					= [(int) $r['ref_page_id'], (string) $r['field_name']];
 			}
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: loadUsageByImage query failed: ' . $e->getMessage());
 		}
 		return $cache = $out;
 	}
@@ -490,7 +512,7 @@ trait ImageLibraryUsage {
 	 */
 	protected function imageClusterKeys(int $pageId, string $fieldName, string $basename, array $dupKeyHashes, array $membersByHash): array {
 		$self = $pageId . "\0" . $this->basenameStem($basename);
-		$hash = $dupKeyHashes[$pageId . "\0" . $fieldName . "\0" . $basename] ?? null;
+		$hash = $dupKeyHashes[$this->hashKey($pageId, $fieldName, $basename)] ?? null;
 		if ($hash === null || empty($membersByHash[$hash])) return [$self];
 
 		$keys = [$self => true];

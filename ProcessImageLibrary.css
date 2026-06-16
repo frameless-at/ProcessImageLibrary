@@ -5,6 +5,17 @@
  * fallbacks (light-theme values) are kept in each var() so legacy
  * themes (Reno, Default) still render readable. */
 
+/* Module design tokens — one source for repeated values. Namespaced --ml-*
+   so they can't collide with the theme's --pw-* vars; on :root so body-level
+   dialogs / popups (appended outside .ml-root) inherit them too. */
+:root {
+	--ml-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+	--ml-danger: #c33;        /* inline delete / armed-confirm red */
+	--ml-confirm: #2a8a2a;    /* inline confirm green */
+	/* Neutral row hover/active tint (the tag-manager tint, reused widely). */
+	--ml-tint-hover: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+}
+
 .ml-root {
 	margin: 0 0 1rem;
 }
@@ -190,7 +201,7 @@
 	opacity: 1;
 }
 .ml-replace-btn:hover { color: var(--pw-main-color, #5b8cd6); }
-.ml-delete-btn:hover  { color: #c33; }
+.ml-delete-btn:hover  { color: var(--ml-danger); }
 
 /* Picker mode: the library embedded (modal iframe) to choose existing
    image(s) for a page's image field. Selection is via the normal checkboxes
@@ -412,7 +423,7 @@
 .ml-delete-confirm-list,
 .ml-delete-confirm-solo {
 	margin: 0.5rem 0 0;
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-family: var(--ml-mono);
 	font-size: 0.95em;
 	color: var(--pw-text-color, #333);
 }
@@ -424,7 +435,7 @@
 .ml-delete-confirm-list-more {
 	margin: 0.25rem 0 0;
 	padding-left: 1.25rem;
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-family: var(--ml-mono);
 	font-size: 0.95em;
 	color: var(--pw-muted-color, #666);
 }
@@ -484,7 +495,7 @@
 .ml-delete-confirm-usage-list-grouped > li > strong {
 	display: inline-block;
 	margin-bottom: 0.15rem;
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-family: var(--ml-mono);
 	font-weight: 600;
 }
 /* Drop-target highlight: the single row currently under the file
@@ -1065,7 +1076,7 @@ textarea.ml-cell-input {
 	align-items: center;
 	padding: 0 0.5rem;
 	font: inherit;
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-family: var(--ml-mono);
 	color: var(--pw-muted-color, #777);
 	background: var(--pw-main-background, #f5f5f5);
 	border: 1px solid var(--pw-border-color, #c0c0c0);
@@ -1151,7 +1162,7 @@ textarea.ml-langtabs-pane {
 	border-radius: 2px;
 }
 .ml-popup-tag-list label:hover {
-	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+	background: var(--ml-tint-hover);
 }
 /* A predefined-tag chip: the checkbox/label plus (for managers) hover-revealed
    rename/delete controls that act library-wide. The chip is the grid item; its
@@ -1194,11 +1205,11 @@ textarea.ml-langtabs-pane {
 	opacity: 1;
 }
 .ml-tag-rename:hover { color: var(--pw-main-color, #5b8cd6); }
-.ml-tag-delete:hover { color: #c33; }
+.ml-tag-delete:hover { color: var(--ml-danger); }
 /* While inline-renaming, the ✎ has become a ✓ — keep it visible + tinted. */
 .ml-tag-manage.ml-tag-confirm {
 	opacity: 1;
-	color: #2a8a2a;
+	color: var(--ml-confirm);
 }
 /* Inline delete confirm (armed by the first × click): both controls stay
    visible, the × becomes a red confirm ✓, the tag goes struck-through red, and
@@ -1211,7 +1222,7 @@ textarea.ml-langtabs-pane {
 	text-decoration: line-through;
 }
 .ml-tag-manage.ml-tag-confirm-del {
-	color: #c33;
+	color: var(--ml-danger);
 }
 .ml-tag-count {
 	flex: 0 0 auto;
@@ -1288,7 +1299,7 @@ textarea.ml-langtabs-pane {
 	border: 1px solid var(--pw-border-color, #e5e5e5);
 	border-radius: 3px;
 	background: var(--pw-inputs-background, #fafafa);
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-family: var(--ml-mono);
 	font-size: 0.85em;
 }
 .ml-bulk-result-list[hidden] {
@@ -1367,7 +1378,7 @@ textarea.ml-langtabs-pane {
 }
 @media (hover: hover) {
 	.ml-columns-list li:hover {
-		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+		background: var(--ml-tint-hover);
 	}
 	.ml-columns-list li:hover .ml-col-move {
 		opacity: 1;
@@ -1385,7 +1396,7 @@ textarea.ml-langtabs-pane {
 		pointer-events: none;
 	}
 	.ml-columns-list li.ml-col-item--active {
-		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+		background: var(--ml-tint-hover);
 	}
 	.ml-columns-list li.ml-col-item--active .ml-col-move {
 		opacity: 1;
@@ -1448,12 +1459,12 @@ textarea.ml-langtabs-pane {
    it follows the moved element instead of lighting up the row in its old slot. */
 @media (hover: hover) {
 	.ml-coll-row:hover {
-		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+		background: var(--ml-tint-hover);
 	}
 }
 @media (hover: none) {
 	.ml-coll-row--active {
-		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+		background: var(--ml-tint-hover);
 	}
 }
 /* Collections are all team now — no personal/shared distinction, so no italic
@@ -1518,9 +1529,9 @@ textarea.ml-langtabs-pane {
 /* Inline delete (like the tag manager): × goes red on hover; once armed it
    becomes a red ✓, the row's controls stay visible and the name is struck
    through until you confirm or it auto-disarms. */
-.ml-coll-del:hover { color: #c33; }
-.ml-coll-del.ml-coll-armed { color: #c33; opacity: 1; }
-.ml-coll-move.ml-coll-confirm { color: #2a8a2a; opacity: 1; }   /* green ✓ while renaming */
+.ml-coll-del:hover { color: var(--ml-danger); }
+.ml-coll-del.ml-coll-armed { color: var(--ml-danger); opacity: 1; }
+.ml-coll-move.ml-coll-confirm { color: var(--ml-confirm); opacity: 1; }   /* green ✓ while renaming */
 .ml-coll-row-deleting .ml-coll-move { opacity: 1; }
 .ml-coll-row-deleting .ml-coll-name {
 	text-decoration: line-through;
@@ -1834,7 +1845,7 @@ textarea.ml-langtabs-pane {
 	margin-top: 0.75rem;
 	white-space: pre-wrap;
 	color: var(--pw-text-color, #444);
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+	font-family: var(--ml-mono);
 	font-size: 0.85em;
 }
 
@@ -1928,7 +1939,7 @@ textarea.ml-langtabs-pane {
 	opacity: 1;
 }
 .ml-bookmark-del:hover {
-	color: #c33;
+	color: var(--ml-danger);
 }
 /* While a selection is active you're CURATING, not deleting — hide the × on
    collection tabs. Clicking the tab itself adds/removes the selection; the

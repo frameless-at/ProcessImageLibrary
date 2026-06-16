@@ -947,7 +947,7 @@ class ProcessImageLibrary extends Process {
 		$placements = count($rows);
 		$liveByHash = [];
 		foreach ($rows as $r) {
-			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			$h = $keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 			if ($h !== null) $liveByHash[$h] = ($liveByHash[$h] ?? 0) + 1;
 		}
 		$duplicateSets = 0;
@@ -989,15 +989,7 @@ class ProcessImageLibrary extends Process {
 	 * complete.
 	 */
 	public function ___executeScanStep() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		@set_time_limit(60);
 		$offset = (int) $this->wire('input')->post('offset');
 		if ($offset === 0) {
@@ -1018,15 +1010,7 @@ class ProcessImageLibrary extends Process {
 	 * with the returned nextOffset until complete.
 	 */
 	public function ___executeReclaimStep() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		@set_time_limit(60);
 		$r = $this->reclaimStep((int) $this->wire('input')->post('offset'), 4);
 		$r['ok']             = true;
@@ -1069,15 +1053,7 @@ class ProcessImageLibrary extends Process {
 	 * cached disk-saved figure is refreshed so the Status block is correct.
 	 */
 	public function ___executeRevertStep() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		@set_time_limit(60);
 		// Revert works at the FILESYSTEM level, not from the manifest: it un-shares
 		// every file the OS reports as shared (link-count ≥ 2), so it also clears
@@ -1106,15 +1082,7 @@ class ProcessImageLibrary extends Process {
 	 * standalone copies. POST + CSRF, returns the audit numbers (raw + human).
 	 */
 	public function ___executeDiskAudit() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		@set_time_limit(120);
 		$a = $this->diskAudit();
 		$a['ok'] = true;
@@ -1138,17 +1106,7 @@ class ProcessImageLibrary extends Process {
 	 * original, so it costs ~no extra disk. POST + CSRF. Returns { ok, basename }.
 	 */
 	public function ___executeAssign() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input = $this->wire('input');
 		$san   = $this->wire('sanitizer');
@@ -1706,7 +1664,7 @@ class ProcessImageLibrary extends Process {
 		if ($sort === 'usageCount') {
 			$counts = $this->usagePageCountsForRows($rows);
 			foreach ($rows as &$r) {
-				$key = (int) $r['pageId'] . "\0" . (string) $r['fieldName'] . "\0" . (string) $r['basename'];
+				$key = $this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename']);
 				$r['usageCount'] = $counts[$key] ?? 0;
 			}
 			unset($r);
@@ -1732,7 +1690,7 @@ class ProcessImageLibrary extends Process {
 		$keyHash  = $this->loadDuplicateKeyHashes();
 		$ctxCount = [];
 		foreach ($rows as $r) {
-			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			$h = $keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 			if ($h !== null) $ctxCount[$h] = ($ctxCount[$h] ?? 0) + 1;
 		}
 
@@ -1780,7 +1738,7 @@ class ProcessImageLibrary extends Process {
 		// Annotate each visible row with its contextual duplicate count / hash
 		// (replaces the old global attachDuplicateCounts).
 		foreach ($slice as &$row) {
-			$h = $keyHash[$row['pageId'] . "\0" . $row['fieldName'] . "\0" . $row['basename']] ?? null;
+			$h = $keyHash[$this->hashKey((int) $row['pageId'], (string) $row['fieldName'], (string) $row['basename'])] ?? null;
 			$c = ($h !== null) ? ($ctxCount[$h] ?? 0) : 0;
 			$row['dupCount'] = $c >= 2 ? $c : 0;
 			$row['dupHash']  = $c >= 2 ? (string) $h : '';
@@ -1880,7 +1838,7 @@ class ProcessImageLibrary extends Process {
 		$units  = [];
 		$byHash = [];   // content hash => index of its unit in $units
 		foreach ($rows as $r) {
-			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			$h = $keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 			if ($h === null || ($ctxCount[$h] ?? 0) < 2) {  // unique in context
 				$units[] = [$r];
 				continue;
@@ -2089,7 +2047,7 @@ class ProcessImageLibrary extends Process {
 	protected function flatUsedTags(array $rows): array {
 		$set = [];
 		foreach ($rows as $row) {
-			$tags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			$tags = $this->splitImageTags((string) ($row['tags'] ?? ''));
 			foreach ($tags as $t) $set[$t] = true;
 		}
 		$keys = array_keys($set);
@@ -2100,7 +2058,7 @@ class ProcessImageLibrary extends Process {
 	protected function collectUsedTagsByField(array $rows): array {
 		$byField = [];
 		foreach ($rows as $row) {
-			$tags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			$tags = $this->splitImageTags((string) ($row['tags'] ?? ''));
 			if (!$tags) continue;
 			$f = (string) $row['fieldName'];
 			if (!isset($byField[$f])) $byField[$f] = [];
@@ -2399,13 +2357,13 @@ class ProcessImageLibrary extends Process {
 		$this->applySort($rows, $sortState['sort'], $sortState['dir']);
 
 		$keyHash    = $this->loadDuplicateKeyHashes();
-		$targetHash = $keyHash[$cpid . "\0" . $cfield . "\0" . $cbase] ?? null;
+		$targetHash = $keyHash[$this->hashKey($cpid, $cfield, $cbase)] ?? null;
 		if ($targetHash === null) {
 			return '<p class="ml-empty">' . $san->entities($this->_('No duplicates for this image.')) . '</p>';
 		}
 
-		$cluster = array_values(array_filter($rows, static function ($r) use ($keyHash, $targetHash) {
-			return ($keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null) === $targetHash;
+		$cluster = array_values(array_filter($rows, function ($r) use ($keyHash, $targetHash) {
+			return ($keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null) === $targetHash;
 		}));
 		$cluster = $this->hydrateSlice($cluster);
 		// Show every copy as a plain, visible, editable row — clear the dup
@@ -2429,22 +2387,7 @@ class ProcessImageLibrary extends Process {
 	 * for the field.
 	 */
 	public function ___executeSave() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		// Buffer everything — any stray notice or PW startup warning
-		// would otherwise land before our json_encode in the response
-		// body and break the client's JSON.parse.
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -2749,18 +2692,7 @@ class ProcessImageLibrary extends Process {
 	}
 
 	public function ___executeRename() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -2806,6 +2738,11 @@ class ProcessImageLibrary extends Process {
 		}
 		$this->wire('cache')->deleteFor($this);
 
+		// The embed rewrite saved the referencing pages with a field-only save
+		// (no Pages::saved hook), so refresh their where-used rows now — after the
+		// cache clear above, so the stem index sees the new basename.
+		$this->reindexUsageForRefPages($result['embedsRefPageIds'] ?? []);
+
 		$finalBasename = (string) $result['basename'];
 		$finalDot      = strrpos($finalBasename, '.');
 
@@ -2847,18 +2784,7 @@ class ProcessImageLibrary extends Process {
 	 * filemtime so JS can cache-bust the thumbnail.
 	 */
 	public function ___executeReplace() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -2900,6 +2826,39 @@ class ProcessImageLibrary extends Process {
 				'Extension mismatch: existing is .%s, upload is .%s. Replace keeps the original format.',
 				$oldExt, $newExt
 			));
+		}
+
+		// Content validation: the upload must actually BE an image of the
+		// claimed type, not arbitrary bytes under an image extension. Replace
+		// already pins the extension to the original, so matching the bytes to
+		// that extension is enough. getimagesize() doesn't recognise SVG, so
+		// that one format is sniffed for an <svg root instead.
+		$imgInfo = @getimagesize($tmpPath);
+		if ($imgInfo === false) {
+			if ($newExt === 'svg') {
+				$head = (string) @file_get_contents($tmpPath, false, null, 0, 512);
+				if (stripos($head, '<svg') === false) {
+					return $this->jsonError('Upload is not a valid SVG image');
+				}
+			} else {
+				return $this->jsonError('Upload is not a valid image');
+			}
+		} else {
+			$extsByType = [
+				IMAGETYPE_JPEG    => ['jpg', 'jpeg'],
+				IMAGETYPE_PNG     => ['png'],
+				IMAGETYPE_GIF     => ['gif'],
+				IMAGETYPE_WEBP    => ['webp'],
+				IMAGETYPE_BMP     => ['bmp'],
+				IMAGETYPE_TIFF_II => ['tif', 'tiff'],
+				IMAGETYPE_TIFF_MM => ['tif', 'tiff'],
+			];
+			$validExts = $extsByType[(int) $imgInfo[2]] ?? [];
+			if ($validExts && !in_array($newExt, $validExts, true)) {
+				return $this->jsonError(sprintf(
+					'Upload content does not match the .%s extension', $newExt
+				));
+			}
 		}
 
 		$targetPath = (string) $img->filename;
@@ -2994,18 +2953,7 @@ class ProcessImageLibrary extends Process {
 	 * with the other endpoints.
 	 */
 	public function ___executeDelete() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -3109,17 +3057,7 @@ class ProcessImageLibrary extends Process {
 	 * treats absence as "no references found".
 	 */
 	public function ___executeUsage() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$itemsJson = (string) $input->post('items');
@@ -3151,17 +3089,7 @@ class ProcessImageLibrary extends Process {
 	 * Returns { ok, pages: [ { pageId, pageTitle, editUrl, fieldName }, … ] }.
 	 */
 	public function ___executeUsageDetail() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input    = $this->wire('input');
 		$pageId   = (int) $input->post('pageId');
@@ -3203,22 +3131,22 @@ class ProcessImageLibrary extends Process {
 			$pid = (int) $item['pageId'];
 			$bn  = (string) $item['basename'];
 			if (!$pid || $bn === '') continue;
-			$dot  = strrpos($bn, '.');
-			$stem = $dot === false ? $bn : substr($bn, 0, $dot);
+			$stem = $this->basenameStem($bn);
 			if ($stem === '') continue;
 			$key = $pid . ':' . $bn;
 			$byKey[$key] = [];
 			$qs = preg_quote($stem, '#');
-			// pwimage embeds this image's file two different ways, and we must
-			// catch BOTH or a rename/delete silently misses the reference:
-			//   - direct, same page:  /<pid>/<stem>.<variation>.<ext>
-			//   - cross-page insert:  /<anyPid>/<stem>.<variation>-pid<pid>[-...].<ext>
-			//     -- "Insert from library" copies a sized variation onto the
-			//       EDITING page and records the source page as -pid<pid> in the
-			//       filename, so the URL pid is the editing page, NOT this image's.
-			// A loose "/<stem>." needle finds candidates of either form cheaply;
-			// the regex then verifies it's really THIS image (a same-stem image
-			// on another page is rejected).
+			// pwimage stores an inserted variation in the SOURCE image's own files
+			// folder, so its URL is /files/<sourcePid>/<stem>.<variation>[-is][-pid<editorPid>].<ext>
+			// for BOTH same-page and cross-page inserts. The optional -pid<N> marker
+			// records the EDITING page that uses the variation, NOT the source (see
+			// PW core ProcessPageEditImageSelect; the grammar is documented on the
+			// ImageLibraryUsage trait). So the DIRECT branch (/<pid>/<stem>.) already
+			// catches every standard embed of this image. The second branch is a
+			// defensive fallback for the rarer setup where a copy lands in another
+			// page's folder tagged with this image's id; it is a no-op for standard
+			// pwimage data. A loose "/<stem>." needle finds candidates of either
+			// form cheaply; the regex then verifies it is really THIS image.
 			$specs[$key] = [
 				'needle' => '/' . $stem . '.',
 				'regex'  => '#/(?:' . $pid . '/' . $qs . '\.'
@@ -3403,9 +3331,10 @@ class ProcessImageLibrary extends Process {
 		// stem. Rewrite them so they survive the rename. A rewrite failure
 		// must never roll back a rename that already succeeded on disk.
 		$embedRefs = [];
+		$refPageIds = [];
 		try {
 			$embedRefs = $this->rewriteEmbeddedReferences(
-				$img, $page, $oldBasename, (string) $img->basename
+				$img, $page, $oldBasename, (string) $img->basename, $refPageIds
 			);
 		} catch (\Throwable $e) {
 			$this->wire('log')->error(
@@ -3415,11 +3344,12 @@ class ProcessImageLibrary extends Process {
 		}
 
 		return [
-			'ok'              => true,
-			'basename'        => (string) $img->basename,
-			'unchanged'       => false,
-			'embedsRewritten' => count($embedRefs),
-			'embedsRefs'      => $embedRefs,
+			'ok'               => true,
+			'basename'         => (string) $img->basename,
+			'unchanged'        => false,
+			'embedsRewritten'  => count($embedRefs),
+			'embedsRefs'       => $embedRefs,
+			'embedsRefPageIds' => array_keys($refPageIds),
 		];
 	}
 
@@ -3457,7 +3387,7 @@ class ProcessImageLibrary extends Process {
 	 *
 	 * @return array<int,array{pageId:int,pageTitle:string,fieldName:string,editUrl:string}>
 	 */
-	protected function rewriteEmbeddedReferences(Pageimage $img, Page $ownerPage, string $oldBasename, string $newBasename): array {
+	protected function rewriteEmbeddedReferences(Pageimage $img, Page $ownerPage, string $oldBasename, string $newBasename, array &$refPageIds = []): array {
 		$oldDot  = strrpos($oldBasename, '.');
 		$oldStem = $oldDot === false ? $oldBasename : substr($oldBasename, 0, $oldDot);
 		$oldExt  = $oldDot === false ? '' : substr($oldBasename, $oldDot + 1);
@@ -3477,13 +3407,16 @@ class ProcessImageLibrary extends Process {
 
 		$qOld = preg_quote($oldStem, '#');
 		$qExt = preg_quote($oldExt, '#');
-		// pwimage embeds this image two ways; both rewrite ONLY the stem (via a
-		// lookahead) so any variation — crop, multi-dot, hidpi — is preserved,
-		// and the pinned extension keeps a different-type sibling (foo.png) safe:
-		//   direct:     /<pid>/<stem>.<variation>.<ext>
-		//   cross-page: /<anyPid>/<stem>.<variation>-pid<pid>[-hidpi].<ext>
-		//     — "Insert from library" + crop stores an INDEPENDENT copy on the
-		//       EDITING page (its own folder) and records the source as -pid<pid>.
+		// pwimage stores the inserted variation in the SOURCE image's own folder,
+		// so its URL is /<sourcePid>/<stem>.<variation>[-is][-pid<editorPid>].<ext>
+		// for same- and cross-page inserts (-pid<N> is the EDITING page that uses
+		// it, NOT the source; see ImageLibraryUsage / PW core). Both regexes
+		// rewrite ONLY the stem (via a lookahead) so any variation (crop,
+		// multi-dot, hidpi) and the pinned extension stay intact. The direct
+		// branch covers every standard embed; the cross branch is a defensive
+		// fallback for the rarer copy-in-another-folder setup:
+		//   direct: /<pid>/<stem>.<variation>.<ext>
+		//   cross:  /<anyPid>/<stem>.<variation>-pid<pid>[-hidpi].<ext>
 		$directRe = '#(/' . $pid . '/)' . $qOld . '(?=\.[^"\'\s/]*' . $qExt . '\b)#i';
 		$crossRe  = '#(/\d+/)' . $qOld . '(?=\.[^"\'\s/]*-pid' . $pid . '\b[^"\'\s/]*' . $qExt . '\b)#i';
 
@@ -3510,6 +3443,10 @@ class ProcessImageLibrary extends Process {
 				try {
 					if ($this->rewriteTextareaField($refPage, $name, $directRe, $crossRe, $newStem)) {
 						$refPage->save($name);
+						// Field-only save doesn't fire Pages::saved, so the usage
+						// reindex hook won't run for this page — collect its raw id
+						// so the caller can reindex it after the row cache is fresh.
+						$refPageIds[(int) $refPage->id] = true;
 						// The cross-page copy is an independent file PW regenerates
 						// from the source — once the source is renamed it can't, so
 						// the embed breaks. Rename the copy on the editing page to
@@ -3537,13 +3474,17 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Rename the cross-page "Insert from library" copy files this image left on
-	 * another page. Those copies are named "<oldStem>.<variation>-pid<sourcePid>
-	 * …<ext>" in the EDITING page's own files folder — independent of PW's API
-	 * (they're regenerated from the source on render). When the source is
-	 * renamed they'd dangle, so re-stem them here. Only files carrying the exact
-	 * -pid<sourcePid> marker are touched, so an unrelated same-stem image on that
-	 * page is never affected. Filesystem-level, mirroring the dedup engine.
+	 * Defensive cleanup for a NON-standard setup: an "Insert from library" copy
+	 * that landed in the EDITING page's own files folder, named
+	 * "<oldStem>.<variation>-pid<sourcePid>...<ext>" (tagged with the source id).
+	 * In standard pwimage the inserted variation instead lives in the SOURCE
+	 * image's folder and PW regenerates it from the source after a rename, so the
+	 * URL rewrite alone suffices and this scan matches nothing. Where such an
+	 * independent copy DOES exist it would dangle once the source is renamed, so
+	 * re-stem it here. Only files carrying the exact -pid<sourcePid> marker are
+	 * touched, so an unrelated same-stem image on that page is never affected.
+	 * Filesystem-level, mirroring the dedup engine. Harmless no-op on standard
+	 * installs; kept as a safety net.
 	 */
 	protected function renameCrossPageCopies(Page $page, string $oldStem, string $newStem, int $sourcePid): void {
 		$dir = (string) $page->filesPath();
@@ -3715,6 +3656,25 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Shared preamble for every JSON AJAX POST endpoint: flag the request as
+	 * ajax, send the JSON content-type, start output buffering, and enforce
+	 * POST + a valid CSRF token. On failure it emits the JSON error and exits
+	 * (jsonError -> emitJson exits), so returning means the request may proceed.
+	 * Call as the first statement of the endpoint: $this->beginJsonPost();
+	 */
+	protected function beginJsonPost(): void {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			$this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			$this->jsonError('Invalid CSRF token', 403);
+		}
+	}
+
+	/**
 	 * Render an error response with an HTTP status code that JS callers can
 	 * branch on. Returned from executeSave; safe to use in any JSON endpoint.
 	 */
@@ -3768,19 +3728,7 @@ class ProcessImageLibrary extends Process {
 	 * Returns JSON: { ok, succeeded:int, failed:string[] }.
 	 */
 	public function ___executeBulk() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -3842,6 +3790,10 @@ class ProcessImageLibrary extends Process {
 		// instead of clearing it. Only populated by the rename branch
 		// (other subfields don't change basename).
 		$renamed = [];
+		// Raw referencing-page ids whose embeds were rewritten by a rename in
+		// this batch — reindexed once after the cache clear (field-only saves
+		// skip the Pages::saved usage hook).
+		$renamedRefPageIds = [];
 		$failed      = [];
 		$tagsCfg     = $this->getTagsConfig();
 		// New tags entered on mode-3 ("predefined + own") fields during this
@@ -3897,6 +3849,9 @@ class ProcessImageLibrary extends Process {
 					}
 					if (empty($renameResult['unchanged'])) {
 						$fieldsTouched[$fn] = true;
+					}
+					foreach ($renameResult['embedsRefPageIds'] ?? [] as $rid) {
+						$renamedRefPageIds[(int) $rid] = true;
 					}
 					$succeeded++;
 					$newBn = (string) $renameResult['basename'];
@@ -3968,13 +3923,13 @@ class ProcessImageLibrary extends Process {
 					}
 					if ($mode === 'add') {
 						// Union with the row's existing tags, dedup.
-						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$existing = $this->splitImageTags((string) $img->tags);
 						$tokens   = array_values(array_unique(array_merge($existing, $tokens)));
 					} elseif ($mode === 'remove') {
 						// Set difference: drop every token the user
 						// listed from the row's existing tag set. No-op
 						// for rows that don't carry any of them.
-						$existing = preg_split('/\s+/', (string) $img->tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+						$existing = $this->splitImageTags((string) $img->tags);
 						$drop     = array_flip($tokens);
 						$tokens   = array_values(array_filter($existing, function ($t) use ($drop) {
 							return !isset($drop[$t]);
@@ -4033,6 +3988,10 @@ class ProcessImageLibrary extends Process {
 			$this->wire('cache')->deleteFor($this);
 		}
 
+		// Refresh where-used rows for pages whose embeds a rename rewrote — after
+		// the cache clear so the stem index reflects the new basenames.
+		$this->reindexUsageForRefPages(array_keys($renamedRefPageIds));
+
 		// Promote any new mode-3 tags into their fields' predefined lists, so
 		// they're offered on every image. Hand the updated lists back keyed by
 		// field for live client refresh.
@@ -4078,17 +4037,7 @@ class ProcessImageLibrary extends Process {
 	 * load.
 	 */
 	public function ___executeUserPrefs() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$raw = (string) $this->wire('input')->post('prefs');
 		$data = $raw !== '' ? json_decode($raw, true) : null;
@@ -4151,17 +4100,7 @@ class ProcessImageLibrary extends Process {
 	 * end-state), other config keys are preserved.
 	 */
 	public function ___executeSharedPrefs() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		if (!$this->canManageShared()) {
 			return $this->jsonError('Not allowed', 403);
 		}
@@ -4211,17 +4150,7 @@ class ProcessImageLibrary extends Process {
 	 *           '1' → apply (retag/untag images, update tagsList)
 	 */
 	public function ___executeTagBulk() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		if (!$this->canManageShared()) {
 			return $this->jsonError('Not allowed', 403);
 		}
@@ -4682,7 +4611,7 @@ class ProcessImageLibrary extends Process {
 		$out = [];
 		foreach ($this->loadRows() as $r) {
 			if (($r['fieldName'] ?? '') !== $fieldName) continue;
-			foreach (preg_split('/\s+/', (string) ($r['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [] as $t) {
+			foreach ($this->splitImageTags((string) ($r['tags'] ?? '')) as $t) {
 				if (mb_strtolower($t) === $tagLc) {
 					$out[(int) $r['pageId']][] = (string) $r['basename'];
 					break;
@@ -4759,7 +4688,7 @@ class ProcessImageLibrary extends Process {
 				foreach ($items as $img) {
 					if (!is_array($img) || empty($img['data'])) continue;
 					$basename = (string) $img['data'];
-					$seenKey  = $pageId . "\0" . $fieldName . "\0" . $basename;
+					$seenKey  = $this->hashKey($pageId, $fieldName, $basename);
 					if (isset($seen[$seenKey])) continue;   // same physical file already emitted
 					$seen[$seenKey] = true;
 					$rows[] = [
@@ -4818,7 +4747,23 @@ class ProcessImageLibrary extends Process {
 		$qs = ltrim($qs, '?');
 		$params = [];
 		if ($qs !== '') parse_str($qs, $params);
+		return $this->buildFilters($params, $imageFields, $eligibleTemplates, $customCols);
+	}
 
+	/**
+	 * The single source of truth for turning a raw param map (from a parsed
+	 * querystring OR from $input->get) into the canonical filter array
+	 * applyRowFilters consumes. parseFilterQs and readFilterInput differ only in
+	 * WHERE the params come from; this keeps their output byte-identical, which
+	 * the match-aware "row vanished" check relies on.
+	 *
+	 * @param array<string,mixed> $params
+	 * @param array<int,string> $imageFields
+	 * @param array<int,string> $eligibleTemplates
+	 * @param array<int,string> $customCols
+	 * @return array<string,mixed>
+	 */
+	protected function buildFilters(array $params, array $imageFields, array $eligibleTemplates, array $customCols = []): array {
 		$template = (string) ($params['template'] ?? '');
 		$field    = (string) ($params['field'] ?? '');
 
@@ -4827,6 +4772,7 @@ class ProcessImageLibrary extends Process {
 			if (!empty($params['no_custom_' . $name])) $noCustom[$name] = true;
 		}
 
+		// Tags: comma form (?tags=foo,bar) or bracket array form (?tags[]=foo&tags[]=bar).
 		$tags = [];
 		$rawTags = $params['tags'] ?? '';
 		if (is_array($rawTags)) {
@@ -4848,6 +4794,7 @@ class ProcessImageLibrary extends Process {
 			'no_desc'   => !empty($params['no_desc']),
 			'no_tags'   => !empty($params['no_tags']),
 			'no_custom' => $noCustom,
+			'dupes'     => !empty($params['dupes']),
 			'tags'      => $tags,
 			'coll'      => preg_replace('/[^a-z0-9]/i', '', $coll) ?? '',
 			'sel'       => $coll !== '' ? $this->resolveCollectionKeys($coll) : [],
@@ -4863,6 +4810,30 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function rowKey(int $pageId, string $fieldName, string $basename): string {
 		return sprintf('%d:%s:%s', $pageId, $fieldName, $basename);
+	}
+
+	/**
+	 * The INTERNAL hash-map identity key for an image: "pageId\0fieldName\0
+	 * basename". The NUL-joined twin of rowKey() (which uses ':' for the
+	 * client-facing key) — used purely as a PHP array key for the dedup /
+	 * usage maps, where a NUL separator can't collide with field names or
+	 * basenames. Typed params keep the casting consistent across every call
+	 * site (a row's pageId may arrive as int or numeric string).
+	 */
+	protected function hashKey(int $pageId, string $fieldName, string $basename): string {
+		return $pageId . "\0" . $fieldName . "\0" . $basename;
+	}
+
+	/**
+	 * Split a Pageimage tags string into tokens. Image tags are WHITESPACE-
+	 * separated (a single tag may itself contain a comma), so this is
+	 * deliberately NOT splitTags() — that also splits on commas for the
+	 * comma-separated filter-input form.
+	 *
+	 * @return array<int,string>
+	 */
+	protected function splitImageTags(string $tags): array {
+		return preg_split('/\s+/', $tags, -1, PREG_SPLIT_NO_EMPTY) ?: [];
 	}
 
 	/** Hard caps so a malicious / runaway payload can't bloat $user->meta. */
@@ -5102,52 +5073,25 @@ class ProcessImageLibrary extends Process {
 	}
 
 	protected function readFilterInput(array $imageFields, array $eligibleTemplates, array $customCols = []): array {
-		$input    = $this->wire('input');
-		$template = (string) $input->get('template');
-		$field    = (string) $input->get('field');
-
-		$noCustom = [];
-		foreach ($customCols as $name) {
-			if ($input->get('no_custom_' . $name)) {
-				$noCustom[$name] = true;
-			}
-		}
-
-		// Tags filter — AND-match against row tags. Accepts either the
-		// comma-separated form (?tags=foo,bar) that buildUrl emits, or
-		// the legacy PHP-array bracket form (?tags[]=foo&tags[]=bar)
-		// from older bookmarks / direct form submissions.
-		$rawTags = $input->get('tags');
-		$tags = [];
-		if (is_array($rawTags)) {
-			foreach ($rawTags as $t) {
-				$t = trim((string) $t);
-				if ($t !== '') $tags[] = $t;
-			}
-		} elseif (is_string($rawTags) && $rawTags !== '') {
-			foreach ($this->splitTags($rawTags) as $t) {
-				$tags[] = $t;
-			}
-		}
-		$tags = array_values(array_unique($tags));
-
-		// Collection recall: ?coll=<id> resolves (server-side, from $user->meta)
-		// to an explicit row-key set. Exposed as 'sel'; applyRowFilters narrows
-		// the grid to exactly those images.
-		$coll = (string) $input->get('coll');
-
-		return [
-			'q'              => trim((string) $input->get('q')),
-			'template'       => in_array($template, $eligibleTemplates, true) ? $template : '',
-			'field'          => in_array($field, $imageFields, true) ? $field : '',
-			'no_desc'        => (bool) $input->get('no_desc'),
-			'no_tags'        => (bool) $input->get('no_tags'),
-			'no_custom'      => $noCustom,
-			'dupes'          => (bool) $input->get('dupes'),
-			'tags'           => $tags,
-			'coll'           => preg_replace('/[^a-z0-9]/i', '', $coll) ?? '',
-			'sel'            => $coll !== '' ? $this->resolveCollectionKeys($coll) : [],
+		$input  = $this->wire('input');
+		// Collect the same keys parseFilterQs reads from a querystring, then run
+		// the shared builder so both paths emit a byte-identical filter array.
+		// Tags accepts either the comma form (?tags=foo,bar) or the bracket-array
+		// form (?tags[]=foo&tags[]=bar) — buildFilters normalises both.
+		$params = [
+			'q'        => $input->get('q'),
+			'template' => $input->get('template'),
+			'field'    => $input->get('field'),
+			'no_desc'  => $input->get('no_desc'),
+			'no_tags'  => $input->get('no_tags'),
+			'dupes'    => $input->get('dupes'),
+			'tags'     => $input->get('tags'),
+			'coll'     => $input->get('coll'),
 		];
+		foreach ($customCols as $name) {
+			$params['no_custom_' . $name] = $input->get('no_custom_' . $name);
+		}
+		return $this->buildFilters($params, $imageFields, $eligibleTemplates, $customCols);
 	}
 
 	/**
@@ -5391,7 +5335,7 @@ class ProcessImageLibrary extends Process {
 		$filtered = array_values(array_filter($rows, function ($r) use (
 			$hasQ, $reqTerms, $excTerms, $optTerms, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
 		) {
-			if ($dupes && !isset($dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']])) return false;
+			if ($dupes && !isset($dupKeyHashes[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])])) return false;
 			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
 			if ($field !== '' && $r['fieldName'] !== $field) return false;
 
@@ -5449,12 +5393,12 @@ class ProcessImageLibrary extends Process {
 		if ($dupes) {
 			$cnt = [];
 			foreach ($filtered as $r) {
-				$h = $dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+				$h = $dupKeyHashes[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 				if ($h !== null) $cnt[$h] = ($cnt[$h] ?? 0) + 1;
 			}
 			$kept = [];
 			foreach ($filtered as $r) {
-				$h = $dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+				$h = $dupKeyHashes[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 				if ($h !== null && ($cnt[$h] ?? 0) >= 2) $kept[] = $r;
 			}
 			return $kept;
@@ -5931,7 +5875,7 @@ class ProcessImageLibrary extends Process {
 		$usageCounts = $this->usedInColumnVisible() ? $this->usagePageCountsForRows($slice) : [];
 		if ($usageCounts) {
 			foreach ($slice as &$row) {
-				$key = (int) $row['pageId'] . "\0" . (string) $row['fieldName'] . "\0" . (string) $row['basename'];
+				$key = $this->hashKey((int) $row['pageId'], (string) $row['fieldName'], (string) $row['basename']);
 				if (isset($usageCounts[$key])) $row['usageCount'] = (int) $usageCounts[$key];
 			}
 			unset($row);
@@ -6661,7 +6605,7 @@ class ProcessImageLibrary extends Process {
 		if (!$tags) return $rows;
 		$wanted = array_fill_keys($tags, true);
 		return array_values(array_filter($rows, function ($row) use ($wanted) {
-			$rowTags = preg_split('/\s+/', (string) ($row['tags'] ?? ''), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+			$rowTags = $this->splitImageTags((string) ($row['tags'] ?? ''));
 			foreach ($rowTags as $t) {
 				if (isset($wanted[$t])) return true;   // any match → keep
 			}

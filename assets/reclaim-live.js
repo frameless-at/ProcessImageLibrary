@@ -32,6 +32,15 @@
 
 	function fmt(n) { return (n | 0).toLocaleString(); }
 
+	// HTML-escape a server-provided string before it goes into innerHTML.
+	// Today the audit fields are numbers / fixed reason keys, but escaping
+	// keeps it safe if a path or filename ever flows into them.
+	function esc(s) {
+		return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+			return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+		});
+	}
+
 	// Byte → human string, matching the PHP formatFilesize so the live-counted
 	// figure reads the same as the server's. Avoids `| 0` (32-bit) since byte
 	// totals can exceed 2 GB.
@@ -178,9 +187,9 @@
 			if (!d || !d.ok) throw new Error((d && d.error) || 'audit failed');
 			var rows = [
 				['Files scanned',            fmt(d.files) + (d.truncated ? ' (capped)' : '')],
-				['Logical size (what FTP/backup sees)', d.apparentHuman],
-				['Actual disk usage (du)',   d.actualHuman],
-				['→ Space saved by hardlinks', '<strong>' + d.savedHuman + '</strong>']
+				['Logical size (what FTP/backup sees)', esc(d.apparentHuman)],
+				['Actual disk usage (du)',   esc(d.actualHuman)],
+				['→ Space saved by hardlinks', '<strong>' + esc(d.savedHuman) + '</strong>']
 			];
 			// Page Versions is a niche feature — only show its breakdown when the
 			// install actually has version files.
@@ -188,7 +197,7 @@
 			if (hasVersions) {
 				rows.push(['Version files total',  fmt(d.versionFiles)]);
 				rows.push(['  · already shared',   fmt(d.versionShared)]);
-				rows.push(['  · still standalone', fmt(d.versionStandalone) + ' (' + d.versionStandaloneHuman + ' reclaimable)']);
+				rows.push(['  · still standalone', fmt(d.versionStandalone) + ' (' + esc(d.versionStandaloneHuman) + ' reclaimable)']);
 			}
 			var html = '<table class="uk-table uk-table-small uk-table-divider uk-margin-remove">' +
 				rows.map(function (r) {
@@ -199,12 +208,12 @@
 				html += '<div class="uk-text-muted uk-margin-small-top">Why standalone version files weren’t linked:</div>' +
 					'<ul class="uk-list uk-margin-remove-top">' +
 					Object.keys(d.versionReasons).map(function (k) {
-						return '<li>' + k + ': <strong>' + fmt(d.versionReasons[k]) + '</strong></li>';
+						return '<li>' + esc(k) + ': <strong>' + fmt(d.versionReasons[k]) + '</strong></li>';
 					}).join('') + '</ul>';
 			}
 			out.innerHTML = html;
 		}).catch(function (e) {
-			out.innerHTML = '<span class="uk-text-danger">✗ ' + (e && e.message ? e.message : 'error') + '</span>';
+			out.innerHTML = '<span class="uk-text-danger">✗ ' + esc(e && e.message ? e.message : 'error') + '</span>';
 		}).then(function () { btn.disabled = false; });
 	}
 

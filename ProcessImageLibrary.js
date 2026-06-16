@@ -81,6 +81,27 @@
 			return fd;
 		}
 
+		// One place for the POST boilerplate every AJAX endpoint repeated:
+		// FormData (from a plain {key:value} object OR an already-built
+		// FormData) + CSRF token + same-origin + X-Requested-With. Returns the
+		// raw fetch Promise so each caller keeps its own .then()/.catch().
+		function postForm(url, data) {
+			var fd;
+			if (data instanceof FormData) {
+				fd = data;
+			} else {
+				fd = new FormData();
+				if (data) Object.keys(data).forEach(function (k) { fd.append(k, data[k]); });
+			}
+			appendCsrf(fd);
+			return fetch(url, {
+				method: 'POST',
+				credentials: 'same-origin',
+				headers: { 'X-Requested-With': 'XMLHttpRequest' },
+				body: fd
+			});
+		}
+
 		// -- Picker mode ------------------------------------------------
 		// When the library is embedded as a picker (modal iframe in the page
 		// editor), images are chosen via the normal selection checkboxes (in
@@ -148,11 +169,7 @@
 				fd.append('targetField',  root.dataset.targetField || '');
 				// Editing a page version → assign into that version, not live.
 				fd.append('targetVersion', root.dataset.targetVersion || '');
-				appendCsrf(fd);
-				return fetch(assignUrl, {
-					method: 'POST', credentials: 'same-origin',
-					headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd
-				}).then(function (r) { return r.json(); }).then(function (d) {
+				return postForm(assignUrl, fd).then(function (r) { return r.json(); }).then(function (d) {
 					return !!(d && d.ok);
 				}).catch(function () { return false; });
 			}
@@ -229,13 +246,7 @@
 			// Send the current filter URL state so the server can
 			// tell us whether the saved row still belongs in this view.
 			fd.append('filterQs', location.search || '');
-			appendCsrf(fd);
-			return fetch(config.saveUrl, {
-				method: 'POST',
-				body: fd,
-				credentials: 'same-origin',
-				headers: { 'X-Requested-With': 'XMLHttpRequest' }
-			}).then(function (res) {
+			return postForm(config.saveUrl, fd).then(function (res) {
 				return res.json().then(function (data) { return { status: res.status, data: data }; });
 			});
 		}
@@ -843,8 +854,7 @@
 		function tagBulkFetch(params) {
 			var fd = new FormData();
 			Object.keys(params).forEach(function (k) { fd.append(k, params[k]); });
-			appendCsrf(fd);
-			return fetch(config.tagBulkUrl, { method: 'POST', body: fd, credentials: 'same-origin' })
+			return postForm(config.tagBulkUrl, fd)
 				.then(function (r) { return r.json(); });
 		}
 
@@ -1459,12 +1469,7 @@
 						fd.append('fieldName', td.dataset.field);
 						fd.append('basename',  td.dataset.basename);
 						fd.append('value',     newStem);
-						appendCsrf(fd);
-						return fetch(config.renameUrl, {
-							method: 'POST',
-							body: fd,
-							credentials: 'same-origin'
-						}).then(function (res) {
+						return postForm(config.renameUrl, fd).then(function (res) {
 							return res.json().then(function (data) {
 								return { status: res.status, data: data };
 							});
@@ -2057,14 +2062,7 @@
 			fd.append('fieldName', field);
 			fd.append('basename', basename);
 			fd.append('file', file);
-			appendCsrf(fd);
-
-			fetch(config.replaceUrl, {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'X-Requested-With': 'XMLHttpRequest' },
-				body: fd
-			}).then(function (res) {
+			postForm(config.replaceUrl, fd).then(function (res) {
 				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
 			}).then(function (data) {
 				if (!data || !data.ok) {
@@ -2324,13 +2322,7 @@
 			});
 			var fd = new FormData();
 			fd.append('items', JSON.stringify(payload));
-			appendCsrf(fd);
-			return fetch(config.usageUrl, {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'X-Requested-With': 'XMLHttpRequest' },
-				body: fd
-			}).then(function (res) {
+			return postForm(config.usageUrl, fd).then(function (res) {
 				return res.json().catch(function () { return null; });
 			}).then(function (data) {
 				return (data && data.ok && data.usage) ? data.usage : {};
@@ -2454,13 +2446,7 @@
 			fd.append('pageId', pageId);
 			fd.append('field', field || '');
 			fd.append('basename', basename);
-			appendCsrf(fd);
-			fetch(config.usageDetailUrl, {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'X-Requested-With': 'XMLHttpRequest' },
-				body: fd
-			}).then(function (r) {
+			postForm(config.usageDetailUrl, fd).then(function (r) {
 				return r.json().catch(function () { return null; });
 			}).then(function (d) {
 				body.textContent = '';
@@ -2611,11 +2597,23 @@
 			return map;
 		}
 
+		// Like rowsByKey(), but maps to the row/card element in EITHER view
+		// (table .ml-row / gallery .ml-card) so callers never interpolate a
+		// basename-bearing data-key into a CSS attribute selector.
+		function rowElsByKey() {
+			var map = {};
+			if (!results) return map;
+			results.querySelectorAll('.ml-select-row').forEach(function (cb) {
+				var row = cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
+				if (cb.dataset.key && row) map[cb.dataset.key] = row;
+			});
+			return map;
+		}
+
 		function deleteItems(items) {
 			if (!config.deleteUrl || !items.length) return;
 			var fd = new FormData();
 			fd.append('items', JSON.stringify(items));
-			appendCsrf(fd);
 			// Mark rows about to be deleted so they fade out — the
 			// actual removal happens once the server reports back
 			// which ones succeeded.
@@ -2625,12 +2623,7 @@
 				if (map[k]) map[k].classList.add('ml-row-uploading');
 			});
 
-			fetch(config.deleteUrl, {
-				method: 'POST',
-				credentials: 'same-origin',
-				headers: { 'X-Requested-With': 'XMLHttpRequest' },
-				body: fd
-			}).then(function (res) {
+			postForm(config.deleteUrl, fd).then(function (res) {
 				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
 			}).then(function (data) {
 				// Drop the uploading state regardless — the rows we
@@ -2821,13 +2814,7 @@
 			// the single-save postSave() path.
 			fd.append('filterQs', location.search || '');
 			if (extra) Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
-			appendCsrf(fd);
-
-			return fetch(config.bulkUrl, {
-				method: 'POST',
-				body: fd,
-				credentials: 'same-origin'
-			}).then(function (res) {
+			return postForm(config.bulkUrl, fd).then(function (res) {
 				return res.json().then(function (data) { return { status: res.status, data: data }; });
 			}).finally(function () {
 				isBulking = false;
@@ -3534,12 +3521,7 @@
 					bookmarks: bookmarks,
 					collections: sharedCollections
 				}));
-				appendCsrf(fd);
-				fetch(config.sharedPrefsUrl, {
-					method: 'POST',
-					body: fd,
-					credentials: 'same-origin'
-				}).catch(function (err) {
+				postForm(config.sharedPrefsUrl, fd).catch(function (err) {
 					console.error('[ImageLibrary] save shared prefs failed:', err);
 				});
 			}, 400);
@@ -3577,12 +3559,7 @@
 					thumbScale: thumbScale,
 					viewMode:  viewMode
 				}));
-				appendCsrf(fd);
-				fetch(config.userPrefsUrl, {
-					method: 'POST',
-					body: fd,
-					credentials: 'same-origin'
-				}).catch(function (err) {
+				postForm(config.userPrefsUrl, fd).catch(function (err) {
 					console.error('[ImageLibrary] save user prefs failed:', err);
 				});
 			}, 400);
@@ -4817,13 +4794,13 @@
 			if (!viewed || !results) return 0;
 			var subtree = collSubtreeSet(sharedCollections, viewed);
 			var removed = 0;
+			var rowEls = rowElsByKey();
 			keys.forEach(function (k) {
 				var stillIn = sharedCollections.some(function (c) {
 					return c && subtree[c.id] && c.keys && c.keys.indexOf(k) !== -1;
 				});
 				if (stillIn) return;
-				var cb = results.querySelector('.ml-select-row[data-key="' + k + '"]');
-				var row = cb && cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
+				var row = rowEls[k];
 				if (row) { row.remove(); selection.delete(k); removed++; }
 			});
 			return removed;
@@ -4963,14 +4940,10 @@
 				});
 			});
 			var removed = Object.keys(removedKeys).length;
+			var rowEls = rowElsByKey();
 			selKeys.forEach(function (k) {
-				// k is wrapped in quotes here, so the raw value is correct (row
-				// keys never contain a double-quote).
-				if (results) {
-					var cb = results.querySelector('.ml-select-row[data-key="' + k + '"]');
-					var row = cb && cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
-					if (row) row.remove();
-				}
+				var row = rowEls[k];
+				if (row) row.remove();
 			});
 			if (found.shared) saveSharedPrefs(); else saveUserPrefs();
 			clearSelectionConfirm();
