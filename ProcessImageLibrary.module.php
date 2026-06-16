@@ -2362,7 +2362,7 @@ class ProcessImageLibrary extends Process {
 			return '<p class="ml-empty">' . $san->entities($this->_('No duplicates for this image.')) . '</p>';
 		}
 
-		$cluster = array_values(array_filter($rows, static function ($r) use ($keyHash, $targetHash) {
+		$cluster = array_values(array_filter($rows, function ($r) use ($keyHash, $targetHash) {
 			return ($keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null) === $targetHash;
 		}));
 		$cluster = $this->hydrateSlice($cluster);
