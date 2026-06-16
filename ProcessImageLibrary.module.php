@@ -5294,6 +5294,38 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Parse a free-text query into REQUIRED and EXCLUDED terms for a tokenised,
+	 * case-insensitive substring search:
+	 *   - whitespace separates terms; every plain / +term must match (AND)
+	 *   - a term prefixed with - is EXCLUDED (the row must NOT contain it)
+	 *   - a "quoted phrase" (optionally signed) matches its words contiguously
+	 * Lone signs and empty quotes are ignored. Terms are lower-cased so the
+	 * caller matches them against a lower-cased haystack.
+	 *
+	 * @return array{0:array<int,string>,1:array<int,string>} [required, excluded]
+	 */
+	protected function parseSearchTerms(string $q): array {
+		$q = trim($q);
+		if ($q === '') return [[], []];
+		$required = [];
+		$excluded = [];
+		// Token = optional +/- sign, then a "quoted phrase" or a run of non-space.
+		if (!preg_match_all('/([+-]?)(?:"([^"]*)"|(\S+))/u', $q, $matches, PREG_SET_ORDER)) {
+			return [[], []];
+		}
+		foreach ($matches as $tok) {
+			$sign = $tok[1];
+			// $tok[2] = quoted body (may be ''), $tok[3] = bare word.
+			$term = ($tok[2] !== '') ? $tok[2] : ($tok[3] ?? '');
+			$term = mb_strtolower(trim($term));
+			if ($term === '') continue;
+			if ($sign === '-') $excluded[] = $term;
+			else $required[] = $term;
+		}
+		return [array_values(array_unique($required)), array_values(array_unique($excluded))];
+	}
+
+	/**
 	 * Apply PHP-level row filters that PW's findRaw selector can't (or shouldn't)
 	 * express. Template narrowing is already done at the selector level in
 	 * loadRows; here we handle the per-image-row filters.
@@ -5320,8 +5352,8 @@ class ProcessImageLibrary extends Process {
 			}));
 		}
 
-		$q        = mb_strtolower($filters['q']);
-		$hasQ     = $q !== '';
+		[$reqTerms, $excTerms] = $this->parseSearchTerms((string) $filters['q']);
+		$hasQ     = $reqTerms !== [] || $excTerms !== [];
 		$tplName  = (string) ($filters['template'] ?? '');
 		$field    = $filters['field'];
 		$noDesc   = $filters['no_desc'];
@@ -5348,7 +5380,7 @@ class ProcessImageLibrary extends Process {
 		}
 
 		$filtered = array_values(array_filter($rows, function ($r) use (
-			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
+			$hasQ, $reqTerms, $excTerms, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
 		) {
 			if ($dupes && !isset($dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']])) return false;
 			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
@@ -5382,7 +5414,13 @@ class ProcessImageLibrary extends Process {
 					. $this->normalizeDescription($r['pageTitle'] ?? '') . ' '
 					. $customHay
 				);
-				if (mb_strpos($hay, $q) === false) return false;
+				// AND over required terms, NONE of the excluded terms.
+				foreach ($reqTerms as $t) {
+					if (mb_strpos($hay, $t) === false) return false;
+				}
+				foreach ($excTerms as $t) {
+					if (mb_strpos($hay, $t) !== false) return false;
+				}
 			}
 			return true;
 		}));
@@ -6426,6 +6464,9 @@ class ProcessImageLibrary extends Process {
 		$q->name        = 'q';
 		$q->label       = $this->_('Search');
 		$q->placeholder = $this->_('Page title, description, tags, filename, customs');
+		// Searches all of the above. Multiple words = all must match; -word
+		// excludes; "quote a phrase" to match it whole.
+		$q->notes       = $this->_('Multiple words: all must match. Use -word to exclude, "quotes" for an exact phrase.');
 		$q->value       = $filters['q'];
 		$q->columnWidth = $this->pickerMode ? 100 : 33;
 		$outer->add($q);
