@@ -989,15 +989,7 @@ class ProcessImageLibrary extends Process {
 	 * complete.
 	 */
 	public function ___executeScanStep() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		@set_time_limit(60);
 		$offset = (int) $this->wire('input')->post('offset');
 		if ($offset === 0) {
@@ -1018,15 +1010,7 @@ class ProcessImageLibrary extends Process {
 	 * with the returned nextOffset until complete.
 	 */
 	public function ___executeReclaimStep() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		@set_time_limit(60);
 		$r = $this->reclaimStep((int) $this->wire('input')->post('offset'), 4);
 		$r['ok']             = true;
@@ -1069,15 +1053,7 @@ class ProcessImageLibrary extends Process {
 	 * cached disk-saved figure is refreshed so the Status block is correct.
 	 */
 	public function ___executeRevertStep() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		@set_time_limit(60);
 		// Revert works at the FILESYSTEM level, not from the manifest: it un-shares
 		// every file the OS reports as shared (link-count ≥ 2), so it also clears
@@ -1106,15 +1082,7 @@ class ProcessImageLibrary extends Process {
 	 * standalone copies. POST + CSRF, returns the audit numbers (raw + human).
 	 */
 	public function ___executeDiskAudit() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		@set_time_limit(120);
 		$a = $this->diskAudit();
 		$a['ok'] = true;
@@ -1138,17 +1106,7 @@ class ProcessImageLibrary extends Process {
 	 * original, so it costs ~no extra disk. POST + CSRF. Returns { ok, basename }.
 	 */
 	public function ___executeAssign() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		if (!$this->wire('session')->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input = $this->wire('input');
 		$san   = $this->wire('sanitizer');
@@ -2429,22 +2387,7 @@ class ProcessImageLibrary extends Process {
 	 * for the field.
 	 */
 	public function ___executeSave() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		// Buffer everything — any stray notice or PW startup warning
-		// would otherwise land before our json_encode in the response
-		// body and break the client's JSON.parse.
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -2749,18 +2692,7 @@ class ProcessImageLibrary extends Process {
 	}
 
 	public function ___executeRename() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -2852,18 +2784,7 @@ class ProcessImageLibrary extends Process {
 	 * filemtime so JS can cache-bust the thumbnail.
 	 */
 	public function ___executeReplace() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -3032,18 +2953,7 @@ class ProcessImageLibrary extends Process {
 	 * with the other endpoints.
 	 */
 	public function ___executeDelete() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -3147,17 +3057,7 @@ class ProcessImageLibrary extends Process {
 	 * treats absence as "no references found".
 	 */
 	public function ___executeUsage() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$itemsJson = (string) $input->post('items');
@@ -3189,17 +3089,7 @@ class ProcessImageLibrary extends Process {
 	 * Returns { ok, pages: [ { pageId, pageTitle, editUrl, fieldName }, … ] }.
 	 */
 	public function ___executeUsageDetail() {
-		$this->wire('config')->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input    = $this->wire('input');
 		$pageId   = (int) $input->post('pageId');
@@ -3767,6 +3657,25 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Shared preamble for every JSON AJAX POST endpoint: flag the request as
+	 * ajax, send the JSON content-type, start output buffering, and enforce
+	 * POST + a valid CSRF token. On failure it emits the JSON error and exits
+	 * (jsonError -> emitJson exits), so returning means the request may proceed.
+	 * Call as the first statement of the endpoint: $this->beginJsonPost();
+	 */
+	protected function beginJsonPost(): void {
+		$this->wire('config')->ajax = true;
+		header('Content-Type: application/json');
+		ob_start();
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			$this->jsonError('POST required', 405);
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			$this->jsonError('Invalid CSRF token', 403);
+		}
+	}
+
+	/**
 	 * Render an error response with an HTTP status code that JS callers can
 	 * branch on. Returned from executeSave; safe to use in any JSON endpoint.
 	 */
@@ -3820,19 +3729,7 @@ class ProcessImageLibrary extends Process {
 	 * Returns JSON: { ok, succeeded:int, failed:string[] }.
 	 */
 	public function ___executeBulk() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		header('Content-Type: application/json');
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$input     = $this->wire('input');
 		$sanitizer = $this->wire('sanitizer');
@@ -4141,17 +4038,7 @@ class ProcessImageLibrary extends Process {
 	 * load.
 	 */
 	public function ___executeUserPrefs() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 
 		$raw = (string) $this->wire('input')->post('prefs');
 		$data = $raw !== '' ? json_decode($raw, true) : null;
@@ -4214,17 +4101,7 @@ class ProcessImageLibrary extends Process {
 	 * end-state), other config keys are preserved.
 	 */
 	public function ___executeSharedPrefs() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		if (!$this->canManageShared()) {
 			return $this->jsonError('Not allowed', 403);
 		}
@@ -4274,17 +4151,7 @@ class ProcessImageLibrary extends Process {
 	 *           '1' → apply (retag/untag images, update tagsList)
 	 */
 	public function ___executeTagBulk() {
-		$config = $this->wire('config');
-		$config->ajax = true;
-		ob_start();
-
-		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
-			return $this->jsonError('POST required', 405);
-		}
-		$session = $this->wire('session');
-		if (!$session->CSRF->hasValidToken()) {
-			return $this->jsonError('Invalid CSRF token', 403);
-		}
+		$this->beginJsonPost();
 		if (!$this->canManageShared()) {
 			return $this->jsonError('Not allowed', 403);
 		}
