@@ -513,7 +513,7 @@ trait ImageLibraryUsage {
 	 */
 	protected function imageClusterKeys(int $pageId, string $fieldName, string $basename, array $dupKeyHashes, array $membersByHash): array {
 		$self = $pageId . "\0" . $this->basenameStem($basename);
-		$hash = $dupKeyHashes[$pageId . "\0" . $fieldName . "\0" . $basename] ?? null;
+		$hash = $dupKeyHashes[$this->hashKey($pageId, $fieldName, $basename)] ?? null;
 		if ($hash === null || empty($membersByHash[$hash])) return [$self];
 
 		$keys = [$self => true];

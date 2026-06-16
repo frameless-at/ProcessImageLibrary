@@ -135,7 +135,7 @@ trait ImageLibraryHashing {
 				'SELECT page_id, field_name, basename FROM `' . self::METALOCK_TABLE . '`'
 			);
 			while ($r = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-				$out[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']] = true;
+				$out[$this->hashKey((int) $r['page_id'], (string) $r['field_name'], (string) $r['basename'])] = true;
 			}
 		} catch (\Throwable $e) {
 			$this->wire('log')->error('ImageLibrary: loadLockSet query failed: ' . $e->getMessage());
@@ -218,7 +218,7 @@ trait ImageLibraryHashing {
 				);
 				$rows->execute($hashes);
 				while ($r = $rows->fetch(\PDO::FETCH_ASSOC)) {
-					$keys[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']]
+					$keys[$this->hashKey((int) $r['page_id'], (string) $r['field_name'], (string) $r['basename'])]
 						= (string) $r['content_hash'];
 				}
 			}
@@ -615,7 +615,7 @@ trait ImageLibraryHashing {
 		// Version-inclusive: version-copy files are legitimately deduped, so
 		// their fingerprint rows must NOT be pruned as orphans.
 		foreach ($this->loadImageRowsAll() as $r) {
-			$live[(int) $r['pageId'] . "\0" . (string) $r['fieldName'] . "\0" . (string) $r['basename']] = true;
+			$live[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] = true;
 		}
 		// Safety: an empty live set means discovery/cache hiccuped, NOT that the
 		// whole library vanished. Pruning against it would wipe every fingerprint
@@ -628,7 +628,7 @@ trait ImageLibraryHashing {
 			$stale = [];
 			while ($r = $sel->fetch(\PDO::FETCH_ASSOC)) {
 				$pid = (int) $r['page_id']; $fn = (string) $r['field_name']; $bn = (string) $r['basename'];
-				if (isset($live[$pid . "\0" . $fn . "\0" . $bn])) continue;     // live original
+				if (isset($live[$this->hashKey($pid, $fn, $bn)])) continue;     // live original
 				$stale[] = [$pid, $fn, $bn];
 			}
 			if ($stale) {

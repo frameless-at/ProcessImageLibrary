@@ -947,7 +947,7 @@ class ProcessImageLibrary extends Process {
 		$placements = count($rows);
 		$liveByHash = [];
 		foreach ($rows as $r) {
-			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			$h = $keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 			if ($h !== null) $liveByHash[$h] = ($liveByHash[$h] ?? 0) + 1;
 		}
 		$duplicateSets = 0;
@@ -1664,7 +1664,7 @@ class ProcessImageLibrary extends Process {
 		if ($sort === 'usageCount') {
 			$counts = $this->usagePageCountsForRows($rows);
 			foreach ($rows as &$r) {
-				$key = (int) $r['pageId'] . "\0" . (string) $r['fieldName'] . "\0" . (string) $r['basename'];
+				$key = $this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename']);
 				$r['usageCount'] = $counts[$key] ?? 0;
 			}
 			unset($r);
@@ -1690,7 +1690,7 @@ class ProcessImageLibrary extends Process {
 		$keyHash  = $this->loadDuplicateKeyHashes();
 		$ctxCount = [];
 		foreach ($rows as $r) {
-			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			$h = $keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 			if ($h !== null) $ctxCount[$h] = ($ctxCount[$h] ?? 0) + 1;
 		}
 
@@ -1738,7 +1738,7 @@ class ProcessImageLibrary extends Process {
 		// Annotate each visible row with its contextual duplicate count / hash
 		// (replaces the old global attachDuplicateCounts).
 		foreach ($slice as &$row) {
-			$h = $keyHash[$row['pageId'] . "\0" . $row['fieldName'] . "\0" . $row['basename']] ?? null;
+			$h = $keyHash[$this->hashKey((int) $row['pageId'], (string) $row['fieldName'], (string) $row['basename'])] ?? null;
 			$c = ($h !== null) ? ($ctxCount[$h] ?? 0) : 0;
 			$row['dupCount'] = $c >= 2 ? $c : 0;
 			$row['dupHash']  = $c >= 2 ? (string) $h : '';
@@ -1838,7 +1838,7 @@ class ProcessImageLibrary extends Process {
 		$units  = [];
 		$byHash = [];   // content hash => index of its unit in $units
 		foreach ($rows as $r) {
-			$h = $keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+			$h = $keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 			if ($h === null || ($ctxCount[$h] ?? 0) < 2) {  // unique in context
 				$units[] = [$r];
 				continue;
@@ -2357,13 +2357,13 @@ class ProcessImageLibrary extends Process {
 		$this->applySort($rows, $sortState['sort'], $sortState['dir']);
 
 		$keyHash    = $this->loadDuplicateKeyHashes();
-		$targetHash = $keyHash[$cpid . "\0" . $cfield . "\0" . $cbase] ?? null;
+		$targetHash = $keyHash[$this->hashKey($cpid, $cfield, $cbase)] ?? null;
 		if ($targetHash === null) {
 			return '<p class="ml-empty">' . $san->entities($this->_('No duplicates for this image.')) . '</p>';
 		}
 
 		$cluster = array_values(array_filter($rows, static function ($r) use ($keyHash, $targetHash) {
-			return ($keyHash[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null) === $targetHash;
+			return ($keyHash[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null) === $targetHash;
 		}));
 		$cluster = $this->hydrateSlice($cluster);
 		// Show every copy as a plain, visible, editable row — clear the dup
@@ -4689,7 +4689,7 @@ class ProcessImageLibrary extends Process {
 				foreach ($items as $img) {
 					if (!is_array($img) || empty($img['data'])) continue;
 					$basename = (string) $img['data'];
-					$seenKey  = $pageId . "\0" . $fieldName . "\0" . $basename;
+					$seenKey  = $this->hashKey($pageId, $fieldName, $basename);
 					if (isset($seen[$seenKey])) continue;   // same physical file already emitted
 					$seen[$seenKey] = true;
 					$rows[] = [
@@ -4811,6 +4811,18 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function rowKey(int $pageId, string $fieldName, string $basename): string {
 		return sprintf('%d:%s:%s', $pageId, $fieldName, $basename);
+	}
+
+	/**
+	 * The INTERNAL hash-map identity key for an image: "pageId\0fieldName\0
+	 * basename". The NUL-joined twin of rowKey() (which uses ':' for the
+	 * client-facing key) — used purely as a PHP array key for the dedup /
+	 * usage maps, where a NUL separator can't collide with field names or
+	 * basenames. Typed params keep the casting consistent across every call
+	 * site (a row's pageId may arrive as int or numeric string).
+	 */
+	protected function hashKey(int $pageId, string $fieldName, string $basename): string {
+		return $pageId . "\0" . $fieldName . "\0" . $basename;
 	}
 
 	/** Hard caps so a malicious / runaway payload can't bloat $user->meta. */
@@ -5312,7 +5324,7 @@ class ProcessImageLibrary extends Process {
 		$filtered = array_values(array_filter($rows, function ($r) use (
 			$hasQ, $reqTerms, $excTerms, $optTerms, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
 		) {
-			if ($dupes && !isset($dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']])) return false;
+			if ($dupes && !isset($dupKeyHashes[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])])) return false;
 			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
 			if ($field !== '' && $r['fieldName'] !== $field) return false;
 
@@ -5370,12 +5382,12 @@ class ProcessImageLibrary extends Process {
 		if ($dupes) {
 			$cnt = [];
 			foreach ($filtered as $r) {
-				$h = $dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+				$h = $dupKeyHashes[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 				if ($h !== null) $cnt[$h] = ($cnt[$h] ?? 0) + 1;
 			}
 			$kept = [];
 			foreach ($filtered as $r) {
-				$h = $dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']] ?? null;
+				$h = $dupKeyHashes[$this->hashKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename'])] ?? null;
 				if ($h !== null && ($cnt[$h] ?? 0) >= 2) $kept[] = $r;
 			}
 			return $kept;
@@ -5852,7 +5864,7 @@ class ProcessImageLibrary extends Process {
 		$usageCounts = $this->usedInColumnVisible() ? $this->usagePageCountsForRows($slice) : [];
 		if ($usageCounts) {
 			foreach ($slice as &$row) {
-				$key = (int) $row['pageId'] . "\0" . (string) $row['fieldName'] . "\0" . (string) $row['basename'];
+				$key = $this->hashKey((int) $row['pageId'], (string) $row['fieldName'], (string) $row['basename']);
 				if (isset($usageCounts[$key])) $row['usageCount'] = (int) $usageCounts[$key];
 			}
 			unset($row);
