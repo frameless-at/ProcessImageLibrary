@@ -98,7 +98,7 @@ Two-tier model:
 
 - **`image-library-access`** — gates the admin page itself. Without it the page is invisible.
 - **`page-edit` on the target page** — checked per cell, per AJAX endpoint. Editors only ever modify pages they could already edit through the standard Page-Edit UI. The library doesn't elevate access; it just gives editors a faster surface for the same operations.
-- **`image-library-manage-shared`** *(optional)* — gates the site-wide actions that go beyond a single page: managing shared (team) bookmarks and collections, and renaming / deleting tags across the whole library (see **[Managing the tag vocabulary](#managing-the-tag-vocabulary)**). Superusers always have it; grant it to trusted editors as needed. The permission is created automatically on install / upgrade.
+- **`image-library-manage-shared`** *(optional)* — gates the site-wide actions that go beyond a single page: managing the **team-wide** bookmarks and collections (there's one shared set — no per-user variant), and renaming / deleting tags across the whole library (see **[Managing the tag vocabulary](#managing-the-tag-vocabulary)**). Superusers always have it; grant it to trusted editors as needed. The permission is created automatically on install / upgrade.
 
 ## Module configuration
 
