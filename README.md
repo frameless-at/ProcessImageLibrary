@@ -52,20 +52,20 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
 
 ## Quick tour
 
-- **Single view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates — including images that live inside Repeater / RepeaterMatrix fields, resolved up to their owner page. Rows are `(page, field, basename)` tuples.
-- **Table or masonry gallery** — toggle between the data table and a thumbnail gallery that packs tiles into **height-balanced columns** (shortest-column masonry) for fast visual scanning; click a tile to open the per-image editor, or use the hover-revealed checkbox to select it. A size slider scales thumbnails (table) / tiles (gallery) live. Both choices persist per user via `$user->meta`.
-- **Inline editing** for description, tags and any custom subfields (PW 3.0.142+ field-on-image templates). Click a cell, type, hit save — that's it. Multilang installs get per-language tabs in the editor. For predefined-tag fields the tag editor also **manages the vocabulary**: add new tags, or rename / delete a tag library-wide straight from the chip, with the table updating live.
-- **Bulk edits as paintbrush** — tick a few rows, then edit any cell on a selected row to broadcast the change to all selected rows. Works for description, tags, customs, and filenames (with placeholder syntax for numbering).
-- **Replace image in place** — drag a file onto the row or click the upload icon. The basename + every URL stay intact, variations regenerate, metadata is preserved. Extension match enforced so format conversions can't sneak in.
-- **Delete (single + batch)** — trash icon on the row hides behind a confirm dialog. Selection-as-paintbrush works here too: with N rows ticked, clicking the trash on any selected row deletes the whole selection.
-- **Automatic de-duplication** — byte-identical images are fingerprinted and collapsed onto one hardlinked file (lossless, reversible), so duplicate copies cost disk space only once. Runs by itself (on save + hourly); a *Duplicates* filter, copy-count badges and an expandable cluster view surface them, and the config page shows the disk saved with manual Scan / Re-measure / Revert tools.
-- **Where-used column** (opt-in) — see at a glance how many pages embed an image in their rich-text (CKEditor / TinyMCE), and click through to the list of pages + fields. Content-based, so it spans an image's duplicate copies; powered by a cached reverse index maintained on save, the same shape as the dedup engine.
-- **Bookmarks** — save the current filter combination as a named tab above the filter bar. Click a tab to jump back to that view; the filter form repopulates so what you see matches what's applied. Persisted per user via `$user->meta`, cross-device. The "+ Add bookmark" tab surfaces only when the active filter isn't already saved.
-- **Collections** — curate an arbitrary set of images that no filter could reproduce: tick checkboxes, save them as a named collection tab in the same strip. Recall the exact set instantly via a short `?coll=<id>` URL (the image keys live in `$user->meta`, never the URL — a 100-image collection is still a ~12-character link). Grow / trim a collection by clicking its tab while a selection is active; the cursor shows whether the click **adds** (+) or **removes** (−). Collections can themselves be filtered.
-- **Picker add-ons** (optional, off by default) — two opt-in integrations that let editors pull a library image in elsewhere: a *Choose from library* button on every image field, and an *Insert from library* button in TinyMCE / CKEditor (admin + front-end inline editor). No re-upload — the existing file is assigned / embedded; on a versioned page it lands in that version's folder.
-- **Filter, sort, paginate** with URL-state persistence so the view is bookmarkable. Per-user column visibility and order, page size — all stored in `$user->meta` so they follow the user across devices.
-- **Export / Import** the current filter set as JSON or CSV, edit externally, re-upload to apply. Multilang values round-trip in language-suffixed columns.
-- **Server-side performance** with `findRaw` + `WireCache` so listings stay fast across thousands of images. Thumbnails reuse PW's lazily-generated 260 px admin variation whenever possible, falling back to a custom size only when the configured display exceeds it.
+- **One view of every image** — all `FieldtypeImage` fields across every template (Repeater / RepeaterMatrix resolved to the owner page), one row per `(page, field, basename)`.
+- **Table or masonry gallery** — a data table for column-by-column editing, or a shortest-column masonry for visual browsing; size slider scales live, view + zoom persist per user.
+- **Inline editing** — click a cell to edit description, tags or custom subfields; multilang gets per-language tabs, and predefined-tag fields double as a library-wide tag-vocabulary manager.
+- **Bulk edits as a paintbrush** — tick rows, edit any cell on a selected one, and the change broadcasts to the whole selection (description, tags, customs, filenames).
+- **Replace in place** — drop a file on the row; the basename and every URL stay intact, variations regenerate, metadata is preserved (same format only).
+- **Delete (single + batch)** — confirm-gated trash icon; with rows ticked it removes the whole selection.
+- **Automatic de-duplication** — byte-identical copies collapse onto one hardlinked file (lossless, reversible), so they cost disk once; a *Duplicates* filter and cluster view surface them.
+- **Where-used column** (opt-in) — how many pages embed an image in rich text (CKEditor / TinyMCE), with click-through; content-based, via a cached index.
+- **Bookmarks & collections** — a team-wide tab strip: bookmarks save a *filter*, collections save a *hand-picked set* (recalled via a short `?coll=` link). Both support folders / nesting and are managed in one dialog (managers only).
+- **Collections column** — see and re-assign each image's collections inline from the table, single row or batch.
+- **Picker add-ons** (off by default) — pull a library image into any image field (*Choose from library*) or into TinyMCE / CKEditor (*Insert from library*) with no re-upload.
+- **Filter, sort, paginate** — URL-state-persistent so the view is bookmarkable; column visibility / order and page size persist per user.
+- **Export / Import** — round-trip the current set as JSON or CSV, multilang columns included.
+- **Fast at scale** — `findRaw` + `WireCache` keep listings quick across thousands of images; thumbnails reuse PW's 260 px admin variation where possible.
 
 ## Table and gallery views
 
