@@ -280,24 +280,13 @@ class ProcessImageLibrary extends Process {
 					$pageSize = $ps;
 				}
 			}
-			if (isset($raw['bookmarks']) && is_array($raw['bookmarks'])) {
-				foreach ($raw['bookmarks'] as $b) {
-					if (!is_array($b)) continue;
-					$name = (string) ($b['name'] ?? '');
-					$qs   = (string) ($b['qs']   ?? '');
-					if ($name === '') continue;
-					$bookmarks[] = ['name' => $name, 'qs' => $qs];
-				}
-			}
-			// Collections: a saved set of specific images (row-keys), recalled
-			// by ?coll=<id>. Stored as DATA here (not in the URL) so a 100-image
-			// collection stays a 12-char link. See sanitizeCollection().
-			if (isset($raw['collections']) && is_array($raw['collections'])) {
-				foreach ($raw['collections'] as $c) {
-					$clean = $this->sanitizeCollection($c);
-					if ($clean !== null) $collections[] = $clean;
-				}
-			}
+			// Bookmarks are TEAM-wide now too (one store, getSharedPrefs), just
+			// like collections — there's no personal-vs-shared split any more, so
+			// we don't read personal bookmarks here. Any legacy personal ones are
+			// folded into the team store once by migrateLegacyBookmarks().
+			// Collections are TEAM-wide now (one store, getSharedPrefs); there is
+			// no personal collections store any more, so we don't read them here.
+			// Any legacy personal collections in $user->meta are simply ignored.
 			if (isset($raw['thumbScale'])) {
 				$ts = (float) $raw['thumbScale'];
 				if ($ts >= self::THUMB_SCALE_MIN && $ts <= self::THUMB_SCALE_MAX) {
@@ -334,7 +323,7 @@ class ProcessImageLibrary extends Process {
 	 * the per-user prefs for bookmarks/collections, but visible to every
 	 * user with library access and editable only by canManageShared().
 	 *
-	 * @return array{bookmarks:array<int,array{name:string,qs:string}>,collections:array<int,array{id:string,name:string,keys:array<int,string>}>}
+	 * @return array{bookmarks:array<int,array{id:string,name:string,qs:string,parent:string}>,collections:array<int,array{id:string,name:string,keys:array<int,string>}>}
 	 */
 	protected function getSharedPrefs(): array {
 		$cfg = $this->wire('modules')->getConfig($this);
@@ -343,11 +332,8 @@ class ProcessImageLibrary extends Process {
 		if (is_array($cfg)) {
 			if (isset($cfg['sharedBookmarks']) && is_array($cfg['sharedBookmarks'])) {
 				foreach ($cfg['sharedBookmarks'] as $b) {
-					if (!is_array($b)) continue;
-					$name = (string) ($b['name'] ?? '');
-					$qs   = (string) ($b['qs']   ?? '');
-					if ($name === '') continue;
-					$bookmarks[] = ['name' => $name, 'qs' => $qs];
+					$clean = $this->sanitizeBookmark($b);
+					if ($clean !== null) $bookmarks[] = $clean;
 				}
 			}
 			if (isset($cfg['sharedCollections']) && is_array($cfg['sharedCollections'])) {
@@ -358,6 +344,52 @@ class ProcessImageLibrary extends Process {
 			}
 		}
 		return ['bookmarks' => $bookmarks, 'collections' => $collections];
+	}
+
+	/**
+	 * One-time fold of a user's legacy PERSONAL bookmarks into the team-wide
+	 * shared store (bookmarks lost their personal/shared split). Runs on render,
+	 * guarded by a per-user meta flag so it happens exactly once. De-duped by
+	 * name+canonical-qs against what's already shared; each migrated bookmark
+	 * gets a fresh id + empty parent. Afterwards the user's personal bookmarks
+	 * are cleared so they don't linger or re-migrate.
+	 */
+	protected function migrateLegacyBookmarks(): void {
+		$user = $this->wire('user');
+		if ($user->meta('imageLibraryBmMigrated')) return;
+
+		$raw = $user->meta('imageLibraryPrefs');
+		if (!is_array($raw)) $raw = $user->meta('mediaLibraryPrefs');
+		$personal = (is_array($raw) && isset($raw['bookmarks']) && is_array($raw['bookmarks']))
+			? $raw['bookmarks'] : [];
+		if (!$personal) { $user->meta('imageLibraryBmMigrated', 1); return; }
+
+		$cfg = $this->wire('modules')->getConfig($this);
+		if (!is_array($cfg)) $cfg = [];
+		$shared = (isset($cfg['sharedBookmarks']) && is_array($cfg['sharedBookmarks']))
+			? $cfg['sharedBookmarks'] : [];
+
+		$seen = [];
+		foreach ($shared as $b) {
+			if (!is_array($b)) continue;
+			$seen[((string) ($b['name'] ?? '')) . '|' . $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''))] = true;
+		}
+		$added = false;
+		foreach ($personal as $b) {
+			$clean = $this->sanitizeBookmark($b);
+			if ($clean === null) continue;
+			$k = $clean['name'] . '|' . $clean['qs'];
+			if (isset($seen[$k])) continue;
+			$seen[$k] = true;
+			$shared[] = $clean;
+			$added = true;
+		}
+		if ($added) {
+			$cfg['sharedBookmarks'] = $shared;
+			$this->wire('modules')->saveConfig($this, $cfg);
+		}
+		if (is_array($raw)) { $raw['bookmarks'] = []; $user->meta('imageLibraryPrefs', $raw); }
+		$user->meta('imageLibraryBmMigrated', 1);
 	}
 
 	/** The whitelist of persisted result-layout modes (table vs masonry).
@@ -460,6 +492,9 @@ class ProcessImageLibrary extends Process {
 		// (see renderResultsHtml), the same way custom-subfield sorts are.
 		'variationsCount' => 'int',
 		'usageCount'      => 'int',
+		// Collections column — text sort by the (comma-joined) collection names a
+		// row belongs to, populated on the full set just-in-time like the counts.
+		'collectionNames' => 'string',
 	];
 
 	const DEFAULT_SORT = 'pageTitle';
@@ -1457,6 +1492,7 @@ class ProcessImageLibrary extends Process {
 		$this->wire('modules')->get('JqueryUI');
 		// Bookmarks stay in the picker too — saved filter sets are the fastest
 		// way into a large library when you're hunting for one image to insert.
+		$this->migrateLegacyBookmarks();   // one-time fold of personal bookmarks → team store
 		$prefs = $this->getUserPrefs();
 		$shared = $this->getSharedPrefs();
 		$out .= $this->renderBookmarksBar($filters, $prefs['bookmarks'], $prefs['collections'], $shared['bookmarks'], $shared['collections']);
@@ -1471,6 +1507,11 @@ class ProcessImageLibrary extends Process {
 		// Table-only concern → skip it in the (masonry-only) picker.
 		if (!$this->pickerMode) {
 			$out .= $this->renderColumnsDialog($customCols);
+		}
+		// Collections manager dialog — sibling of .ml-results like the column
+		// picker, so it survives AJAX swaps; the JS builds its tree on open.
+		if (!$this->pickerMode) {
+			$out .= $this->renderCollectionsDialog();
 		}
 		if (!$this->pickerMode) {
 			$out .= $this->renderExportImportBar($filters);
@@ -1506,6 +1547,7 @@ class ProcessImageLibrary extends Process {
 			'modified'    => $this->_('Modified'),
 			'variations'  => $this->_('Variations'),
 			'usedIn'      => $this->_('Used in'),
+			'collections' => $this->_('Collections'),
 		];
 		foreach ($customCols as $name) {
 			$cols['custom:' . $name] = $name;
@@ -1588,6 +1630,50 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Collections manager dialog shell. The list (.ml-collections-list) is
+	 * built client-side from the in-memory collections so it always reflects
+	 * the current set; the JS wires drag-reorder + nesting and the arrow /
+	 * indent buttons, then persists via the prefs endpoints. Same chrome as
+	 * the column picker (shared dialog block).
+	 */
+	protected function renderCollectionsDialog(): string {
+		$san = $this->wire('sanitizer');
+		// Literal "&" — these static UI strings are NOT run through entities();
+		// the output pipeline already encodes once, so pre-encoding here would
+		// double it into "&amp;". Same convention as the usedInTitle label.
+		$title = $this->_('Manage bookmarks & collections');
+		$close = $san->entities($this->_('Close'));
+		$tabColl = $san->entities($this->_('Collections'));
+		$tabBm   = $san->entities($this->_('Bookmarks'));
+		$newLabel = $san->entities($this->_('New'));
+		$out  = '<dialog class="ml-collections-dialog">';
+		$out .= '<header>' . $title . '</header>';
+		// Tab bar: the two tabs (reusing the admin's own uk-tab markup, same as the
+		// bookmarks bar) plus a single right-aligned "+ New" link. New creates a
+		// collection or a folder depending on which tab is active (the JS reads the
+		// active tab); the panes below just hold the lists.
+		$out .= '<div class="ml-mgr-tabbar">';
+		$out .= '<ul class="uk-tab ml-mgr-tabs">';
+		$out .= '<li class="uk-active" data-pane="coll"><a href="#">' . $tabColl . '</a></li>';
+		$out .= '<li data-pane="bm"><a href="#">' . $tabBm . '</a></li>';
+		$out .= '</ul>';
+		$out .= '<a href="#" role="button" class="ml-coll-new">'
+			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $newLabel . '</a>';
+		$out .= '</div>';
+		$out .= '<div class="ml-mgr-pane" data-pane="coll">';
+		$out .= '<ul class="ml-collections-list"></ul>';
+		$out .= '</div>';
+		$out .= '<div class="ml-mgr-pane" data-pane="bm" hidden>';
+		$out .= '<ul class="ml-bookmarks-list"></ul>';
+		$out .= '</div>';
+		$out .= '<footer>';
+		$out .= '<button type="button" class="ml-collections-close uk-button uk-button-secondary">' . $close . '</button>';
+		$out .= '</footer>';
+		$out .= '</dialog>';
+		return $out;
+	}
+
+	/**
 	 * Render just the swappable region (table + pagination) for a given
 	 * filter/sort/page state. Called by both ___execute and ___executeData
 	 * so server-rendered and AJAX-rendered HTML stay in sync.
@@ -1626,6 +1712,13 @@ class ProcessImageLibrary extends Process {
 			unset($r);
 		} elseif ($sort === 'variationsCount') {
 			$this->hydrateVariationCounts($rows);
+		} elseif ($sort === 'collectionNames') {
+			$byKey = $this->collectionNamesByKey();
+			foreach ($rows as &$r) {
+				$key = $this->rowKey((int) $r['pageId'], (string) $r['fieldName'], (string) $r['basename']);
+				$r['collectionNames'] = $byKey[$key] ?? '';
+			}
+			unset($r);
 		}
 		$this->applySort($rows, $sort, $dir);
 
@@ -1722,6 +1815,9 @@ class ProcessImageLibrary extends Process {
 		return '<div class="ml-picker-bar ml-picker-bar--' . $san->entities($pos) . '">'
 			. '<button type="button" class="ml-pick-confirm uk-button uk-button-primary" disabled>'
 			. $san->entities($this->_('Use selected')) . ' <span class="ml-pick-count">(0)</span>'
+			. '</button>'
+			. '<button type="button" class="ml-pick-cancel uk-button uk-button-secondary">'
+			. $san->entities($this->_('Cancel'))
 			. '</button>'
 			. '</div>';
 	}
@@ -4029,22 +4125,9 @@ class ProcessImageLibrary extends Process {
 				$clean['pageSize'] = $ps;
 			}
 		}
-		if (isset($data['bookmarks']) && is_array($data['bookmarks'])) {
-			foreach ($data['bookmarks'] as $b) {
-				if (!is_array($b)) continue;
-				$name = $sanitizer->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
-				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
-				if ($name === '') continue;
-				$clean['bookmarks'][] = ['name' => $name, 'qs' => $qs];
-			}
-		}
-		if (isset($data['collections']) && is_array($data['collections'])) {
-			foreach ($data['collections'] as $c) {
-				$col = $this->sanitizeCollection($c);
-				if ($col !== null) $clean['collections'][] = $col;
-				if (count($clean['collections']) >= self::COLLECTION_MAX) break;
-			}
-		}
+		// Bookmarks + collections are TEAM-wide now (executeSharedPrefs); the
+		// per-user prefs blob no longer stores them, so we deliberately ignore
+		// any bookmarks/collections in this payload and keep them empty.
 		if (isset($data['thumbScale'])) {
 			$ts = (float) $data['thumbScale'];
 			if ($ts >= self::THUMB_SCALE_MIN && $ts <= self::THUMB_SCALE_MAX) {
@@ -4094,11 +4177,8 @@ class ProcessImageLibrary extends Process {
 		$collections = [];
 		if (isset($data['bookmarks']) && is_array($data['bookmarks'])) {
 			foreach ($data['bookmarks'] as $b) {
-				if (!is_array($b)) continue;
-				$name = $sanitizer->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
-				$qs   = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
-				if ($name === '') continue;
-				$bookmarks[] = ['name' => $name, 'qs' => $qs];
+				$clean = $this->sanitizeBookmark($b);
+				if ($clean !== null) $bookmarks[] = $clean;
 				if (count($bookmarks) >= self::COLLECTION_MAX) break;
 			}
 		}
@@ -4812,11 +4892,51 @@ class ProcessImageLibrary extends Process {
 	 * @param mixed $c
 	 * @return array{id:string,name:string,keys:array<int,string>}|null
 	 */
+	/** A fresh alphanumeric id for a bookmark / folder (stable handle for
+	 *  nesting). Hex from uniqid(), dot stripped, capped — same charset the
+	 *  client's id generator emits. */
+	protected function newBookmarkId(): string {
+		return substr(str_replace('.', '', uniqid('', true)), 0, 12);
+	}
+
+	/**
+	 * Validate one raw bookmark into a clean record, or null if unusable.
+	 * A bookmark is now {id, name, qs, parent}: a FILTER bookmark carries a
+	 * canonical qs (a saved filter, always a leaf), while a FOLDER is an empty
+	 * container (qs === '') that only groups children — and is the only thing
+	 * allowed to be a parent. id is generated when missing so legacy records
+	 * (which had none) get a stable handle. Single team store, like collections.
+	 *
+	 * @param mixed $b
+	 * @return array{id:string,name:string,qs:string,parent:string}|null
+	 */
+	protected function sanitizeBookmark($b): ?array {
+		if (!is_array($b)) return null;
+		$name = $this->wire('sanitizer')->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
+		if ($name === '') return null;
+		$id = preg_replace('/[^a-z0-9]/i', '', (string) ($b['id'] ?? '')) ?? '';
+		if ($id === '') $id = $this->newBookmarkId();
+		$qs = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
+		// Parent folder id for nesting; a bookmark can never be its own parent.
+		// Structural validity (parent is a folder, depth cap) is enforced by the
+		// manager UI; array order is the display order.
+		$parent = preg_replace('/[^a-z0-9]/i', '', (string) ($b['parent'] ?? '')) ?? '';
+		if ($parent === $id) $parent = '';
+		return ['id' => $id, 'name' => $name, 'qs' => $qs, 'parent' => $parent];
+	}
+
 	protected function sanitizeCollection($c): ?array {
 		if (!is_array($c)) return null;
 		$id   = preg_replace('/[^a-z0-9]/i', '', (string) ($c['id'] ?? '')) ?? '';
 		$name = $this->wire('sanitizer')->text((string) ($c['name'] ?? ''), ['maxLength' => 80]);
 		if ($id === '' || $name === '') return null;
+
+		// Parent collection id for nesting. Same id charset; a collection can
+		// never be its own parent. Structural validity (parent exists, depth cap,
+		// same store) is enforced by the manager UI; the array order is preserved
+		// as the display order (a child sits right after its parent).
+		$parent = preg_replace('/[^a-z0-9]/i', '', (string) ($c['parent'] ?? '')) ?? '';
+		if ($parent === $id) $parent = '';
 
 		$keys = [];
 		if (isset($c['keys']) && is_array($c['keys'])) {
@@ -4826,28 +4946,84 @@ class ProcessImageLibrary extends Process {
 				if (count($keys) >= self::COLLECTION_KEYS_MAX) break;
 			}
 		}
-		if (!$keys) return null;
-		return ['id' => $id, 'name' => $name, 'keys' => array_keys($keys)];
+		// Empty keys are allowed: a collection can be an empty container created
+		// up-front (you then nest subgroups under it, or add images later). A
+		// valid id + name is enough.
+		return ['id' => $id, 'name' => $name, 'keys' => array_keys($keys), 'parent' => $parent];
 	}
 
 	/**
 	 * Row-keys of the saved collection with the given id (empty if none). The
 	 * source for the ?coll= grid filter — keys live in $user->meta, never the URL.
 	 *
+	 * A collection resolves to the UNION of its OWN keys and the keys of ALL its
+	 * descendant collections (recursive). So a parent like "Flowers" that only
+	 * groups colour subgroups shows every image in red ∪ yellow ∪ pink, plus
+	 * any it holds directly. Leaves (no children) just return their own keys.
+	 *
 	 * @return array<int,string>
 	 */
+	/**
+	 * Map each image row-key to the comma-joined names of the collections it
+	 * appears under — UNION membership (own keys + sub-collections), in display
+	 * order, same as the Collections column. Drives the text sort for that column.
+	 *
+	 * @return array<string,string>
+	 */
+	protected function collectionNamesByKey(): array {
+		$out = [];
+		$list = $this->getSharedPrefs()['collections'];
+		foreach ($list as $coll) {
+			$name = (string) ($coll['name'] ?? '');
+			$cid  = (string) ($coll['id'] ?? '');
+			if ($name === '' || $cid === '') continue;
+			foreach ($this->collectionUnionKeys($cid, $list) as $k) {
+				$out[(string) $k][] = $name;
+			}
+		}
+		foreach ($out as $k => $names) {
+			$out[$k] = implode(', ', $names);
+		}
+		return $out;
+	}
+
 	protected function resolveCollectionKeys(string $id): array {
 		$id = preg_replace('/[^a-z0-9]/i', '', $id) ?? '';
 		if ($id === '') return [];
-		foreach ($this->getUserPrefs()['collections'] as $c) {
-			if (($c['id'] ?? '') === $id) return $c['keys'];
+		// Collections live in ONE team-wide store now (no personal split).
+		return $this->collectionUnionKeys($id, $this->getSharedPrefs()['collections']);
+	}
+
+	/**
+	 * Union of a collection's own keys plus every descendant's keys, de-duped.
+	 * Depth-first over the parent→children relationship; cycle-safe via $seen.
+	 *
+	 * @param array<int,array<string,mixed>> $list  one store's collections
+	 * @return array<int,string>
+	 */
+	protected function collectionUnionKeys(string $id, array $list): array {
+		$keysById = [];
+		$children = [];
+		foreach ($list as $c) {
+			$cid = (string) ($c['id'] ?? '');
+			if ($cid === '') continue;
+			$keysById[$cid] = $c['keys'] ?? [];
+			$p = (string) ($c['parent'] ?? '');
+			if ($p !== '') $children[$p][] = $cid;
 		}
-		// Personal collections win on id-collision; fall through to the
-		// team-wide shared store so ?coll=<id> resolves shared sets too.
-		foreach ($this->getSharedPrefs()['collections'] as $c) {
-			if (($c['id'] ?? '') === $id) return $c['keys'];
+		$out  = [];
+		$seen = [];
+		$stack = [$id];
+		while ($stack) {
+			$cur = array_pop($stack);
+			if (isset($seen[$cur])) continue;
+			$seen[$cur] = true;
+			foreach ($keysById[$cur] ?? [] as $k) $out[$k] = true;
+			foreach ($children[$cur] ?? [] as $childId) {
+				if (!isset($seen[$childId])) $stack[] = $childId;
+			}
 		}
-		return [];
+		return array_keys($out);
 	}
 
 	/**
@@ -5118,6 +5294,47 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Parse a free-text query into REQUIRED, EXCLUDED and OPTIONAL terms for a
+	 * tokenised, case-insensitive substring search (classic search-engine rules):
+	 *   - a plain word is OPTIONAL — if any optional terms exist, at least one
+	 *     must match (so "red rose" = red OR rose)
+	 *   - a +word is REQUIRED — every one must match ("red +rose" = rose must
+	 *     match AND, from the optional group, red too, i.e. both)
+	 *   - a -word is EXCLUDED — the row must NOT contain it
+	 *   - a "quoted phrase" (optionally signed) matches its words contiguously
+	 * Lone signs and empty quotes are ignored. Terms are lower-cased so the
+	 * caller matches them against a lower-cased haystack.
+	 *
+	 * @return array{0:array<int,string>,1:array<int,string>,2:array<int,string>} [required, excluded, optional]
+	 */
+	protected function parseSearchTerms(string $q): array {
+		$q = trim($q);
+		if ($q === '') return [[], [], []];
+		$required = [];
+		$excluded = [];
+		$optional = [];
+		// Token = optional +/- sign, then a "quoted phrase" or a run of non-space.
+		if (!preg_match_all('/([+-]?)(?:"([^"]*)"|(\S+))/u', $q, $matches, PREG_SET_ORDER)) {
+			return [[], [], []];
+		}
+		foreach ($matches as $tok) {
+			$sign = $tok[1];
+			// $tok[2] = quoted body (may be ''), $tok[3] = bare word.
+			$term = ($tok[2] !== '') ? $tok[2] : ($tok[3] ?? '');
+			$term = mb_strtolower(trim($term));
+			if ($term === '') continue;
+			if ($sign === '-')      $excluded[] = $term;
+			elseif ($sign === '+')  $required[] = $term;
+			else                    $optional[] = $term;
+		}
+		return [
+			array_values(array_unique($required)),
+			array_values(array_unique($excluded)),
+			array_values(array_unique($optional)),
+		];
+	}
+
+	/**
 	 * Apply PHP-level row filters that PW's findRaw selector can't (or shouldn't)
 	 * express. Template narrowing is already done at the selector level in
 	 * loadRows; here we handle the per-image-row filters.
@@ -5131,8 +5348,12 @@ class ProcessImageLibrary extends Process {
 		// normal filters below apply WITHIN it — a collection can be filtered, so
 		// coll and the filter params coexist rather than replace each other. Rows
 		// whose images were since deleted/renamed simply don't match here.
-		$sel = $filters['sel'] ?? [];
-		if (!empty($sel)) {
+		// Gate on whether a collection is being recalled at all — NOT on whether
+		// it resolved to any keys. An empty collection (a container with no
+		// images yet) must show NOTHING, not fall through to the full grid.
+		$collActive = ((string) ($filters['coll'] ?? '')) !== '';
+		if ($collActive) {
+			$sel    = $filters['sel'] ?? [];
 			$selSet = array_fill_keys($sel, true);
 			$rows = array_values(array_filter($rows, function ($r) use ($selSet) {
 				$key = ((int) $r['pageId']) . ':' . $r['fieldName'] . ':' . $r['basename'];
@@ -5140,8 +5361,8 @@ class ProcessImageLibrary extends Process {
 			}));
 		}
 
-		$q        = mb_strtolower($filters['q']);
-		$hasQ     = $q !== '';
+		[$reqTerms, $excTerms, $optTerms] = $this->parseSearchTerms((string) $filters['q']);
+		$hasQ     = $reqTerms !== [] || $excTerms !== [] || $optTerms !== [];
 		$tplName  = (string) ($filters['template'] ?? '');
 		$field    = $filters['field'];
 		$noDesc   = $filters['no_desc'];
@@ -5168,7 +5389,7 @@ class ProcessImageLibrary extends Process {
 		}
 
 		$filtered = array_values(array_filter($rows, function ($r) use (
-			$hasQ, $q, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
+			$hasQ, $reqTerms, $excTerms, $optTerms, $tplId, $field, $noDesc, $noTags, $noCustom, $dupes, $dupKeyHashes
 		) {
 			if ($dupes && !isset($dupKeyHashes[$r['pageId'] . "\0" . $r['fieldName'] . "\0" . $r['basename']])) return false;
 			if ($tplId && (int) $r['templateId'] !== $tplId) return false;
@@ -5202,7 +5423,21 @@ class ProcessImageLibrary extends Process {
 					. $this->normalizeDescription($r['pageTitle'] ?? '') . ' '
 					. $customHay
 				);
-				if (mb_strpos($hay, $q) === false) return false;
+				// + terms ALL required; - terms NONE allowed; plain terms are an
+				// OR group — if any exist, at least one must match.
+				foreach ($reqTerms as $t) {
+					if (mb_strpos($hay, $t) === false) return false;
+				}
+				foreach ($excTerms as $t) {
+					if (mb_strpos($hay, $t) !== false) return false;
+				}
+				if ($optTerms) {
+					$anyOpt = false;
+					foreach ($optTerms as $t) {
+						if (mb_strpos($hay, $t) !== false) { $anyOpt = true; break; }
+					}
+					if (!$anyOpt) return false;
+				}
 			}
 			return true;
 		}));
@@ -5908,6 +6143,10 @@ class ProcessImageLibrary extends Process {
 				'bookmarkDeleted'  => $this->_('Bookmark deleted'),
 				'bookmarkDelete'   => $this->_('Delete bookmark'),
 				'bookmarkEmpty'    => $this->_('Apply some filters first.'),
+				// Bookmarks-in-manager: folder grouping.
+				'bmNewFolderName'  => $this->_('New folder'),
+				'bmManageEmpty'    => $this->_('No bookmarks yet.'),
+				'bmConfirmDeleteFolder' => $this->_('Click again — this also deletes the bookmarks inside the folder.'),
 				// Collection labels — saving a checkbox selection as a named set.
 				'collectionSave'    => $this->_('Save collection'),
 				'collectionHint'    => $this->_('Saves the %d selected image(s) as a named collection.'),
@@ -5916,10 +6155,30 @@ class ProcessImageLibrary extends Process {
 				'collectionDelete'  => $this->_('Delete collection'),
 				// Add-button label swaps to this while a selection exists, and the
 				// per-collection "+" adds the selection to that existing set.
-				'bookmarkAdd'       => $this->_('Add bookmark'),
-				'collectionAdd'     => $this->_('Add collection'),
+				'bookmarkAdd'       => $this->_('New'),
+				'collectionAdd'     => $this->_('New'),
 				'collectionUpdated' => $this->_('Added %d image(s) to the collection'),
 				'collectionRemoved' => $this->_('Removed %d image(s) from the collection'),
+				// Collections manager (drag-and-drop reorder + nesting) row controls.
+				'collMoveUp'        => $this->_('Move up'),
+				'collMoveDown'      => $this->_('Move down'),
+				'collNest'          => $this->_('Make a subgroup of the item above'),
+				'collUnnest'        => $this->_('Move out one level'),
+				'collCollapse'      => $this->_('Collapse'),
+				'collExpand'        => $this->_('Expand'),
+				'collDelete'        => $this->_('Delete collection'),
+				'collConfirmDelete' => $this->_('Click again to delete'),
+				'collConfirmDeleteTree' => $this->_('Click again — this also deletes its subgroups. The images stay in the library.'),
+				'collRename'        => $this->_('Rename collection'),
+				'collNewName'       => $this->_('New collection'),
+				'collManageEmpty'   => $this->_('No collections yet.'),
+				'collManageTeam'    => $this->_('Team'),
+				'collectionsManage'      => $this->_('Manage bookmarks & collections'),
+				'collectionsAssign'      => $this->_('Assign to collections'),
+				'barBookmarks'           => $this->_('Bookmarks'),
+				'barCollections'         => $this->_('Collections'),
+				'collectionsAssignN'     => $this->_('Assign %d images to collections'),
+				'collectionsManageShort' => $this->_('Manage'),
 				// Shared (team-wide) bookmarks + collections — the manager-only
 				// "share with team" toggle in the save dialog + its toasts.
 				'shareWithTeam'     => $this->_('Share with the team'),
@@ -6017,10 +6276,10 @@ class ProcessImageLibrary extends Process {
 	 * JS so the tab navigates via the existing AJAX filter swap
 	 * pipeline (replaceFromQs).
 	 *
-	 * @param array<int,array{name:string,qs:string}> $bookmarks
-	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $collections
-	 * @param array<int,array{name:string,qs:string}> $sharedBookmarks
-	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $sharedCollections
+	 * @param array<int,array{name:string,qs:string}> $bookmarks  legacy personal (migrated/empty)
+	 * @param array<int,array{id:string,name:string,keys:array<int,string>}> $collections  legacy personal (empty)
+	 * @param array<int,array{id:string,name:string,qs:string,parent:string}> $sharedBookmarks  THE team bookmark store
+	 * @param array<int,array{id:string,name:string,keys:array<int,string>,parent:string}> $sharedCollections  THE team collection store
 	 */
 	protected function renderBookmarksBar(array $filters, array $bookmarks, array $collections = [], array $sharedBookmarks = [], array $sharedCollections = []): string {
 		$san  = $this->wire('sanitizer');
@@ -6030,15 +6289,15 @@ class ProcessImageLibrary extends Process {
 		$currentCanon = $this->canonicalizeBookmarkQs(http_build_query($this->bookmarkFilterPayload($filters)));
 		$currentColl  = (string) ($filters['coll'] ?? '');
 		$addTitle = $san->entities($this->_('Save current filter as bookmark'));
-		$addLabel = $san->entities($this->_('Add bookmark'));
+		$addLabel = $san->entities($this->_('New'));
 		$allLabel = $san->entities($this->_('Show all'));
 		$delTitle = $san->entities($this->_('Delete bookmark'));
 		$collDelTitle = $san->entities($this->_('Delete collection'));
 
 		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
 
-		// Baseline "Show all" tab first — empty querystring, active
-		// iff nothing filter-shaped AND no collection is currently set.
+		// Baseline "Show all" tab first - empty querystring, active iff nothing
+		// filter-shaped AND no collection is currently set.
 		$allActive = ($currentCanon === '' && $currentColl === '') ? ' class="uk-active"' : '';
 		$out .= '<li' . $allActive . '>'
 			. '<a class="ml-bookmark" href="' . $san->entities($page->url) . '" data-qs="">'
@@ -6051,19 +6310,28 @@ class ProcessImageLibrary extends Process {
 		// renders for users who may manage the team store.
 		$bookmarkMatched = false;
 
-		$renderBookmark = function (array $b, int $idx, bool $shared) use ($san, $page, $currentCanon, $currentColl, $delTitle, $canManageShared, &$bookmarkMatched): string {
-			$canon = $this->canonicalizeBookmarkQs((string) $b['qs']);
-			$href  = $page->url . $canon;
-			$isActive = ($canon !== '' && $canon === $currentCanon && $currentColl === '');
+		// Bookmarks are team-wide now (no personal/shared split, no italic). A
+		// FILTER bookmark carries a qs and applies it on click; a FOLDER (empty
+		// qs) only groups children — its nested children live in a hover flyout
+		// the JS builds (rerenderBookmarksList on init), so here we render
+		// top-level entries only. The × (delete) shows for managers only.
+		$renderBookmark = function (array $b) use ($san, $page, $currentCanon, $currentColl, $delTitle, $canManageShared, &$bookmarkMatched): string {
+			$bid = (string) ($b['id'] ?? '');
+			if ($bid === '') return '';
+			if (((string) ($b['parent'] ?? '')) !== '') return '';   // top-level only
+			$canon = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
+			$isFolder = ($canon === '');
+			$href  = $isFolder ? '#' : ($page->url . $canon);
+			$isActive = (!$isFolder && $canon === $currentCanon && $currentColl === '');
 			if ($isActive) $bookmarkMatched = true;
-			$cls = 'ml-bookmark' . ($shared ? ' ml-bookmark--shared' : '');
-			return '<li' . ($isActive ? ' class="uk-active"' : '') . ($shared ? ' data-shared="1"' : '') . ' data-bookmark-idx="' . $idx . '">'
+			$cls = 'ml-bookmark' . ($isFolder ? ' ml-bookmark--folder' : '');
+			return '<li' . ($isActive ? ' class="uk-active"' : '') . ' data-bookmark-id="' . $san->entities($bid) . '">'
 				. '<a class="' . $cls . '"'
 				. ' href="' . $san->entities($href) . '"'
 				. ' data-qs="' . $san->entities($canon) . '">'
 				. $san->entities((string) $b['name'])
 				. '</a>'
-				. ((!$shared || $canManageShared)
+				. ($canManageShared
 					? '<button type="button" class="ml-bookmark-del"'
 						. ' aria-label="' . $delTitle . '" title="' . $delTitle . '">'
 						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
@@ -6074,6 +6342,10 @@ class ProcessImageLibrary extends Process {
 		$renderCollection = function (array $c, bool $shared) use ($san, $page, $currentColl, $collDelTitle, $canManageShared): string {
 			$cid = (string) ($c['id'] ?? '');
 			if ($cid === '') return '';
+			// Only top-level collections get a tab here. Nested ones live in the
+			// parent tab's hover flyout, which the JS builds (rerenderBookmarksList
+			// runs on init); rendering them flat too would flash duplicate tabs.
+			if (($c['parent'] ?? '') !== '') return '';
 			$qs = '?coll=' . rawurlencode($cid);
 			$cls = 'ml-bookmark ml-bookmark--collection' . ($shared ? ' ml-bookmark--shared' : '');
 			// Curate actions are cursor-driven, not buttons: while a selection
@@ -6087,25 +6359,29 @@ class ProcessImageLibrary extends Process {
 				. '<i class="fa fa-clone" aria-hidden="true"></i> '
 				. $san->entities((string) ($c['name'] ?? ''))
 				. '</a>'
-				. ((!$shared || $canManageShared)
-					? '<button type="button" class="ml-bookmark-del"'
-						. ' aria-label="' . $collDelTitle . '" title="' . $collDelTitle . '">'
-						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
-					: '')
+				// No × on collection tabs — deletion lives in the manager dialog.
 				. '</li>';
 		};
 
-		// Bookmarks first (personal, then team) …
-		foreach ($bookmarks as $idx => $b)       $out .= $renderBookmark($b, (int) $idx, false);
-		foreach ($sharedBookmarks as $idx => $b) $out .= $renderBookmark($b, (int) $idx, true);
-		// … then collections (personal, then team).
-		foreach ($collections as $c)       $out .= $renderCollection($c, false);
+		// Bookmarks first (team store), then collections (team store). The legacy
+		// personal arrays ($bookmarks/$collections) are migrated/empty now.
+		foreach ($sharedBookmarks as $b)   $out .= $renderBookmark($b);
 		foreach ($sharedCollections as $c) $out .= $renderCollection($c, true);
 
-		// Add button rightmost — opens the name-dialog. Server-side it's hidden
+		// "Manage" — icon-only, sitting directly after the bookmarks/collections
+		// and BEFORE the "New" link (no far-right float). Opens the drag-and-drop
+		// manager. Managers only; shown even with none so the first can be created.
+		if ($canManageShared) {
+			$manageTitle = $this->_('Manage bookmarks & collections');   // literal &, no entities (see renderCollectionsDialog)
+			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
+				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
+				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
+		}
+
+		// Add ("New") button — opens the name-dialog. Server-side it's hidden
 		// unless a non-saved filter is active; the JS additionally reveals it
 		// whenever a checkbox selection exists (→ "save as collection").
-		$addHidden = ($currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
+		$addHidden = (!$canManageShared || $currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
 		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
 			. ' title="' . $addTitle . '">'
 			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
@@ -6205,6 +6481,9 @@ class ProcessImageLibrary extends Process {
 		$q->name        = 'q';
 		$q->label       = $this->_('Search');
 		$q->placeholder = $this->_('Page title, description, tags, filename, customs');
+		// Searches all of the above. Plain words are OR (any match); +word is
+		// required, -word excludes, "quote a phrase" to match it whole.
+		$q->notes       = $this->_('Multiple words match any (OR). Use +word to require, -word to exclude, "quotes" for an exact phrase.');
 		$q->value       = $filters['q'];
 		$q->columnWidth = $this->pickerMode ? 100 : 33;
 		$outer->add($q);
@@ -6453,6 +6732,7 @@ class ProcessImageLibrary extends Process {
 			['modified',    $this->_('Modified'),    'modified'],
 			['variations',  $this->_('Variations'),  'variationsCount'],
 			['usedIn',      $this->_('Used in'),     'usageCount'],
+			['collections', $this->_('Collections'), 'collectionNames'],
 		];
 		if (!$showTagsCol) {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
@@ -6490,6 +6770,28 @@ class ProcessImageLibrary extends Process {
 			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters);
 		}
 		$out .= '</tr></thead><tbody>';
+
+		// Collections column: index every team collection's row-keys once, so each
+		// row can list (and link) the collections it appears under in O(1). UNION
+		// membership — a row in a sub-collection also appears under its parent(s)
+		// (recall shows the union), so list the whole union, not just direct keys.
+		// Stored in display (pre-order) order, so parents come before their
+		// children. Cheap (no per-image queries), so it's not gated.
+		$collByKey = [];
+		$collList = $this->getSharedPrefs()['collections'];
+		foreach ($collList as $coll) {
+			$cid = (string) ($coll['id'] ?? '');
+			if ($cid === '') continue;
+			foreach ($this->collectionUnionKeys($cid, $collList) as $k) {
+				$collByKey[(string) $k][] = ['id' => $cid, 'name' => (string) ($coll['name'] ?? '')];
+			}
+		}
+		// Field-editor link base for the Field column (resolved field id per name,
+		// cached across rows). $fields->get() is itself cached, but skip the repeat.
+		$fieldEditBase = $this->wire('config')->urls->admin . 'setup/field/edit?id=';
+		$fieldIdCache  = [];
+		// Managers can assign an image to collections straight from the column.
+		$canAssignColl = $this->canManageShared();
 
 		// The slice arrives collapsed into per-image units (buildDisplayUnits):
 		// a duplicated image's copies sit consecutively, head first. Only the
@@ -6673,7 +6975,22 @@ class ProcessImageLibrary extends Process {
 			$fieldLabel = !empty($row['repeaterField'])
 				? $san->entities((string) $row['repeaterField']) . '.' . $san->entities((string) $row['fieldName'])
 				: $san->entities((string) $row['fieldName']);
-			$out .= '<td data-col="field"><code>' . $fieldLabel . '</code></td>';
+			// Link the field name to PW's field editor (resolve + cache the id).
+			$fname = (string) $row['fieldName'];
+			if (!array_key_exists($fname, $fieldIdCache)) {
+				$f = $this->wire('fields')->get($fname);
+				$fieldIdCache[$fname] = ($f && $f->id) ? (int) $f->id : 0;
+			}
+			$fid = $fieldIdCache[$fname];
+			$out .= '<td data-col="field"><code>';
+			if ($fid) {
+				$out .= '<a href="' . $san->entities($fieldEditBase . $fid) . '" title="'
+					. $san->entities(sprintf($this->_('Edit the “%s” field'), $fname)) . '">'
+					. $fieldLabel . '</a>';
+			} else {
+				$out .= $fieldLabel;
+			}
+			$out .= '</code></td>';
 			// Filename cell — inline-editable, but only the stem; the
 			// extension stays locked and rides along with the rename
 			// on the server. Stem + ext are split server-side so the JS
@@ -6756,6 +7073,34 @@ class ProcessImageLibrary extends Process {
 					)) . '">' . $usageCount . '</a>';
 			} else {
 				$out .= '<span class="ml-usage-none" aria-hidden="true">–</span>';
+			}
+			$out .= '</td>';
+
+			// Collections this image directly belongs to — each links to its
+			// ?coll= recall view. A dash means it's in no collection. Managers get
+			// a clickable cell (caret affordance) that opens an inline checkbox
+			// tree to assign / unassign the image (JS reads the row identity attrs).
+			$out .= '<td class="ml-cell-collections' . ($canAssignColl ? ' ml-cell-coll-edit' : '') . '" data-col="collections"';
+			if ($canAssignColl) {
+				$out .= ' ' . $editAttrs . ' role="button" tabindex="0" title="'
+					. $san->entities($this->_('Assign to collections')) . '"';
+			}
+			$out .= '>';
+			$out .= '<span class="ml-coll-cell-list">';
+			$memberOf = $collByKey[$selKey] ?? [];
+			if ($memberOf) {
+				$links = [];
+				foreach ($memberOf as $m) {
+					$links[] = '<a href="?coll=' . rawurlencode($m['id']) . '">'
+						. $san->entities($m['name']) . '</a>';
+				}
+				$out .= implode(', ', $links);
+			} else {
+				$out .= '<span class="ml-usage-none" aria-hidden="true">–</span>';
+			}
+			$out .= '</span>';
+			if ($canAssignColl) {
+				$out .= ' <i class="fa fa-caret-down ml-coll-cell-caret" aria-hidden="true"></i>';
 			}
 			$out .= '</td>';
 

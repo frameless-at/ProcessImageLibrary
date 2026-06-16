@@ -348,7 +348,8 @@
 .ml-bulk-result-dialog,
 .ml-delete-confirm,
 .ml-bookmark-dialog,
-.ml-usage-dialog {
+.ml-usage-dialog,
+.ml-collections-dialog {
 	border: 1px solid var(--pw-border-color, #ccc);
 	border-radius: 4px;
 	padding: 1.25rem;
@@ -365,7 +366,8 @@
 .ml-bookmark-dialog::backdrop,
 .ml-image-modal::backdrop,
 .ml-cluster-modal::backdrop,
-.ml-usage-dialog::backdrop {
+.ml-usage-dialog::backdrop,
+.ml-collections-dialog::backdrop {
 	background: var(--pw-modal-color, rgba(0, 0, 0, 0.4));
 }
 .ml-popup-editor > header,
@@ -373,7 +375,8 @@
 .ml-bulk-result-dialog > header,
 .ml-delete-confirm > header,
 .ml-bookmark-dialog > header,
-.ml-usage-dialog > header {
+.ml-usage-dialog > header,
+.ml-collections-dialog > header {
 	font-weight: 600;
 	font-size: 1.05em;
 	margin: 0 0 0.75rem;
@@ -385,7 +388,8 @@
 .ml-bulk-result-dialog > footer,
 .ml-delete-confirm > footer,
 .ml-bookmark-dialog > footer,
-.ml-usage-dialog > footer {
+.ml-usage-dialog > footer,
+.ml-collections-dialog > footer {
 	display: flex;
 	justify-content: flex-end;
 	gap: 0.5rem;
@@ -401,6 +405,7 @@
 .ml-columns-dialog     { width: min(420px, 92vw); }
 .ml-bookmark-dialog    { width: min(420px, 92vw); }
 .ml-usage-dialog       { width: min(480px, 92vw); }
+.ml-collections-dialog { width: min(460px, 92vw); }
 
 /* Delete-confirm content bits (preview list + warning line) — the
    structural chrome is inherited from the shared block above. */
@@ -869,6 +874,20 @@ textarea.ml-cell-input {
 .ml-cell-variations {
 	color: var(--pw-muted-color, #555);
 }
+/* Collections cell — managers can click it to assign (caret affordance). */
+.ml-cell-coll-edit {
+	cursor: pointer;
+}
+.ml-coll-cell-caret {
+	opacity: 0.5;
+	font-size: 0.85em;
+}
+/* Assign popover: every collection is a checkable row (folder model), indented
+   by depth. Rows reuse .ml-popup-checklist styling. */
+.ml-coll-assign-list {
+	max-height: 50vh;
+	overflow-y: auto;
+}
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
    columnWidth handling; here we let the pagination flex-wrap so the
@@ -880,8 +899,12 @@ textarea.ml-cell-input {
 		row-gap: 0.5rem;
 	}
 	.ml-pagination-right {
-		margin-left: 0;
+		/* Stay right-aligned on mobile too: margin-left:auto (from the base
+		   rule) pushes the group right when it wraps to its own line, and
+		   justify-content:flex-end keeps its controls right-aligned if they
+		   wrap across lines. */
 		flex-wrap: wrap;
+		justify-content: flex-end;
 	}
 	/* Pre-JS masonry fallback: smaller column on phones so the brief
 	   un-hydrated state isn't one giant column. (The hydrated flex layout
@@ -1184,7 +1207,7 @@ textarea.ml-langtabs-pane {
 	opacity: 1;
 }
 .ml-tag-chip.ml-tag-deleting > label {
-	color: #c33;
+	font-weight: 700;
 	text-decoration: line-through;
 }
 .ml-tag-manage.ml-tag-confirm-del {
@@ -1196,8 +1219,10 @@ textarea.ml-langtabs-pane {
 	color: var(--pw-muted-color, #888);
 	white-space: nowrap;
 }
-/* Inline rename input — replaces the chip's label in place. */
-.ml-tag-edit-input {
+/* Inline rename input — replaces the chip's label (tags) / row name
+   (collections manager) in place. */
+.ml-tag-edit-input,
+.ml-coll-edit-input {
 	flex: 1 1 auto;
 	min-width: 0;
 	height: auto;
@@ -1296,6 +1321,8 @@ textarea.ml-langtabs-pane {
 	align-items: center;
 	gap: 0.25rem;
 	cursor: grab;
+	padding: 0.15rem 0.3rem;
+	border-radius: 3px;
 }
 .ml-columns-list li:active {
 	cursor: grabbing;
@@ -1310,13 +1337,10 @@ textarea.ml-langtabs-pane {
 	gap: 0.4rem;
 	cursor: pointer;
 	padding: 0.2rem 0.3rem;
-	border-radius: 2px;
 	min-width: 0;
 }
-.ml-columns-list label:hover {
-	background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
-}
-.ml-col-move {
+.ml-col-move,
+.ml-coll-move {
 	flex: 0 0 auto;
 	background: transparent;
 	border: 0;
@@ -1327,9 +1351,284 @@ textarea.ml-langtabs-pane {
 	font-size: 0.85em;
 	border-radius: 2px;
 }
-.ml-col-move:hover {
+.ml-col-move:hover,
+.ml-coll-move:hover {
 	background: color-mix(in srgb, var(--pw-main-background, #f0f0f0) 60%, var(--pw-text-color, #000) 8%);
 	color: var(--pw-text-color, #333);
+}
+/* Column picker: reveal the reorder arrows on row hover (cleaner resting
+   state — matches the collections manager). Keyboard reveal is keyed on the
+   BUTTON's :focus-visible, not the row's :focus-within — otherwise the
+   dialog's auto-focused checkbox would reveal the first row on open, and a
+   mouse-clicked arrow would stay stuck visible (focus lingers on it). */
+.ml-columns-list .ml-col-move {
+	opacity: 0;
+	transition: opacity 0.12s ease-out;
+}
+@media (hover: hover) {
+	.ml-columns-list li:hover {
+		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+	}
+	.ml-columns-list li:hover .ml-col-move {
+		opacity: 1;
+	}
+}
+.ml-columns-list .ml-col-move:focus-visible {
+	opacity: 1;
+}
+/* Touch: no hover (and a tap's :hover sticks to the old screen slot after a
+   reorder). Reveal the arrows for the ACTIVE row only (JS-driven, follows the
+   moved <li>); hidden arrows are non-interactive so a tap on an inactive row's
+   arrow area just activates it. */
+@media (hover: none) {
+	.ml-columns-list .ml-col-move {
+		pointer-events: none;
+	}
+	.ml-columns-list li.ml-col-item--active {
+		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+	}
+	.ml-columns-list li.ml-col-item--active .ml-col-move {
+		opacity: 1;
+		pointer-events: auto;
+	}
+}
+
+/* Collections manager — drag-and-drop tree of collections (one level deep).
+   Mirrors the column-picker list; rows are draggable, children are indented,
+   and drop targets show a line (reorder) or a box (nest). */
+/* "+ New collection" — a plain link-style action above the manager list.
+   No bespoke colour: it inherits the dialog text colour. */
+/* Manager tab bar: the uk-tab strip (Collections / Bookmarks) on the left and a
+   single right-aligned "+ New" link on the same row. */
+.ml-mgr-tabbar {
+	display: flex;
+	align-items: baseline;   /* "+ New" text sits on the tab-label baseline */
+	margin: 0 0 0.8rem;
+}
+.ml-mgr-tabs {
+	margin: 0;
+}
+/* "+ New" — a real link in the theme's link colour, pushed to the right of the
+   tab row, its text baseline-aligned with the tab labels. */
+.ml-coll-new {
+	margin-left: auto;
+	white-space: nowrap;
+	cursor: pointer;
+}
+.ml-collections-list,
+.ml-bookmarks-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.1rem;
+}
+/* Bookmark-row type icon (folder vs filter bookmark) in the manager list. */
+.ml-coll-typeicon {
+	opacity: 0.7;
+	width: 1em;
+	text-align: center;
+}
+.ml-coll-row {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+	padding: 0.25rem 0.3rem;
+	border-radius: 3px;
+	cursor: grab;
+	border: 1px solid transparent;   /* reserved so drop highlights don't shift layout */
+}
+.ml-coll-row:active { cursor: grabbing; }
+.ml-coll-row.ml-dragging { opacity: 0.35; }
+/* Light-grey highlight — the exact tint the tag manager uses for its chip rows.
+   DESKTOP uses transient :hover (follows the mouse). TOUCH has no hover (and a
+   tap's :hover sticks), so there the highlight is driven by an explicit JS
+   "active" class — exactly ONE row, the one last acted on / just reordered, so
+   it follows the moved element instead of lighting up the row in its old slot. */
+@media (hover: hover) {
+	.ml-coll-row:hover {
+		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+	}
+}
+@media (hover: none) {
+	.ml-coll-row--active {
+		background: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+	}
+}
+/* Collections are all team now — no personal/shared distinction, so no italic
+   marker on manager rows. */
+.ml-coll-row--shared { font-style: normal; }
+/* Collapse caret for parents; a same-width spacer keeps leaf names aligned.
+   (Indent per nesting level is applied inline as padding-left.) */
+.ml-coll-caret {
+	flex: 0 0 auto;
+	width: 1.1rem;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	color: var(--pw-muted-color, #999);
+	cursor: pointer;
+	font-size: 0.95em;
+	line-height: 1;
+	text-align: center;
+}
+.ml-coll-caret--leaf { cursor: default; }
+.ml-coll-name {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.ml-coll-btns {
+	flex: 0 0 auto;
+	display: flex;
+	gap: 0.05rem;
+}
+/* Row controls are hidden at rest and revealed for the ACTIVE row (explicit JS
+   class — touch-reliable, exactly one row), on desktop hover, or the button's
+   own :focus-visible (keyboard). Hover is desktop-only so a sticky touch :hover
+   doesn't reveal a second row's controls next to the active one. */
+.ml-coll-move {
+	opacity: 0;
+	transition: opacity 0.12s ease-out;
+}
+@media (hover: hover) {
+	.ml-coll-row:hover .ml-coll-move {
+		opacity: 1;
+	}
+}
+.ml-coll-move:focus-visible {
+	opacity: 1;
+}
+@media (hover: none) {
+	/* Hidden controls are non-interactive on touch, so a tap on an inactive
+	   row's (invisible) buttons falls through to the row and just activates it;
+	   once active the controls show AND become tappable. (The collapse caret is
+	   a separate, always-visible control, unaffected.) */
+	.ml-coll-move {
+		pointer-events: none;
+	}
+	.ml-coll-row--active .ml-coll-move {
+		opacity: 1;
+		pointer-events: auto;
+	}
+}
+/* Inline delete (like the tag manager): × goes red on hover; once armed it
+   becomes a red ✓, the row's controls stay visible and the name is struck
+   through until you confirm or it auto-disarms. */
+.ml-coll-del:hover { color: #c33; }
+.ml-coll-del.ml-coll-armed { color: #c33; opacity: 1; }
+.ml-coll-move.ml-coll-confirm { color: #2a8a2a; opacity: 1; }   /* green ✓ while renaming */
+.ml-coll-row-deleting .ml-coll-move { opacity: 1; }
+.ml-coll-row-deleting .ml-coll-name {
+	text-decoration: line-through;
+	font-weight: 700;
+}
+/* Drop indicators set during dragover. */
+.ml-coll-row.ml-drop-before { box-shadow: inset 0 2px 0 0 var(--pw-primary, #3480e3); }
+.ml-coll-row.ml-drop-after  { box-shadow: inset 0 -2px 0 0 var(--pw-primary, #3480e3); }
+.ml-coll-row.ml-drop-into {
+	border-color: var(--pw-primary, #3480e3);
+	background: color-mix(in srgb, var(--pw-main-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+}
+/* "Team" separator + empty state. */
+.ml-coll-sep {
+	margin: 0.5rem 0 0.15rem;
+	font-size: 0.8em;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--pw-muted-color, #999);
+}
+.ml-coll-empty {
+	color: var(--pw-muted-color, #999);
+	font-style: italic;
+	padding: 0.25rem 0.3rem;
+}
+/* "Manage" — icon-only, sitting directly after the bookmarks/collections (the
+   "New" link follows it), NOT floated to the far right. Nudged ~3px down so the
+   gear lines up optically with the tab text baseline. */
+.ml-collections-manage > a {
+	margin-right: 0;     /* override the tab strip's 30px del-button gutter */
+	color: var(--pw-muted-color, #888);
+	position: relative;
+	top: 3px;
+}
+.ml-collections-manage > a:hover { color: var(--pw-text-color, inherit); }
+
+/* Nested collections in the tab strip: only the top level shows as a tab;
+   descendants live in a hover flyout (indent per relative depth set inline).
+   The caret marks a tab that has a flyout. */
+.ml-coll-has-children { position: relative; }
+.ml-coll-tab-caret {
+	font-size: 0.85em;
+	opacity: 0.6;
+	margin-left: 0.1rem;
+	/* Never let the parent link's hover underline run under the caret icon. */
+	display: inline-block;
+	text-decoration: none;
+}
+/* On TOUCH only: kill the sticky :hover underline a tap leaves on bar/flyout
+   links (the text next to the caret). Desktop keeps its real :hover / :active
+   feedback - this is gated to (hover: none) so it never touches mouse devices. */
+@media (hover: none) {
+	.ml-bookmarks-tabs a.ml-bookmark,
+	.ml-bookmarks-tabs a.ml-bookmark:hover,
+	.ml-coll-flyout a.ml-bookmark,
+	.ml-coll-flyout a.ml-bookmark:hover {
+		text-decoration: none;
+	}
+}
+.ml-coll-flyout {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	z-index: 60;
+	width: max-content;   /* only as wide as the longest item, no fixed width */
+	margin: 0;
+	padding: 0.25rem 0;
+	list-style: none;
+	background: var(--pw-blocks-background, #fff);
+	border: 1px solid var(--pw-border-color, #ccc);
+	border-radius: 4px;
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.15);
+	display: none;
+}
+/* Cascading: a flyout (or sub-flyout) shows while its parent item is hovered
+   (desktop) or while it's tap-opened (.ml-flyout-open, touch — no hover there).
+   The flyout is a DOM descendant of that item, so the whole chain stays open. */
+@media (hover: hover) {
+	.ml-coll-has-children:hover > .ml-coll-flyout { display: block; }
+}
+.ml-coll-has-children.ml-flyout-open > .ml-coll-flyout { display: block; }
+/* A NESTED flyout (under a flyout item) opens to the SIDE; the top-level one
+   stays directly below its tab (inherited top:100%/left:0). */
+.ml-coll-flyout-item > .ml-coll-flyout {
+	top: -0.3rem;
+	left: 100%;
+}
+.ml-coll-flyout-item { position: relative; }
+.ml-coll-flyout-item > a.ml-bookmark {
+	display: flex;
+	align-items: center;
+	padding: 0.3rem 0.85rem;
+	white-space: nowrap;
+	margin: 0;
+}
+/* A flyout item with a submenu: name stays LEFT, caret pushed to the right edge
+   via margin-left:auto. (justify-content:space-between would centre the name
+   when a curate glyph also sits in the row.) */
+.ml-coll-flyout-parent > a .ml-coll-tab-caret { margin-left: auto; }
+.ml-coll-flyout-item.uk-active > a {
+	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+}
+/* Hover tint desktop-only — on touch :hover sticks to the last-tapped item. */
+@media (hover: hover) {
+	.ml-coll-flyout-item > a:hover {
+		background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+	}
 }
 
 /* Visually-hidden live region — kept in the DOM and announced by
@@ -1546,6 +1845,44 @@ textarea.ml-langtabs-pane {
 	margin-top: 0.35rem;
 	margin-bottom: 0;
 }
+/* Mobile bar: "Bookmarks" / "Collections" are flyout-PARENT tabs whose flyout
+   holds the real items one level deeper (same .ml-coll-flyout optics as desktop,
+   tap-driven via .ml-flyout-open). Desktop keeps the flat strip. */
+@media (max-width: 640px) {
+	/* Each category flyout drops below ITS OWN tab (not all at the strip's left).
+	   The tab is the positioning context; cap size to the viewport. */
+	.ml-bookmarks-tabs > li.ml-coll-has-children {
+		position: relative;
+	}
+	.ml-bookmarks-tabs > li.ml-coll-has-children > .ml-coll-flyout {
+		left: 0;
+		min-width: 12rem;
+		max-width: 86vw;
+		max-height: 70vh;
+		overflow-y: auto;
+	}
+	/* A side cascade can't fit a phone, so nested flyouts open inline (accordion),
+	   indented under their parent item. width:auto (not the base max-content) so
+	   every level fills the flyout's full width — entries stay the same width and
+	   all carets line up on the same right edge, with text indented per level. */
+	.ml-coll-flyout-item > .ml-coll-flyout {
+		position: static;
+		top: auto;
+		left: auto;
+		border: 0;
+		box-shadow: none;
+		background: none;
+		padding-left: 0.9rem;
+		width: auto;
+		min-width: 0;
+		max-width: none;
+	}
+	/* A nested item's side-pointing caret turns down when expanded inline. (The
+	   top-level category carets already point down, so they're left alone.) */
+	.ml-coll-flyout-item.ml-flyout-open > a > .ml-coll-tab-caret {
+		transform: rotate(90deg);
+	}
+}
 /* Uniform 30 px gap between every tab so the bookmark trash button
    has room to sit in the gap rather than overlapping a neighbour. */
 .ml-bookmarks-tabs > li > a {
@@ -1596,37 +1933,79 @@ textarea.ml-langtabs-pane {
 /* While a selection is active you're CURATING, not deleting — hide the × on
    collection tabs. Clicking the tab itself adds/removes the selection; the
    cursor says which. */
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] .ml-bookmark-del {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] .ml-bookmark-del {
 	display: none;
 }
 /* Curate cursors (selection active):
    - a NON-active collection tab → "+" (the click ADDS the selection to it);
    - the ACTIVE collection tab (you're inside it) → "−" (the click REMOVES the
      selection from it). Custom SVG cursors, native copy/pointer as fallback. */
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id] > a {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
 }
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id].uk-active > a {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].uk-active > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
 /* Shared (team-wide) tabs are read-only for non-managers: no curate cursor —
    a click just recalls. Managers get the curate cursors back via the
    ml-can-manage-shared root class (the rules above already cover non-shared
    tabs for them). */
-.ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared] > a {
+.ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a {
 	cursor: pointer;
 }
-.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared] > a {
+.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
 }
-.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection > li[data-coll-id][data-shared].uk-active > a {
+.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared].uk-active > a {
 	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
+/* Folder model: a parent collection holds its own images and is curatable like
+   any leaf, so it keeps the +/− curate cursor — no read-only exception. */
+/* Touch devices have no cursor, so the curate +/− affordance is shown as a
+   glyph BEFORE the collection name instead. Mirrors the curate-cursor cascade
+   above one-for-one: "+" to ADD the selection, "−" to REMOVE it from the
+   active tab; only non-manager shared tabs get no glyph. Inherits the tab's
+   own colour (no bespoke colour). Selectors and source order match the cursor
+   rules so the glyph always agrees with what a click does. */
+@media (hover: none) {
+	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id] > a::before {
+		content: "+";
+		display: inline-block;
+		flex: 0 0 auto;
+		width: 1em;
+		margin-right: 0.4rem;
+		text-align: center;
+		font-size: 1.2em;
+		font-weight: 700;
+		line-height: 1;
+	}
+	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id].uk-active > a::before {
+		content: "\2212";
+	}
+	.ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a::before {
+		content: "";
+	}
+	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a::before {
+		content: "+";
+		margin-right: 0.45rem;
+	}
+	.ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared].uk-active > a::before {
+		content: "\2212";
+	}
+}
 
-/* Shared tabs are distinguished by italics alone — same colour and weight as
-   the personal tabs, no extra icon. */
-.ml-bookmark--shared {
+/* Bookmarks are shown in italic to tell them apart from collections (which are
+   upright). Targets bookmark tabs AND their flyout items — the <li> carries
+   data-bookmark-id either way; the "Show all" tab and collection tabs (which
+   carry data-coll-id) are unaffected. */
+.ml-bookmarks-tabs li[data-bookmark-id] > a {
 	font-style: italic;
+}
+/* Legacy shared bookmarks were italic via this class; kept only so any
+   server-rendered .ml-bookmark--shared still reads consistently. Collections
+   stay upright. */
+.ml-bookmark--collection.ml-bookmark--shared {
+	font-style: normal;
 }
 
 /* "Share with the team" toggle in the save dialog. */

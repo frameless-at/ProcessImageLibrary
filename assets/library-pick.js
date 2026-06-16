@@ -65,7 +65,46 @@
 		if (version > 0 && url.indexOf('target_version=') === -1) {
 			url += '&target_version=' + version;
 		}
+		var titleText = btn.getAttribute('data-title') || 'Image library';
 
+		// Prefer ProcessWire's own modal (pwModalWindow), exactly like the
+		// rich-text "Insert from library" path, so both library pickers wear the
+		// same admin-theme chrome. Fall back to the plain <dialog> only if the
+		// core modal helper isn't on this screen (typeof guard: a bare reference
+		// would ReferenceError under strict mode).
+		if (typeof pwModalWindow !== 'undefined') {
+			var $iframe = pwModalWindow(
+				url,
+				{ title: "<i class='fa fa-fw fa-image'></i> " + titleText },
+				'large'
+			);
+			function onModalMsg(e) {
+				if (e.origin !== location.origin) return;       // same-origin only
+				if (!e.data) return;
+				// Cancel: just close, no field reload.
+				if (e.data.mlCancel === true) {
+					window.removeEventListener('message', onModalMsg);
+					try { $iframe.dialog('close'); } catch (err) { /* already closed */ }
+					return;
+				}
+				if (e.data.mlPicked !== true) return;
+				window.removeEventListener('message', onModalMsg);
+				try { $iframe.dialog('close'); } catch (err) { /* already closed */ }
+				reloadField(btn);
+			}
+			window.addEventListener('message', onModalMsg);
+			$iframe.on('dialogclose', function () {
+				window.removeEventListener('message', onModalMsg);
+			});
+			return;
+		}
+		openPickerDialog(btn, url, titleText);
+	}
+
+	// Fallback picker: a bespoke <dialog> with a dark title bar. Kept only for
+	// screens where pwModalWindow is unavailable; the pwModal path above is the
+	// canonical one.
+	function openPickerDialog(btn, url, titleText) {
 		var dlg = document.createElement('dialog');
 		dlg.className = 'ml-pick-dialog';
 		dlg.style.cssText = 'width:min(1100px,96vw);height:88vh;max-width:96vw;max-height:92vh;'
@@ -75,7 +114,7 @@
 		bar.style.cssText = 'display:flex;align-items:center;justify-content:space-between;'
 			+ 'gap:1rem;padding:.5rem .8rem;background:#222;color:#fff;font-weight:600;';
 		var title = document.createElement('span');
-		title.textContent = btn.getAttribute('data-title') || 'Image library';
+		title.textContent = titleText;
 		var close = document.createElement('button');
 		close.type = 'button';
 		close.textContent = '✕';
@@ -99,7 +138,9 @@
 		}
 		function onMsg(e) {
 			if (e.source !== iframe.contentWindow) return;
-			if (!e.data || e.data.mlPicked !== true) return;
+			if (!e.data) return;
+			if (e.data.mlCancel === true) { teardown(); return; }
+			if (e.data.mlPicked !== true) return;
 			teardown();
 			reloadField(btn);
 		}
