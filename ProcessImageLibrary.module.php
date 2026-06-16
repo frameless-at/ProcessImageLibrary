@@ -4851,7 +4851,23 @@ class ProcessImageLibrary extends Process {
 		$qs = ltrim($qs, '?');
 		$params = [];
 		if ($qs !== '') parse_str($qs, $params);
+		return $this->buildFilters($params, $imageFields, $eligibleTemplates, $customCols);
+	}
 
+	/**
+	 * The single source of truth for turning a raw param map (from a parsed
+	 * querystring OR from $input->get) into the canonical filter array
+	 * applyRowFilters consumes. parseFilterQs and readFilterInput differ only in
+	 * WHERE the params come from; this keeps their output byte-identical, which
+	 * the match-aware "row vanished" check relies on.
+	 *
+	 * @param array<string,mixed> $params
+	 * @param array<int,string> $imageFields
+	 * @param array<int,string> $eligibleTemplates
+	 * @param array<int,string> $customCols
+	 * @return array<string,mixed>
+	 */
+	protected function buildFilters(array $params, array $imageFields, array $eligibleTemplates, array $customCols = []): array {
 		$template = (string) ($params['template'] ?? '');
 		$field    = (string) ($params['field'] ?? '');
 
@@ -4860,6 +4876,7 @@ class ProcessImageLibrary extends Process {
 			if (!empty($params['no_custom_' . $name])) $noCustom[$name] = true;
 		}
 
+		// Tags: comma form (?tags=foo,bar) or bracket array form (?tags[]=foo&tags[]=bar).
 		$tags = [];
 		$rawTags = $params['tags'] ?? '';
 		if (is_array($rawTags)) {
@@ -4881,6 +4898,7 @@ class ProcessImageLibrary extends Process {
 			'no_desc'   => !empty($params['no_desc']),
 			'no_tags'   => !empty($params['no_tags']),
 			'no_custom' => $noCustom,
+			'dupes'     => !empty($params['dupes']),
 			'tags'      => $tags,
 			'coll'      => preg_replace('/[^a-z0-9]/i', '', $coll) ?? '',
 			'sel'       => $coll !== '' ? $this->resolveCollectionKeys($coll) : [],
@@ -5135,52 +5153,25 @@ class ProcessImageLibrary extends Process {
 	}
 
 	protected function readFilterInput(array $imageFields, array $eligibleTemplates, array $customCols = []): array {
-		$input    = $this->wire('input');
-		$template = (string) $input->get('template');
-		$field    = (string) $input->get('field');
-
-		$noCustom = [];
-		foreach ($customCols as $name) {
-			if ($input->get('no_custom_' . $name)) {
-				$noCustom[$name] = true;
-			}
-		}
-
-		// Tags filter — AND-match against row tags. Accepts either the
-		// comma-separated form (?tags=foo,bar) that buildUrl emits, or
-		// the legacy PHP-array bracket form (?tags[]=foo&tags[]=bar)
-		// from older bookmarks / direct form submissions.
-		$rawTags = $input->get('tags');
-		$tags = [];
-		if (is_array($rawTags)) {
-			foreach ($rawTags as $t) {
-				$t = trim((string) $t);
-				if ($t !== '') $tags[] = $t;
-			}
-		} elseif (is_string($rawTags) && $rawTags !== '') {
-			foreach ($this->splitTags($rawTags) as $t) {
-				$tags[] = $t;
-			}
-		}
-		$tags = array_values(array_unique($tags));
-
-		// Collection recall: ?coll=<id> resolves (server-side, from $user->meta)
-		// to an explicit row-key set. Exposed as 'sel'; applyRowFilters narrows
-		// the grid to exactly those images.
-		$coll = (string) $input->get('coll');
-
-		return [
-			'q'              => trim((string) $input->get('q')),
-			'template'       => in_array($template, $eligibleTemplates, true) ? $template : '',
-			'field'          => in_array($field, $imageFields, true) ? $field : '',
-			'no_desc'        => (bool) $input->get('no_desc'),
-			'no_tags'        => (bool) $input->get('no_tags'),
-			'no_custom'      => $noCustom,
-			'dupes'          => (bool) $input->get('dupes'),
-			'tags'           => $tags,
-			'coll'           => preg_replace('/[^a-z0-9]/i', '', $coll) ?? '',
-			'sel'            => $coll !== '' ? $this->resolveCollectionKeys($coll) : [],
+		$input  = $this->wire('input');
+		// Collect the same keys parseFilterQs reads from a querystring, then run
+		// the shared builder so both paths emit a byte-identical filter array.
+		// Tags accepts either the comma form (?tags=foo,bar) or the bracket-array
+		// form (?tags[]=foo&tags[]=bar) — buildFilters normalises both.
+		$params = [
+			'q'        => $input->get('q'),
+			'template' => $input->get('template'),
+			'field'    => $input->get('field'),
+			'no_desc'  => $input->get('no_desc'),
+			'no_tags'  => $input->get('no_tags'),
+			'dupes'    => $input->get('dupes'),
+			'tags'     => $input->get('tags'),
+			'coll'     => $input->get('coll'),
 		];
+		foreach ($customCols as $name) {
+			$params['no_custom_' . $name] = $input->get('no_custom_' . $name);
+		}
+		return $this->buildFilters($params, $imageFields, $eligibleTemplates, $customCols);
 	}
 
 	/**
