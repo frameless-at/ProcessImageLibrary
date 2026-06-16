@@ -2902,6 +2902,39 @@ class ProcessImageLibrary extends Process {
 			));
 		}
 
+		// Content validation: the upload must actually BE an image of the
+		// claimed type, not arbitrary bytes under an image extension. Replace
+		// already pins the extension to the original, so matching the bytes to
+		// that extension is enough. getimagesize() doesn't recognise SVG, so
+		// that one format is sniffed for an <svg root instead.
+		$imgInfo = @getimagesize($tmpPath);
+		if ($imgInfo === false) {
+			if ($newExt === 'svg') {
+				$head = (string) @file_get_contents($tmpPath, false, null, 0, 512);
+				if (stripos($head, '<svg') === false) {
+					return $this->jsonError('Upload is not a valid SVG image');
+				}
+			} else {
+				return $this->jsonError('Upload is not a valid image');
+			}
+		} else {
+			$extsByType = [
+				IMAGETYPE_JPEG    => ['jpg', 'jpeg'],
+				IMAGETYPE_PNG     => ['png'],
+				IMAGETYPE_GIF     => ['gif'],
+				IMAGETYPE_WEBP    => ['webp'],
+				IMAGETYPE_BMP     => ['bmp'],
+				IMAGETYPE_TIFF_II => ['tif', 'tiff'],
+				IMAGETYPE_TIFF_MM => ['tif', 'tiff'],
+			];
+			$validExts = $extsByType[(int) $imgInfo[2]] ?? [];
+			if ($validExts && !in_array($newExt, $validExts, true)) {
+				return $this->jsonError(sprintf(
+					'Upload content does not match the .%s extension', $newExt
+				));
+			}
+		}
+
 		$targetPath = (string) $img->filename;
 		if ($targetPath === '' || !is_file($targetPath)) {
 			return $this->jsonError('Original file not found on disk');
