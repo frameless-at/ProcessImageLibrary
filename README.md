@@ -19,10 +19,12 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
   - [Scope](#scope)
 - [Filtering](#filtering)
 - [Bookmarks](#bookmarks)
+  - [Managing bookmarks & collections](#managing-bookmarks--collections)
 - [Collections](#collections)
 - [The table](#the-table)
   - [Columns dialog](#columns-dialog)
   - [Pagination row](#pagination-row)
+  - [Collections column](#collections-column)
   - [Used in (where-used column)](#used-in-where-used-column)
 - [Inline editing](#inline-editing)
   - [Editing as paintbrush (bulk)](#editing-as-paintbrush-bulk)
@@ -146,7 +148,7 @@ Available filters:
 
 | Filter | What it does |
 |---|---|
-| Search | Word-match across page title, description, tags, filename, custom subfields |
+| Search | Token search across page title, description, tags, filename, custom subfields. Multiple words match **any** (OR); prefix a word with `+` to require it, `-` to exclude it, or wrap a phrase in `"quotes"` for an exact match (e.g. `red +rose -draft`) |
 | Template | Restrict to pages of this template; the Image-field dropdown narrows to fields the chosen template actually carries |
 | Image field | Restrict to images coming from one specific field |
 | Tags | Multi-select AND-match against pooled tags across all rows |
@@ -163,34 +165,53 @@ After **Apply** the fieldset auto-collapses so the table has full vertical room.
 
 ## Bookmarks
 
-A tab strip sits above the filter bar with the user's saved filter combinations. PW-native chrome — the same `WireTabs` + `uk-tab` markup the rest of the admin uses (Page Edit, Profile, etc.), so the look matches and no module-specific CSS is involved.
+A tab strip sits above the filter bar with the team's saved filter combinations. PW-native chrome — the same `WireTabs` + `uk-tab` markup the rest of the admin uses (Page Edit, Profile, etc.), so the look matches and no module-specific CSS is involved.
 
 - **Show all** is always the leftmost tab — empty filter state.
-- **Saved bookmarks** sit between, in the order they were created. Each tab carries an `×` button on hover (only inside its own tab area) to delete. [Collections](#collections) share the same strip, marked with an icon.
-- **+ Add bookmark** is the rightmost tab and appears when the active filter is BOTH non-empty AND not already saved — so it surfaces exactly when there's a new combination worth keeping. When a checkbox **selection** is active instead, the same button relabels to **+ Add collection** and saves the selection (see [Collections](#collections)).
+- **Saved bookmarks** sit between, in the order set in the manager. A top-level filter bookmark carries an `×` on hover for quick delete. [Collections](#collections) share the same strip, marked with an icon.
+- **Folders** group related bookmarks: an empty container that only nests its children, opened as a cascading hover flyout (up to 3 levels). Folders are created and filled in the manager.
+- A **gear** (`fa-sliders`) sits right after the items and opens the [manager](#managing-bookmarks--collections). Managers only.
+- **+ New** sits at the right of the strip and appears when the active filter is BOTH non-empty AND not already saved — so it surfaces exactly when there's a new combination worth keeping. When a checkbox **selection** is active instead, the same link saves the selection as a [collection](#collections). After saving, the manager opens on the matching tab so you can place / sort the new entry right away.
 
 Clicking a bookmark navigates via the same AJAX swap the filter form uses, and **resets + repopulates the filter form** so the visible inputs match the bookmark's state — no stale checkboxes left from the previous filter. Active tab is computed by canonicalising the current URL against each bookmark's saved querystring (filter-shaped params only, sorted, empty values dropped).
 
 What's stored: only **filter** params (`q`, `template`, `field`, `tags`, `no_desc`, `no_tags`, `no_custom_*`). Sort, direction, page size and page number stay orthogonal — switching bookmarks doesn't clobber your current sort.
 
-Storage piggy-backs on `$user->meta('imageLibraryPrefs')` alongside the existing `columns`, `pageSize`, `viewMode`, `thumbScale` and `collections` keys — cross-device, no new endpoint.
+**Team-wide storage.** Bookmarks and collections are a single **team store** in the module config (not per-user) — everyone with library access sees the same set. Each bookmark is `{ id, name, qs, parent }` (a folder has an empty `qs`). Creating, renaming, foldering and deleting them is gated by the **`image-library-manage-shared`** permission; users without it can recall the saved bookmarks but not change them.
+
+**On mobile**, the strip collapses to three tabs — **Show all**, **Bookmarks**, **Collections** — and the items open one level deeper as cascading tap-to-open flyouts (the same optics as the desktop hover flyouts), so the bar stays usable on a narrow screen.
+
+![PLACEHOLDER — the mobile bookmarks/collections bar: three tabs (Show all / Bookmarks / Collections) with a Collections flyout tapped open, showing nested collections indented under a parent](docs/screenshots/30-mobile-bar.png)
+
+### Managing bookmarks & collections
+
+The gear opens a single tabbed **manager** dialog — **Collections** | **Bookmarks** — for everything that isn't a one-click save:
+
+- **Rename** any entry inline; **delete** with an inline "click again to confirm".
+- **Reorder** with ▲ / ▼ (or drag) and **nest** / **un-nest** to build folders / sub-collections, up to **3 levels**.
+- **Deleting a collection cascades** to its sub-collections (like deleting a set in Lightroom / a folder in Apple Photos); the images themselves stay in the library.
+- A small type icon marks each row — a folder icon for an empty container, the duplicate/clone icon for one that holds its own images.
+
+![PLACEHOLDER — the bookmarks/collections manager dialog: the Collections | Bookmarks tab row with a right-aligned "+ New" link, a list of nested collections with rename / delete / move / nest controls, and a Close button](docs/screenshots/27-collections-manager.png)
 
 ## Collections
 
 Where a [bookmark](#bookmarks) saves a *filter*, a **collection** saves a *specific, hand-picked set of images* — useful when the set can't be expressed as a filter (e.g. filter to `red +flowers`, then keep only the three you actually want). Collections live in the same tab strip as bookmarks, marked with an icon, and work in the admin **and** the picker — handy for pulling up a curated set while inserting images.
 
-![The bookmark / collection tab strip ("Show all", a "Flowers" collection, a "Red" collection, "+ Add collection") above the masonry gallery, with several flower tiles ticked via their selection checkboxes](docs/screenshots/13-collections.png)
+![The bookmark / collection tab strip ("Show all", a "Flowers" collection, a "Red" collection, the manage gear, and "+ New") above the masonry gallery, with several flower tiles ticked via their selection checkboxes](docs/screenshots/13-collections.png)
 
-**Storage, not URL.** A collection stores its image identity keys (`pageId:fieldName:basename`) as data in `$user->meta('imageLibraryPrefs')` under `collections`, each as `{ id, name, keys[] }`. Recall is a short `?coll=<id>` URL — a 100-image collection is a ~12-character link, never a multi-kilobyte query string that would blow past URL limits. The server resolves the id back to the key set and filters the grid to it.
+**Storage, not URL.** Collections live in the same [team store](#bookmarks) as bookmarks (module config), each as `{ id, name, keys[], parent }` — `keys` are image identity keys (`pageId:fieldName:basename`); `parent` nests it under another collection. Recall is a short `?coll=<id>` URL — a 100-image collection is a ~12-character link, never a multi-kilobyte query string that would blow past URL limits. The server resolves the id back to the key set (its own images **plus** every sub-collection's) and filters the grid to it.
 
-**Create.** Tick image checkboxes (table or masonry). The bookmark bar's add button relabels to **+ Add collection**; click it, name the set, save. The checkboxes clear as confirmation, and the new collection tab joins the strip.
+**Create.** Tick image checkboxes (table or masonry), then click **+ New** in the bar; name the set and save. The checkboxes clear as confirmation, the new collection joins the strip, and the [manager](#managing-bookmarks--collections) opens so you can nest / sort it. Creating and editing collections needs the **`image-library-manage-shared`** permission. You can also assign images to collections straight from the [Collections column](#collections-column) in the table.
+
+**Folder model — a collection holds images *and* sub-collections.** Every collection can carry its own images and nest other collections (up to 3 levels), like folders that also hold files (Finder, Gmail nested labels). There's no separate "container" type — an empty collection is just one with no images yet. Viewing a parent shows the **union** (its own images plus every descendant's), and removing an image from a parent cascades down to its sub-collections.
 
 **Recall, add, remove — driven by the cursor.** With a selection active, clicking a collection tab curates it instead of navigating, and the cursor signals which way:
 
 - Hovering a collection you're **not** viewing shows a **`+`** cursor — the click **adds** the selection to that collection.
 - Hovering the collection you **are** viewing (its tab is active) shows a **`−`** cursor — the click **removes** the selected images from it (the rows leave the grid in place and the count updates).
 
-Either way the checkboxes clear as confirmation. With **no** selection, a collection tab behaves like any tab — it recalls the set — and its `×` (delete) appears on hover.
+Either way the checkboxes clear as confirmation. With **no** selection, a collection tab behaves like any tab — it recalls the set. Deleting a collection happens in the [manager](#managing-bookmarks--collections), not on the strip.
 
 **Snapshot semantics.** A collection is a snapshot of identities: images deleted or renamed after the fact simply drop out of the recalled view, silently. Duplicate markers are *contextual* (an image is only flagged when ≥2 of its byte-identical copies are present in the current view), so they appear inside a collection only if you deliberately added two copies of the same image to it.
 
@@ -205,6 +226,7 @@ Either way the checkboxes clear as confirmation. With **no** selection, a collec
 - **Description, Tags** — inline-editable (see [Editing](#inline-editing)).
 - **Uploaded, Modified** — created / last-modified timestamps from the underlying Pagefile, formatted in `$config->dateFormat`. Read-only, sortable.
 - **Dimensions, Size** — read-only. **Variations** — read-only, sortable.
+- **Collections** — the collections each image belongs to, linked; managers can re-assign inline (see [Collections column](#collections-column)). Sortable (by collection names).
 - **Used in** — opt-in usage column (hidden by default), sortable; see [Used in](#used-in-where-used-column).
 - **Custom subfields** — auto-discovered from each image field's `field-{name}` custom template (PW 3.0.142+). Editable.
 
@@ -223,6 +245,16 @@ The `fa-columns` icon in the pagination row opens a `<dialog>` listing every col
 - Summary + prev/next on the left
 - Per-page picker + columns icon on the right
 - Rendered both above and below the table for long pages
+
+### Collections column
+
+The **Collections** column shows, per image, the collections it belongs to — each name linked to its `?coll=<id>` recall — and lets a manager re-assign membership without leaving the table. Membership is the **union**: a parent appears whenever the image is in any of its sub-collections. The header is sortable (alphabetically by the joined collection names), and the **Field** cell links straight to the PW field editor.
+
+![PLACEHOLDER — the Collections table column: a row whose Collections cell lists two linked collection names with a small caret, alongside the thumbnail / filename cells](docs/screenshots/28-collections-column.png)
+
+**Assign inline.** Click the cell's caret to open a checkbox tree of every collection; tick / untick to add or remove the image. Ticking a parent adds the image to it; unticking **cascades** the removal to its sub-collections. With several rows **selected**, the change applies to the whole selection (batch). Uncheck the collection you're currently viewing and the row drops out of the grid on the spot. Managers only.
+
+![PLACEHOLDER — the inline assign popover: an indented checkbox tree of collections with some boxes ticked, opened from a Collections cell, with a Close button](docs/screenshots/29-collections-assign.png)
 
 ### Used in (where-used column)
 
@@ -446,9 +478,9 @@ Upload a previously exported (and externally edited) JSON or CSV. The import:
 
 ## Picker add-ons
 
-Two **optional** integrations that surface the library *outside* its own admin page, so editors can drop an existing library image into a page without re-uploading it. Both are **off by default** — the library is fully usable without them — and toggle independently in the collapsed **Picker add-ons** fieldset under [Module configuration](#module-configuration). Each opens the library in a modal **picker**: the normal table / gallery with selection checkboxes and a *Use selected* bar.
+Two **optional** integrations that surface the library *outside* its own admin page, so editors can drop an existing library image into a page without re-uploading it. Both are **off by default** — the library is fully usable without them — and toggle independently in the collapsed **Picker add-ons** fieldset under [Module configuration](#module-configuration). Both open the library through ProcessWire's own modal window (`pwModalWindow`), so the chrome matches the rest of the admin: the normal table / gallery with selection checkboxes and a bar carrying a primary **Use selected** and a secondary **Cancel**.
 
-![The library opened as a modal picker (titled "Insert from library"): the bookmark / collection tabs, a filter bar, a "Use selected" button, and the masonry gallery with images selected](docs/screenshots/20-picker-modal.png)
+![The library opened as a modal picker (titled "Insert from library"): the bookmark / collection tabs, a filter bar, the "Use selected" + "Cancel" buttons, and the masonry gallery with images selected](docs/screenshots/20-picker-modal.png)
 
 Enabling either toggle makes the module `autoload` so its hooks run on the relevant edit screens; after flipping a toggle, run **Modules → Refresh** once.
 
