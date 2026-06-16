@@ -29,19 +29,23 @@ src/*.php (3215), assets/*.js (871).
    (`versionReasons` keys, human sizes) can carry path/filename text, it's an
    injection vector. Build with `textContent` / DOM nodes. **Medium.**
 
-4. **Two parallel copies of the pwimage embed grammar that DISAGREE** —
-   `findImageReferences` (`module.php:~3230`, rename/delete preflight) vs
-   `ImageLibraryUsage::extractUsageKeys` (where-used index). Not just
-   duplication: for a cross-page insert `/files/1164/img.x-is-pid1171.jpeg`,
-   `extractUsageKeys` treats the **directory pid (1164)** as the source image
-   and `-pid1171` as the target page (its comment says this was verified against
-   real data), while `findImageReferences`' regex treats `-pid<pid>` as the
-   **source image's** pid — so the preflight would attribute that embed to image
-   1171 instead of 1164. **High — real correctness conflict, NOT a mechanical
-   dedup.** Needs real embed fixtures to confirm which interpretation is correct,
-   then align `findImageReferences` to it and extract the shared grammar. Left
-   unchanged for now (blind merge would risk rename/delete-follow regressions).
-   **Status: deferred, needs fixtures.**
+4. **pwimage embed grammar — comments were inverted (RESOLVED, comments only).**
+   Confirmed the ground truth from PW core `ProcessPageEditImageSelect`: an
+   inserted variation is stored in the SOURCE image's own files folder, so the
+   URL `/files/<sourcePid>/<stem>...` has the source page id as its directory for
+   BOTH same- and cross-page inserts; the optional `-pid<N>` marker records the
+   EDITING page that USES the variation, not the source. So `extractUsageKeys`
+   (which keys on the directory pid) was already correct, and so is the active
+   matching in `findImageReferences` / `rewriteEmbeddedReferences` (their DIRECT
+   branch matches the source-folder URL). The "conflict" was only (a) inverted
+   doc comments in the rename/delete family AND a self-contradictory docblock in
+   `extractUsageKeys`, and (b) a defensive cross-branch + `renameCrossPageCopies`
+   that target a rarer non-standard setup and are no-ops for standard data.
+   **Verified by the user: renaming an embedded image works.** Fix applied:
+   corrected all six comment sites to the core truth and documented the grammar
+   on the `ImageLibraryUsage` trait; behaviour unchanged, defensive fallback
+   kept. (A shared grammar HELPER extraction is still open — do it with an
+   explicit cross-page test; see P2.) **Status: resolved.**
 
 5. **`parseFilterQs` (`module.php:~4817`) and `readFilterInput` (`~5104`) are
    ~95% duplicated.** They must stay byte-identical for the match-aware

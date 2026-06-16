@@ -3242,16 +3242,17 @@ class ProcessImageLibrary extends Process {
 			$key = $pid . ':' . $bn;
 			$byKey[$key] = [];
 			$qs = preg_quote($stem, '#');
-			// pwimage embeds this image's file two different ways, and we must
-			// catch BOTH or a rename/delete silently misses the reference:
-			//   - direct, same page:  /<pid>/<stem>.<variation>.<ext>
-			//   - cross-page insert:  /<anyPid>/<stem>.<variation>-pid<pid>[-...].<ext>
-			//     -- "Insert from library" copies a sized variation onto the
-			//       EDITING page and records the source page as -pid<pid> in the
-			//       filename, so the URL pid is the editing page, NOT this image's.
-			// A loose "/<stem>." needle finds candidates of either form cheaply;
-			// the regex then verifies it's really THIS image (a same-stem image
-			// on another page is rejected).
+			// pwimage stores an inserted variation in the SOURCE image's own files
+			// folder, so its URL is /files/<sourcePid>/<stem>.<variation>[-is][-pid<editorPid>].<ext>
+			// for BOTH same-page and cross-page inserts. The optional -pid<N> marker
+			// records the EDITING page that uses the variation, NOT the source (see
+			// PW core ProcessPageEditImageSelect; the grammar is documented on the
+			// ImageLibraryUsage trait). So the DIRECT branch (/<pid>/<stem>.) already
+			// catches every standard embed of this image. The second branch is a
+			// defensive fallback for the rarer setup where a copy lands in another
+			// page's folder tagged with this image's id; it is a no-op for standard
+			// pwimage data. A loose "/<stem>." needle finds candidates of either
+			// form cheaply; the regex then verifies it is really THIS image.
 			$specs[$key] = [
 				'needle' => '/' . $stem . '.',
 				'regex'  => '#/(?:' . $pid . '/' . $qs . '\.'
@@ -3510,13 +3511,16 @@ class ProcessImageLibrary extends Process {
 
 		$qOld = preg_quote($oldStem, '#');
 		$qExt = preg_quote($oldExt, '#');
-		// pwimage embeds this image two ways; both rewrite ONLY the stem (via a
-		// lookahead) so any variation — crop, multi-dot, hidpi — is preserved,
-		// and the pinned extension keeps a different-type sibling (foo.png) safe:
-		//   direct:     /<pid>/<stem>.<variation>.<ext>
-		//   cross-page: /<anyPid>/<stem>.<variation>-pid<pid>[-hidpi].<ext>
-		//     — "Insert from library" + crop stores an INDEPENDENT copy on the
-		//       EDITING page (its own folder) and records the source as -pid<pid>.
+		// pwimage stores the inserted variation in the SOURCE image's own folder,
+		// so its URL is /<sourcePid>/<stem>.<variation>[-is][-pid<editorPid>].<ext>
+		// for same- and cross-page inserts (-pid<N> is the EDITING page that uses
+		// it, NOT the source; see ImageLibraryUsage / PW core). Both regexes
+		// rewrite ONLY the stem (via a lookahead) so any variation (crop,
+		// multi-dot, hidpi) and the pinned extension stay intact. The direct
+		// branch covers every standard embed; the cross branch is a defensive
+		// fallback for the rarer copy-in-another-folder setup:
+		//   direct: /<pid>/<stem>.<variation>.<ext>
+		//   cross:  /<anyPid>/<stem>.<variation>-pid<pid>[-hidpi].<ext>
 		$directRe = '#(/' . $pid . '/)' . $qOld . '(?=\.[^"\'\s/]*' . $qExt . '\b)#i';
 		$crossRe  = '#(/\d+/)' . $qOld . '(?=\.[^"\'\s/]*-pid' . $pid . '\b[^"\'\s/]*' . $qExt . '\b)#i';
 
@@ -3570,13 +3574,17 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Rename the cross-page "Insert from library" copy files this image left on
-	 * another page. Those copies are named "<oldStem>.<variation>-pid<sourcePid>
-	 * …<ext>" in the EDITING page's own files folder — independent of PW's API
-	 * (they're regenerated from the source on render). When the source is
-	 * renamed they'd dangle, so re-stem them here. Only files carrying the exact
-	 * -pid<sourcePid> marker are touched, so an unrelated same-stem image on that
-	 * page is never affected. Filesystem-level, mirroring the dedup engine.
+	 * Defensive cleanup for a NON-standard setup: an "Insert from library" copy
+	 * that landed in the EDITING page's own files folder, named
+	 * "<oldStem>.<variation>-pid<sourcePid>...<ext>" (tagged with the source id).
+	 * In standard pwimage the inserted variation instead lives in the SOURCE
+	 * image's folder and PW regenerates it from the source after a rename, so the
+	 * URL rewrite alone suffices and this scan matches nothing. Where such an
+	 * independent copy DOES exist it would dangle once the source is renamed, so
+	 * re-stem it here. Only files carrying the exact -pid<sourcePid> marker are
+	 * touched, so an unrelated same-stem image on that page is never affected.
+	 * Filesystem-level, mirroring the dedup engine. Harmless no-op on standard
+	 * installs; kept as a safety net.
 	 */
 	protected function renameCrossPageCopies(Page $page, string $oldStem, string $newStem, int $sourcePid): void {
 		$dir = (string) $page->filesPath();
