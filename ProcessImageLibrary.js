@@ -2611,6 +2611,19 @@
 			return map;
 		}
 
+		// Like rowsByKey(), but maps to the row/card element in EITHER view
+		// (table .ml-row / gallery .ml-card) so callers never interpolate a
+		// basename-bearing data-key into a CSS attribute selector.
+		function rowElsByKey() {
+			var map = {};
+			if (!results) return map;
+			results.querySelectorAll('.ml-select-row').forEach(function (cb) {
+				var row = cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
+				if (cb.dataset.key && row) map[cb.dataset.key] = row;
+			});
+			return map;
+		}
+
 		function deleteItems(items) {
 			if (!config.deleteUrl || !items.length) return;
 			var fd = new FormData();
@@ -4817,13 +4830,13 @@
 			if (!viewed || !results) return 0;
 			var subtree = collSubtreeSet(sharedCollections, viewed);
 			var removed = 0;
+			var rowEls = rowElsByKey();
 			keys.forEach(function (k) {
 				var stillIn = sharedCollections.some(function (c) {
 					return c && subtree[c.id] && c.keys && c.keys.indexOf(k) !== -1;
 				});
 				if (stillIn) return;
-				var cb = results.querySelector('.ml-select-row[data-key="' + k + '"]');
-				var row = cb && cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
+				var row = rowEls[k];
 				if (row) { row.remove(); selection.delete(k); removed++; }
 			});
 			return removed;
@@ -4963,14 +4976,10 @@
 				});
 			});
 			var removed = Object.keys(removedKeys).length;
+			var rowEls = rowElsByKey();
 			selKeys.forEach(function (k) {
-				// k is wrapped in quotes here, so the raw value is correct (row
-				// keys never contain a double-quote).
-				if (results) {
-					var cb = results.querySelector('.ml-select-row[data-key="' + k + '"]');
-					var row = cb && cb.closest ? cb.closest('.ml-row, .ml-card, tr') : null;
-					if (row) row.remove();
-				}
+				var row = rowEls[k];
+				if (row) row.remove();
 			});
 			if (found.shared) saveSharedPrefs(); else saveUserPrefs();
 			clearSelectionConfirm();
