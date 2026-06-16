@@ -454,6 +454,7 @@ trait ImageLibraryUsage {
 					= [(int) $r['ref_page_id'], (string) $r['field_name']];
 			}
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: loadUsageByImage query failed: ' . $e->getMessage());
 		}
 		return $cache = $out;
 	}

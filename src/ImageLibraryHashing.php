@@ -138,6 +138,7 @@ trait ImageLibraryHashing {
 				$out[$r['page_id'] . "\0" . $r['field_name'] . "\0" . $r['basename']] = true;
 			}
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: loadLockSet query failed: ' . $e->getMessage());
 		}
 		return $out;
 	}
@@ -184,6 +185,7 @@ trait ImageLibraryHashing {
 				];
 			}
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: loadClusterMembers query failed: ' . $e->getMessage());
 		}
 		return $out;
 	}
@@ -221,6 +223,7 @@ trait ImageLibraryHashing {
 				}
 			}
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: loadDuplicateKeyHashes query failed: ' . $e->getMessage());
 		}
 		return $keys;
 	}
@@ -243,6 +246,7 @@ trait ImageLibraryHashing {
 			);
 			$stmt->execute([$filemtime, $pageId, $fieldName, $basename]);
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: refreshStoredMtime failed: ' . $e->getMessage());
 		}
 	}
 
@@ -732,10 +736,14 @@ trait ImageLibraryHashing {
 				if (!$file->isFile() || $file->isLink()) continue;
 				if ($out['files'] >= $max) { $out['truncated'] = true; break; }
 
-				$size  = (int) $file->getSize();
-				$inode = (int) $file->getInode();
-				$dev   = (int) @stat($file->getPathname())['dev'];
-				$nlink = (int) @stat($file->getPathname())['nlink'];
+				// One stat() for size/inode/dev/nlink; skip files that vanished
+				// mid-walk (stat() === false) instead of reading false['dev'].
+				$st = @stat($file->getPathname());
+				if ($st === false) continue;
+				$size  = (int) ($st['size'] ?? 0);
+				$inode = (int) ($st['ino'] ?? 0);
+				$dev   = (int) ($st['dev'] ?? 0);
+				$nlink = (int) ($st['nlink'] ?? 0);
 				$key   = $dev . ':' . $inode;
 
 				$out['files']++;
