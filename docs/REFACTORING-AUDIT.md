@@ -29,10 +29,19 @@ src/*.php (3215), assets/*.js (871).
    (`versionReasons` keys, human sizes) can carry path/filename text, it's an
    injection vector. Build with `textContent` / DOM nodes. **Medium.**
 
-4. **Two parallel copies of the pwimage embed grammar** — `findImageReferences`
-   (`module.php:~3197`) vs `ImageLibraryUsage::extractUsageKeys/buildImageStemIndex`.
-   A rename/delete preflight that drifts from the where-used index silently
-   miscounts references. Unify the grammar in one place. **High (drift risk).**
+4. **Two parallel copies of the pwimage embed grammar that DISAGREE** —
+   `findImageReferences` (`module.php:~3230`, rename/delete preflight) vs
+   `ImageLibraryUsage::extractUsageKeys` (where-used index). Not just
+   duplication: for a cross-page insert `/files/1164/img.x-is-pid1171.jpeg`,
+   `extractUsageKeys` treats the **directory pid (1164)** as the source image
+   and `-pid1171` as the target page (its comment says this was verified against
+   real data), while `findImageReferences`' regex treats `-pid<pid>` as the
+   **source image's** pid — so the preflight would attribute that embed to image
+   1171 instead of 1164. **High — real correctness conflict, NOT a mechanical
+   dedup.** Needs real embed fixtures to confirm which interpretation is correct,
+   then align `findImageReferences` to it and extract the shared grammar. Left
+   unchanged for now (blind merge would risk rename/delete-follow regressions).
+   **Status: deferred, needs fixtures.**
 
 5. **`parseFilterQs` (`module.php:~4817`) and `readFilterInput` (`~5104`) are
    ~95% duplicated.** They must stay byte-identical for the match-aware
