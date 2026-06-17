@@ -192,13 +192,13 @@ The gear opens a single tabbed **manager** dialog — **Collections** | **Bookma
 - **Deleting a collection cascades** to its sub-collections (like deleting a set in Lightroom / a folder in Apple Photos); the images themselves stay in the library.
 - A small type icon marks each row — a folder icon for an empty container, the duplicate/clone icon for one that holds its own images.
 
-![PLACEHOLDER — the bookmarks/collections manager dialog: the Collections | Bookmarks tab row with a right-aligned "+ New" link, a list of nested collections with rename / delete / move / nest controls, and a Close button](docs/screenshots/27-collections-manager.png)
+![The bookmarks/collections manager dialog: the Collections | Bookmarks tab row with a right-aligned "+ New" link, a tree of nested entries (e.g. Flowers > Roses > Red / White) with rename / delete / move / nest controls, and a Close button](docs/screenshots/27-collections-manager.png)
 
 ## Collections
 
 Where a [bookmark](#bookmarks) saves a *filter*, a **collection** saves a *specific, hand-picked set of images* — useful when the set can't be expressed as a filter (e.g. filter to `red +flowers`, then keep only the three you actually want). Collections live in the same tab strip as bookmarks, marked with an icon, and work in the admin **and** the picker — handy for pulling up a curated set while inserting images.
 
-![The bookmark / collection tab strip ("Show all", a "Flowers" collection, a "Red" collection, the manage gear, and "+ New") above the masonry gallery, with several flower tiles ticked via their selection checkboxes](docs/screenshots/13-collections.png)
+![The bookmark / collection tab strip ("Show all", a "Photographer" and a "Flowers" tab, the manage gear, and "+ New") above the image table, with the Collections and "Used in" columns visible](docs/screenshots/13-collections.png)
 
 **Storage, not URL.** Collections live in the same [team store](#bookmarks) as bookmarks (module config), each as `{ id, name, keys[], parent }` — `keys` are image identity keys (`pageId:fieldName:basename`); `parent` nests it under another collection. Recall is a short `?coll=<id>` URL — a 100-image collection is a ~12-character link, never a multi-kilobyte query string that would blow past URL limits. The server resolves the id back to the key set (its own images **plus** every sub-collection's) and filters the grid to it.
 
@@ -250,11 +250,9 @@ The `fa-columns` icon in the pagination row opens a `<dialog>` listing every col
 
 The **Collections** column shows, per image, the collections it belongs to — each name linked to its `?coll=<id>` recall — and lets a manager re-assign membership without leaving the table. Membership is the **union**: a parent appears whenever the image is in any of its sub-collections. The header is sortable (alphabetically by the joined collection names), and the **Field** cell links straight to the PW field editor.
 
-![PLACEHOLDER — the Collections table column: a row whose Collections cell lists two linked collection names with a small caret, alongside the thumbnail / filename cells](docs/screenshots/28-collections-column.png)
-
 **Assign inline.** Click the cell's caret to open a checkbox tree of every collection; tick / untick to add or remove the image. Ticking a parent adds the image to it; unticking **cascades** the removal to its sub-collections. With several rows **selected**, the change applies to the whole selection (batch). Uncheck the collection you're currently viewing and the row drops out of the grid on the spot. Managers only.
 
-![PLACEHOLDER — the inline assign popover: an indented checkbox tree of collections with some boxes ticked, opened from a Collections cell, with a Close button](docs/screenshots/29-collections-assign.png)
+![The Collections table column (rows listing the linked collection names with a caret) next to the inline assign popover — a checkbox tree of collections with several boxes ticked and a Close button](docs/screenshots/28-collections-column.png)
 
 ### Used in (where-used column)
 
