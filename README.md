@@ -181,7 +181,7 @@ What's stored: only **filter** params (`q`, `template`, `field`, `tags`, `no_des
 
 **On mobile**, the strip collapses to three tabs — **Show all**, **Bookmarks**, **Collections** — and the items open one level deeper as cascading tap-to-open flyouts (the same optics as the desktop hover flyouts), so the bar stays usable on a narrow screen.
 
-![The mobile bookmarks/collections bar: three tabs (Show all / Bookmarks / Collections) with the Collections flyout tapped open, showing Flowers > Roses > Red / White / Yellow nested under their parents](docs/screenshots/30-mobile-bar.jpg)
+<img alt="The mobile bookmarks/collections bar: three tabs (Show all / Bookmarks / Collections) with the Collections flyout tapped open, showing Flowers &gt; Roses &gt; Red / White / Yellow nested under their parents" src="docs/screenshots/30-mobile-bar.jpg" width="380">
 
 ### Managing bookmarks & collections
 
