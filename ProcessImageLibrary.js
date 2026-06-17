@@ -3951,7 +3951,10 @@
 			}
 			// Append a caret (dir = 'right' for nested flyouts, 'down' for top tabs).
 			function barCaret(a, dir) {
-				a.appendChild(document.createTextNode(' '));
+				// No text-node space before the caret: on hover the link underline
+				// would run under that space right up to the arrow. The gap comes
+				// from the caret's own CSS margin / padding instead, so the arrow
+				// (an inline-block, already underline-excluded) stays clean.
 				var car = document.createElement('i');
 				car.className = 'fa fa-caret-' + dir + ' ml-coll-tab-caret';
 				car.setAttribute('aria-hidden', 'true');

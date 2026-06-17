@@ -1576,7 +1576,9 @@ textarea.ml-langtabs-pane {
 .ml-coll-tab-caret {
 	font-size: 0.85em;
 	opacity: 0.6;
-	margin-left: 0.1rem;
+	/* Gap before the caret (the JS no longer emits a text-node space, so this is
+	   the whole gap for top-level tabs; flyout parents override with auto). */
+	margin-left: 0.3rem;
 	/* Never let the parent link's hover underline run under the caret icon. */
 	display: inline-block;
 	text-decoration: none;
@@ -1640,13 +1642,12 @@ textarea.ml-langtabs-pane {
 	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
 }
 /* Hover tint desktop-only — on touch :hover sticks to the last-tapped item.
-   The tint IS the hover feedback here, so drop the link underline too: it ran
-   under the trailing space right up to the caret, making the arrow look
-   underlined. (The caret glyph itself is already excluded via inline-block.) */
+   The link text keeps its hover underline; the caret stays clean because it's
+   inline-block (excluded from the underline) and the gap before it now comes
+   from CSS, not an underlined text-node space (see barCaret). */
 @media (hover: hover) {
 	.ml-coll-flyout-item > a:hover {
 		background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
-		text-decoration: none;
 	}
 }
 
