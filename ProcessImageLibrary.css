@@ -1638,13 +1638,27 @@ textarea.ml-langtabs-pane {
    without the padding its caret would touch the name); the padding also widens
    max-content by the same amount, so every caret stays right-aligned. */
 .ml-coll-flyout-parent > a .ml-coll-tab-caret { margin-left: auto; padding-left: 0.75rem; }
+/* Items WITH a caret (flyout parents + top-level parent tabs): on hover move
+   the underline OFF the <a> and onto the name span only, so the caret/arrow is
+   never underlined (relying on inline-block exclusion proved unreliable). Leaf
+   items keep their normal <a>:hover underline. Gated to (hover:hover) so a
+   sticky tap on touch leaves nothing underlined. */
+@media (hover: hover) {
+	.ml-coll-flyout-parent > a.ml-bookmark:hover,
+	.ml-bookmarks-tabs > li.ml-coll-has-children > a.ml-bookmark:hover {
+		text-decoration: none;
+	}
+	.ml-coll-flyout-parent > a.ml-bookmark:hover .ml-bm-label,
+	.ml-bookmarks-tabs > li.ml-coll-has-children > a.ml-bookmark:hover .ml-bm-label {
+		text-decoration: underline;
+	}
+}
 .ml-coll-flyout-item.uk-active > a {
 	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
 }
 /* Hover tint desktop-only — on touch :hover sticks to the last-tapped item.
-   The link text keeps its hover underline; the caret stays clean because it's
-   inline-block (excluded from the underline) and the gap before it now comes
-   from CSS, not an underlined text-node space (see barCaret). */
+   (The name keeps its hover underline via the .ml-bm-label rule above; the
+   caret is a sibling of that span, so it is never underlined.) */
 @media (hover: hover) {
 	.ml-coll-flyout-item > a:hover {
 		background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);

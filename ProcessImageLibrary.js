@@ -3946,7 +3946,12 @@
 					a.href = isFolder ? '#' : (location.pathname + (item.qs || ''));
 					a.dataset.qs = item.qs || '';
 				}
-				a.appendChild(document.createTextNode(item.name || ''));
+				// Name lives in its own span so the hover underline can sit on the
+				// TEXT only, never on the caret barCaret appends after it.
+				var label = document.createElement('span');
+				label.className = 'ml-bm-label';
+				label.appendChild(document.createTextNode(item.name || ''));
+				a.appendChild(label);
 				return a;
 			}
 			// Append a caret (dir = 'right' for nested flyouts, 'down' for top tabs).
