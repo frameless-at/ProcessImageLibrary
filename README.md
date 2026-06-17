@@ -19,10 +19,12 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
   - [Scope](#scope)
 - [Filtering](#filtering)
 - [Bookmarks](#bookmarks)
+  - [Managing bookmarks & collections](#managing-bookmarks--collections)
 - [Collections](#collections)
 - [The table](#the-table)
   - [Columns dialog](#columns-dialog)
   - [Pagination row](#pagination-row)
+  - [Collections column](#collections-column)
   - [Used in (where-used column)](#used-in-where-used-column)
 - [Inline editing](#inline-editing)
   - [Editing as paintbrush (bulk)](#editing-as-paintbrush-bulk)
@@ -50,20 +52,20 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
 
 ## Quick tour
 
-- **Single view of every image** on the site. Aggregates all `FieldtypeImage` fields across all templates — including images that live inside Repeater / RepeaterMatrix fields, resolved up to their owner page. Rows are `(page, field, basename)` tuples.
-- **Table or masonry gallery** — toggle between the data table and a thumbnail gallery that packs tiles into **height-balanced columns** (shortest-column masonry) for fast visual scanning; click a tile to open the per-image editor, or use the hover-revealed checkbox to select it. A size slider scales thumbnails (table) / tiles (gallery) live. Both choices persist per user via `$user->meta`.
-- **Inline editing** for description, tags and any custom subfields (PW 3.0.142+ field-on-image templates). Click a cell, type, hit save — that's it. Multilang installs get per-language tabs in the editor. For predefined-tag fields the tag editor also **manages the vocabulary**: add new tags, or rename / delete a tag library-wide straight from the chip, with the table updating live.
-- **Bulk edits as paintbrush** — tick a few rows, then edit any cell on a selected row to broadcast the change to all selected rows. Works for description, tags, customs, and filenames (with placeholder syntax for numbering).
-- **Replace image in place** — drag a file onto the row or click the upload icon. The basename + every URL stay intact, variations regenerate, metadata is preserved. Extension match enforced so format conversions can't sneak in.
-- **Delete (single + batch)** — trash icon on the row hides behind a confirm dialog. Selection-as-paintbrush works here too: with N rows ticked, clicking the trash on any selected row deletes the whole selection.
-- **Automatic de-duplication** — byte-identical images are fingerprinted and collapsed onto one hardlinked file (lossless, reversible), so duplicate copies cost disk space only once. Runs by itself (on save + hourly); a *Duplicates* filter, copy-count badges and an expandable cluster view surface them, and the config page shows the disk saved with manual Scan / Re-measure / Revert tools.
-- **Where-used column** (opt-in) — see at a glance how many pages embed an image in their rich-text (CKEditor / TinyMCE), and click through to the list of pages + fields. Content-based, so it spans an image's duplicate copies; powered by a cached reverse index maintained on save, the same shape as the dedup engine.
-- **Bookmarks** — save the current filter combination as a named tab above the filter bar. Click a tab to jump back to that view; the filter form repopulates so what you see matches what's applied. Persisted per user via `$user->meta`, cross-device. The "+ Add bookmark" tab surfaces only when the active filter isn't already saved.
-- **Collections** — curate an arbitrary set of images that no filter could reproduce: tick checkboxes, save them as a named collection tab in the same strip. Recall the exact set instantly via a short `?coll=<id>` URL (the image keys live in `$user->meta`, never the URL — a 100-image collection is still a ~12-character link). Grow / trim a collection by clicking its tab while a selection is active; the cursor shows whether the click **adds** (+) or **removes** (−). Collections can themselves be filtered.
-- **Picker add-ons** (optional, off by default) — two opt-in integrations that let editors pull a library image in elsewhere: a *Choose from library* button on every image field, and an *Insert from library* button in TinyMCE / CKEditor (admin + front-end inline editor). No re-upload — the existing file is assigned / embedded; on a versioned page it lands in that version's folder.
-- **Filter, sort, paginate** with URL-state persistence so the view is bookmarkable. Per-user column visibility and order, page size — all stored in `$user->meta` so they follow the user across devices.
-- **Export / Import** the current filter set as JSON or CSV, edit externally, re-upload to apply. Multilang values round-trip in language-suffixed columns.
-- **Server-side performance** with `findRaw` + `WireCache` so listings stay fast across thousands of images. Thumbnails reuse PW's lazily-generated 260 px admin variation whenever possible, falling back to a custom size only when the configured display exceeds it.
+- **One view of every image** — all `FieldtypeImage` fields across every template (Repeater / RepeaterMatrix resolved to the owner page), one row per `(page, field, basename)`.
+- **Table or masonry gallery** — a data table for column-by-column editing, or a shortest-column masonry for visual browsing; size slider scales live, view + zoom persist per user.
+- **Inline editing** — click a cell to edit description, tags or custom subfields; multilang gets per-language tabs, and predefined-tag fields double as a library-wide tag-vocabulary manager.
+- **Bulk edits as a paintbrush** — tick rows, edit any cell on a selected one, and the change broadcasts to the whole selection (description, tags, customs, filenames).
+- **Replace in place** — drop a file on the row; the basename and every URL stay intact, variations regenerate, metadata is preserved (same format only).
+- **Delete (single + batch)** — confirm-gated trash icon; with rows ticked it removes the whole selection.
+- **Automatic de-duplication** — byte-identical copies collapse onto one hardlinked file (lossless, reversible), so they cost disk once; a *Duplicates* filter and cluster view surface them.
+- **Where-used column** (opt-in) — how many pages embed an image in rich text (CKEditor / TinyMCE), with click-through; content-based, via a cached index.
+- **Bookmarks & collections** — a team-wide tab strip: bookmarks save a *filter*, collections save a *hand-picked set* (recalled via a short `?coll=` link). Both support folders / nesting and are managed in one dialog (managers only).
+- **Collections column** — see and re-assign each image's collections inline from the table, single row or batch.
+- **Picker add-ons** (off by default) — pull a library image into any image field (*Choose from library*) or into TinyMCE / CKEditor (*Insert from library*) with no re-upload.
+- **Filter, sort, paginate** — URL-state-persistent so the view is bookmarkable; column visibility / order and page size persist per user.
+- **Export / Import** — round-trip the current set as JSON or CSV, multilang columns included.
+- **Fast at scale** — `findRaw` + `WireCache` keep listings quick across thousands of images; thumbnails reuse PW's 260 px admin variation where possible.
 
 ## Table and gallery views
 
@@ -96,7 +98,7 @@ Two-tier model:
 
 - **`image-library-access`** — gates the admin page itself. Without it the page is invisible.
 - **`page-edit` on the target page** — checked per cell, per AJAX endpoint. Editors only ever modify pages they could already edit through the standard Page-Edit UI. The library doesn't elevate access; it just gives editors a faster surface for the same operations.
-- **`image-library-manage-shared`** *(optional)* — gates the site-wide actions that go beyond a single page: managing shared (team) bookmarks and collections, and renaming / deleting tags across the whole library (see **[Managing the tag vocabulary](#managing-the-tag-vocabulary)**). Superusers always have it; grant it to trusted editors as needed. The permission is created automatically on install / upgrade.
+- **`image-library-manage-shared`** *(optional)* — gates the site-wide actions that go beyond a single page: managing the **team-wide** bookmarks and collections (there's one shared set — no per-user variant), and renaming / deleting tags across the whole library (see **[Managing the tag vocabulary](#managing-the-tag-vocabulary)**). Superusers always have it; grant it to trusted editors as needed. The permission is created automatically on install / upgrade.
 
 ## Module configuration
 
@@ -146,7 +148,7 @@ Available filters:
 
 | Filter | What it does |
 |---|---|
-| Search | Word-match across page title, description, tags, filename, custom subfields |
+| Search | Token search across page title, description, tags, filename, custom subfields. Multiple words match **any** (OR); prefix a word with `+` to require it, `-` to exclude it, or wrap a phrase in `"quotes"` for an exact match (e.g. `red +rose -draft`) |
 | Template | Restrict to pages of this template; the Image-field dropdown narrows to fields the chosen template actually carries |
 | Image field | Restrict to images coming from one specific field |
 | Tags | Multi-select AND-match against pooled tags across all rows |
@@ -163,34 +165,53 @@ After **Apply** the fieldset auto-collapses so the table has full vertical room.
 
 ## Bookmarks
 
-A tab strip sits above the filter bar with the user's saved filter combinations. PW-native chrome — the same `WireTabs` + `uk-tab` markup the rest of the admin uses (Page Edit, Profile, etc.), so the look matches and no module-specific CSS is involved.
+A tab strip sits above the filter bar with the team's saved filter combinations. PW-native chrome — the same `WireTabs` + `uk-tab` markup the rest of the admin uses (Page Edit, Profile, etc.), so the look matches and no module-specific CSS is involved.
 
 - **Show all** is always the leftmost tab — empty filter state.
-- **Saved bookmarks** sit between, in the order they were created. Each tab carries an `×` button on hover (only inside its own tab area) to delete. [Collections](#collections) share the same strip, marked with an icon.
-- **+ Add bookmark** is the rightmost tab and appears when the active filter is BOTH non-empty AND not already saved — so it surfaces exactly when there's a new combination worth keeping. When a checkbox **selection** is active instead, the same button relabels to **+ Add collection** and saves the selection (see [Collections](#collections)).
+- **Saved bookmarks** sit between, in the order set in the manager. A top-level filter bookmark carries an `×` on hover for quick delete. [Collections](#collections) share the same strip, marked with an icon.
+- **Folders** group related bookmarks: an empty container that only nests its children, opened as a cascading hover flyout (up to 3 levels). Folders are created and filled in the manager.
+- A **gear** (`fa-sliders`) sits right after the items and opens the [manager](#managing-bookmarks--collections). Managers only.
+- **+ New** sits at the right of the strip and appears when the active filter is BOTH non-empty AND not already saved — so it surfaces exactly when there's a new combination worth keeping. When a checkbox **selection** is active instead, the same link saves the selection as a [collection](#collections). After saving, the manager opens on the matching tab so you can place / sort the new entry right away.
 
 Clicking a bookmark navigates via the same AJAX swap the filter form uses, and **resets + repopulates the filter form** so the visible inputs match the bookmark's state — no stale checkboxes left from the previous filter. Active tab is computed by canonicalising the current URL against each bookmark's saved querystring (filter-shaped params only, sorted, empty values dropped).
 
 What's stored: only **filter** params (`q`, `template`, `field`, `tags`, `no_desc`, `no_tags`, `no_custom_*`). Sort, direction, page size and page number stay orthogonal — switching bookmarks doesn't clobber your current sort.
 
-Storage piggy-backs on `$user->meta('imageLibraryPrefs')` alongside the existing `columns`, `pageSize`, `viewMode`, `thumbScale` and `collections` keys — cross-device, no new endpoint.
+**Team-wide storage.** Bookmarks and collections are a single **team store** in the module config (not per-user) — everyone with library access sees the same set. Each bookmark is `{ id, name, qs, parent }` (a folder has an empty `qs`). Creating, renaming, foldering and deleting them is gated by the **`image-library-manage-shared`** permission; users without it can recall the saved bookmarks but not change them.
+
+**On mobile**, the strip collapses to three tabs — **Show all**, **Bookmarks**, **Collections** — and the items open one level deeper as cascading tap-to-open flyouts (the same optics as the desktop hover flyouts), so the bar stays usable on a narrow screen.
+
+![PLACEHOLDER — the mobile bookmarks/collections bar: three tabs (Show all / Bookmarks / Collections) with a Collections flyout tapped open, showing nested collections indented under a parent](docs/screenshots/30-mobile-bar.png)
+
+### Managing bookmarks & collections
+
+The gear opens a single tabbed **manager** dialog — **Collections** | **Bookmarks** — for everything that isn't a one-click save:
+
+- **Rename** any entry inline; **delete** with an inline "click again to confirm".
+- **Reorder** with ▲ / ▼ (or drag) and **nest** / **un-nest** to build folders / sub-collections, up to **3 levels**.
+- **Deleting a collection cascades** to its sub-collections (like deleting a set in Lightroom / a folder in Apple Photos); the images themselves stay in the library.
+- A small type icon marks each row — a folder icon for an empty container, the duplicate/clone icon for one that holds its own images.
+
+![The bookmarks/collections manager dialog: the Collections | Bookmarks tab row with a right-aligned "+ New" link, a tree of nested entries (e.g. Flowers > Roses > Red / White) with rename / delete / move / nest controls, and a Close button](docs/screenshots/27-collections-manager.png)
 
 ## Collections
 
 Where a [bookmark](#bookmarks) saves a *filter*, a **collection** saves a *specific, hand-picked set of images* — useful when the set can't be expressed as a filter (e.g. filter to `red +flowers`, then keep only the three you actually want). Collections live in the same tab strip as bookmarks, marked with an icon, and work in the admin **and** the picker — handy for pulling up a curated set while inserting images.
 
-![The bookmark / collection tab strip ("Show all", a "Flowers" collection, a "Red" collection, "+ Add collection") above the masonry gallery, with several flower tiles ticked via their selection checkboxes](docs/screenshots/13-collections.png)
+![The bookmark / collection tab strip ("Show all", a "Photographer" and a "Flowers" tab, the manage gear, and "+ New") above the image table, with the Collections and "Used in" columns visible](docs/screenshots/13-collections.png)
 
-**Storage, not URL.** A collection stores its image identity keys (`pageId:fieldName:basename`) as data in `$user->meta('imageLibraryPrefs')` under `collections`, each as `{ id, name, keys[] }`. Recall is a short `?coll=<id>` URL — a 100-image collection is a ~12-character link, never a multi-kilobyte query string that would blow past URL limits. The server resolves the id back to the key set and filters the grid to it.
+**Storage, not URL.** Collections live in the same [team store](#bookmarks) as bookmarks (module config), each as `{ id, name, keys[], parent }` — `keys` are image identity keys (`pageId:fieldName:basename`); `parent` nests it under another collection. Recall is a short `?coll=<id>` URL — a 100-image collection is a ~12-character link, never a multi-kilobyte query string that would blow past URL limits. The server resolves the id back to the key set (its own images **plus** every sub-collection's) and filters the grid to it.
 
-**Create.** Tick image checkboxes (table or masonry). The bookmark bar's add button relabels to **+ Add collection**; click it, name the set, save. The checkboxes clear as confirmation, and the new collection tab joins the strip.
+**Create.** Tick image checkboxes (table or masonry), then click **+ New** in the bar; name the set and save. The checkboxes clear as confirmation, the new collection joins the strip, and the [manager](#managing-bookmarks--collections) opens so you can nest / sort it. Creating and editing collections needs the **`image-library-manage-shared`** permission. You can also assign images to collections straight from the [Collections column](#collections-column) in the table.
+
+**Folder model — a collection holds images *and* sub-collections.** Every collection can carry its own images and nest other collections (up to 3 levels), like folders that also hold files (Finder, Gmail nested labels). There's no separate "container" type — an empty collection is just one with no images yet. Viewing a parent shows the **union** (its own images plus every descendant's), and removing an image from a parent cascades down to its sub-collections.
 
 **Recall, add, remove — driven by the cursor.** With a selection active, clicking a collection tab curates it instead of navigating, and the cursor signals which way:
 
 - Hovering a collection you're **not** viewing shows a **`+`** cursor — the click **adds** the selection to that collection.
 - Hovering the collection you **are** viewing (its tab is active) shows a **`−`** cursor — the click **removes** the selected images from it (the rows leave the grid in place and the count updates).
 
-Either way the checkboxes clear as confirmation. With **no** selection, a collection tab behaves like any tab — it recalls the set — and its `×` (delete) appears on hover.
+Either way the checkboxes clear as confirmation. With **no** selection, a collection tab behaves like any tab — it recalls the set. Deleting a collection happens in the [manager](#managing-bookmarks--collections), not on the strip.
 
 **Snapshot semantics.** A collection is a snapshot of identities: images deleted or renamed after the fact simply drop out of the recalled view, silently. Duplicate markers are *contextual* (an image is only flagged when ≥2 of its byte-identical copies are present in the current view), so they appear inside a collection only if you deliberately added two copies of the same image to it.
 
@@ -205,6 +226,7 @@ Either way the checkboxes clear as confirmation. With **no** selection, a collec
 - **Description, Tags** — inline-editable (see [Editing](#inline-editing)).
 - **Uploaded, Modified** — created / last-modified timestamps from the underlying Pagefile, formatted in `$config->dateFormat`. Read-only, sortable.
 - **Dimensions, Size** — read-only. **Variations** — read-only, sortable.
+- **Collections** — the collections each image belongs to, linked; managers can re-assign inline (see [Collections column](#collections-column)). Sortable (by collection names).
 - **Used in** — opt-in usage column (hidden by default), sortable; see [Used in](#used-in-where-used-column).
 - **Custom subfields** — auto-discovered from each image field's `field-{name}` custom template (PW 3.0.142+). Editable.
 
@@ -223,6 +245,14 @@ The `fa-columns` icon in the pagination row opens a `<dialog>` listing every col
 - Summary + prev/next on the left
 - Per-page picker + columns icon on the right
 - Rendered both above and below the table for long pages
+
+### Collections column
+
+The **Collections** column shows, per image, the collections it belongs to — each name linked to its `?coll=<id>` recall — and lets a manager re-assign membership without leaving the table. Membership is the **union**: a parent appears whenever the image is in any of its sub-collections. The header is sortable (alphabetically by the joined collection names), and the **Field** cell links straight to the PW field editor.
+
+**Assign inline.** Click the cell's caret to open a checkbox tree of every collection; tick / untick to add or remove the image. Ticking a parent adds the image to it; unticking **cascades** the removal to its sub-collections. With several rows **selected**, the change applies to the whole selection (batch). Uncheck the collection you're currently viewing and the row drops out of the grid on the spot. Managers only.
+
+![The Collections table column (rows listing the linked collection names with a caret) next to the inline assign popover — a checkbox tree of collections with several boxes ticked and a Close button](docs/screenshots/28-collections-column.png)
 
 ### Used in (where-used column)
 
@@ -446,9 +476,9 @@ Upload a previously exported (and externally edited) JSON or CSV. The import:
 
 ## Picker add-ons
 
-Two **optional** integrations that surface the library *outside* its own admin page, so editors can drop an existing library image into a page without re-uploading it. Both are **off by default** — the library is fully usable without them — and toggle independently in the collapsed **Picker add-ons** fieldset under [Module configuration](#module-configuration). Each opens the library in a modal **picker**: the normal table / gallery with selection checkboxes and a *Use selected* bar.
+Two **optional** integrations that surface the library *outside* its own admin page, so editors can drop an existing library image into a page without re-uploading it. Both are **off by default** — the library is fully usable without them — and toggle independently in the collapsed **Picker add-ons** fieldset under [Module configuration](#module-configuration). Both open the library through ProcessWire's own modal window (`pwModalWindow`), so the chrome matches the rest of the admin: the normal table / gallery with selection checkboxes and a bar carrying a primary **Use selected** and a secondary **Cancel**.
 
-![The library opened as a modal picker (titled "Insert from library"): the bookmark / collection tabs, a filter bar, a "Use selected" button, and the masonry gallery with images selected](docs/screenshots/20-picker-modal.png)
+![The library opened as a modal picker (titled "Insert from library"): the bookmark / collection tabs, a filter bar, the "Use selected" + "Cancel" buttons, and the masonry gallery with images selected](docs/screenshots/20-picker-modal.png)
 
 Enabling either toggle makes the module `autoload` so its hooks run on the relevant edit screens; after flipping a toggle, run **Modules → Refresh** once.
 
