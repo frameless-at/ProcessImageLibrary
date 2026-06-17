@@ -488,7 +488,7 @@ Enabling either toggle makes the module `autoload` so its hooks run on the relev
 
 A **Choose from library** button is appended to every `InputfieldImage` in the page editor, beside the native upload control. It opens the picker scoped to that field; selecting an image copies the chosen file into the target field (native image fields can only reference files in their own page folder, so the bytes are copied), carrying the source's description / tags / custom subfields over, language-aware. The fresh copy is then hard-linked to its byte-identical source, so it costs ~no extra disk.
 
-**Version-aware.** When the page editor is working in a [PagesVersions](https://processwire.com/) version, the pick lands in that version's files folder (`…/<id>/v<n>/`), not the live page — and is de-duplicated on the spot.
+**Version-aware.** When the page editor is working in a **PagesVersionPro** version, the pick lands in that version's files folder (`…/<id>/v<n>/`), not the live page — and is de-duplicated on the spot.
 
 ![A page editor's image field with its thumbnails, showing the added "Choose from library" button right below the native "Choose File" control](docs/screenshots/14-image-field-picker.png)
 
