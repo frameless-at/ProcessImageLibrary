@@ -17,6 +17,7 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
   - [Default sort](#default-sort)
   - [Columns](#columns)
   - [Scope](#scope)
+- [Reclaiming disk](#reclaiming-disk)
 - [Filtering](#filtering)
 - [Bookmarks](#bookmarks)
   - [Managing bookmarks & collections](#managing-bookmarks--collections)
@@ -38,7 +39,6 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
 - [Deleting images](#deleting-images)
 - [Deduplication](#deduplication)
   - [Browsing duplicates](#browsing-duplicates)
-  - [Reclaiming disk](#reclaiming-disk-config-page)
 - [Export / Import](#export--import)
   - [Export](#export)
   - [Import](#import)
@@ -137,6 +137,21 @@ URL overrides (`?sort=…&dir=…`) and header clicks always win; the default on
 
 - **Blacklisted templates** — pages of these templates are excluded from discovery. Lists only templates that actually host an image field (others would be no-ops to blacklist).
 - **Blacklisted image fields** — entire image fields excluded regardless of which template hosts them. Useful when one field (e.g. `signature_image`) lives on many templates but doesn't belong in the library.
+
+## Reclaiming disk
+
+Image Library hardlinks byte-identical copies onto a single file automatically, so duplicates cost disk only once (the full mechanism is under [Deduplication](#deduplication)). The **Deduplication** fieldset at the bottom of the [module config page](#module-configuration) surfaces the current saving and adds manual tools — needed only to process a large existing backlog immediately or to undo, since the automatic passes keep things linked day to day.
+
+- **Status** — a live read-out: *Disk space reclaimed*, *Copies sharing a file*, *Exact-duplicate clusters*. When nothing is collapsed it shows *"Nothing is collapsed right now — run 'Scan and reclaim' below to free space."*
+- **Scan and reclaim (live)** — fingerprints the whole library and hardlinks every byte-identical copy, with a live progress panel: a phase line, a progress bar, a per-cluster log (`• <name> [N copies]: …`) and a running totals line. The Status block updates as it goes.
+- **Re-measure** — a real disk-usage audit: logical size (what FTP / backup sees) vs actual `du`, and the **space saved by hardlinks**, plus a breakdown for page-version files (including why any standalone ones weren't linked).
+- **Revert (un-share all)** — gives every collapsed copy its own independent file again, undoing the saving (the next pass re-collapses them). It confirms first.
+
+![Module config "Deduplication" fieldset: the Status read-out (disk space reclaimed, copies sharing a file, exact-duplicate clusters) above the "Scan and reclaim (live)", "Re-measure" and "Revert (un-share all)" buttons](docs/screenshots/17-dedup-config.png)
+
+![The live progress panel during "Scan and reclaim": a phase line "Reclaiming clusters… X / Y", a progress bar, a totals line, and a monospace log of per-cluster entries](docs/screenshots/18-dedup-progress.png)
+
+> **Caveat.** Backup / deploy tooling that doesn't preserve hardlinks (`rsync` without `-H`, plain `tar` / `cp`, syncing to another mount) re-expands the links over time — it never corrupts anything, and the hourly background pass re-links them on its next run.
 
 ## Filtering
 
@@ -402,21 +417,6 @@ The library fingerprints every managed image by its **exact byte content** and c
 ![A duplicate cluster in the table view: one head row carrying the colored copy-count pill and a ▸/▾ caret, expanded to reveal the other byte-identical copy rows grouped beneath it](docs/screenshots/16-duplicates.png)
 
 ![The masonry cluster modal: a duplicated tile opened to a mini-table of all its copies, each row editable individually, with a Close button](docs/screenshots/19-cluster-modal.png)
-
-### Reclaiming disk (config page)
-
-The **Deduplication** fieldset at the bottom of [Module configuration](#module-configuration) shows the current saving and offers manual tools — needed only to process a large existing backlog immediately or to undo, since the automatic passes keep things linked day to day.
-
-- **Status** — a live read-out: *Disk space reclaimed*, *Copies sharing a file*, *Exact-duplicate clusters*. When nothing is collapsed it shows *"Nothing is collapsed right now — run 'Scan and reclaim' below to free space."*
-- **Scan and reclaim (live)** — fingerprints the whole library and hardlinks every byte-identical copy, with a live progress panel: a phase line, a progress bar, a per-cluster log (`• <name> [N copies]: …`) and a running totals line. The Status block updates as it goes.
-- **Re-measure** — a real disk-usage audit: logical size (what FTP / backup sees) vs actual `du`, and the **space saved by hardlinks**, plus a breakdown for page-version files (including why any standalone ones weren't linked).
-- **Revert (un-share all)** — gives every collapsed copy its own independent file again, undoing the saving (the next pass re-collapses them). It confirms first.
-
-![Module config "Deduplication" fieldset: the Status read-out (disk space reclaimed, copies sharing a file, exact-duplicate clusters) above the "Scan and reclaim (live)", "Re-measure" and "Revert (un-share all)" buttons](docs/screenshots/17-dedup-config.png)
-
-![The live progress panel during "Scan and reclaim": a phase line "Reclaiming clusters… X / Y", a progress bar, a totals line, and a monospace log of per-cluster entries](docs/screenshots/18-dedup-progress.png)
-
-> **Caveat.** Backup / deploy tooling that doesn't preserve hardlinks (`rsync` without `-H`, plain `tar` / `cp`, syncing to another mount) re-expands the links over time — it never corrupts anything, and the hourly background pass re-links them on its next run.
 
 ## Export / Import
 
