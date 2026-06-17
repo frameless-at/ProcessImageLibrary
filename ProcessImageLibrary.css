@@ -1630,8 +1630,12 @@ textarea.ml-langtabs-pane {
 }
 /* A flyout item with a submenu: name stays LEFT, caret pushed to the right edge
    via margin-left:auto. (justify-content:space-between would centre the name
-   when a curate glyph also sits in the row.) */
-.ml-coll-flyout-parent > a .ml-coll-tab-caret { margin-left: auto; }
+   when a curate glyph also sits in the row.) padding-left gives a guaranteed
+   gap between name and caret that margin-left:auto can't (the widest item, which
+   sets the menu's max-content width, has no free space for the auto margin, so
+   without the padding its caret would touch the name); the padding also widens
+   max-content by the same amount, so every caret stays right-aligned. */
+.ml-coll-flyout-parent > a .ml-coll-tab-caret { margin-left: auto; padding-left: 0.75rem; }
 .ml-coll-flyout-item.uk-active > a {
 	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
 }
