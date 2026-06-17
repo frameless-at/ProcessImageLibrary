@@ -7,7 +7,6 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
 ## Contents
 
 - [Quick tour](#quick-tour)
-- [Table and gallery views](#table-and-gallery-views)
 - [Requirements](#requirements)
 - [Install](#install)
 - [Permissions](#permissions)
@@ -22,6 +21,7 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
 - [Bookmarks](#bookmarks)
   - [Managing bookmarks & collections](#managing-bookmarks--collections)
 - [Collections](#collections)
+- [Table and gallery views](#table-and-gallery-views)
 - [The table](#the-table)
   - [Columns dialog](#columns-dialog)
   - [Pagination row](#pagination-row)
@@ -66,12 +66,6 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
 - **Filter, sort, paginate** — URL-state-persistent so the view is bookmarkable; column visibility / order and page size persist per user.
 - **Export / Import** — round-trip the current set as JSON or CSV, multilang columns included.
 - **Fast at scale** — `findRaw` + `WireCache` keep listings quick across thousands of images; thumbnails reuse PW's 260 px admin variation where possible.
-
-## Table and gallery views
-
-The toolbar carries a **view toggle** (top-right, next to the per-page picker): the data **table** for editing metadata column by column, or a **masonry gallery** for browsing visually. The gallery packs thumbnails into **height-balanced columns**: each tile keeps its natural aspect ratio (no crop) and the next tile always drops into the currently shortest column, so the columns stay even instead of ragged. The predicted tile height comes from the server-rendered image dimensions, so the layout settles immediately without waiting for images to load. Click any tile to open the per-image editor (full crop / focus / metadata); the same **selection checkbox** the picker uses sits in the tile's bottom-left corner — hover-revealed here, like the replace / delete actions, and staying visible once ticked — so tiles can be selected for bulk edits or collections just as in the table (the selection is shared across both views). The **size slider** beside the toggle scales thumbnails (table) or tiles (gallery) live; the chosen view and zoom both persist per user across devices.
-
-![Masonry gallery view of the Image Library: the same toolbar with the size slider and table / gallery toggle, below it a grid of flower thumbnails of varying heights packed into even, height-balanced columns](docs/screenshots/04-masonry.png)
 
 ## Requirements
 
@@ -231,6 +225,12 @@ Either way the checkboxes clear as confirmation. With **no** selection, a collec
 **Snapshot semantics.** A collection is a snapshot of identities: images deleted or renamed after the fact simply drop out of the recalled view, silently. Duplicate markers are *contextual* (an image is only flagged when ≥2 of its byte-identical copies are present in the current view), so they appear inside a collection only if you deliberately added two copies of the same image to it.
 
 **Filterable.** A collection can be narrowed: applying a filter (or Reset) while viewing one keeps `?coll` in the URL, so the filters apply *within* the collection rather than replacing it. Deleting the collection you're viewing drops `?coll` and reloads (any other active filters stay).
+
+## Table and gallery views
+
+The toolbar carries a **view toggle** (top-right, next to the per-page picker): the data **table** for editing metadata column by column, or a **masonry gallery** for browsing visually. The gallery packs thumbnails into **height-balanced columns**: each tile keeps its natural aspect ratio (no crop) and the next tile always drops into the currently shortest column, so the columns stay even instead of ragged. The predicted tile height comes from the server-rendered image dimensions, so the layout settles immediately without waiting for images to load. Click any tile to open the per-image editor (full crop / focus / metadata); the same **selection checkbox** the picker uses sits in the tile's bottom-left corner — hover-revealed here, like the replace / delete actions, and staying visible once ticked — so tiles can be selected for bulk edits or collections just as in the table (the selection is shared across both views). The **size slider** beside the toggle scales thumbnails (table) or tiles (gallery) live; the chosen view and zoom both persist per user across devices.
+
+![Masonry gallery view of the Image Library: the same toolbar with the size slider and table / gallery toggle, below it a grid of flower thumbnails of varying heights packed into even, height-balanced columns](docs/screenshots/04-masonry.png)
 
 ## The table
 
