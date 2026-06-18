@@ -1,7 +1,7 @@
 {
   "name": "ProcessImageLibrary",
   "title": "Image Library",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "summary": "A single source of truth for every image on your ProcessWire site.",
   "author": "frameless Media",
   "href": "https://github.com/frameless-at/ProcessImageLibrary",
