@@ -4644,7 +4644,9 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function buildSelector(array $eligibleTemplates): string {
 		if (!$eligibleTemplates) return 'id=0';
-		// include=hidden returns published + hidden, excludes unpublished and trash.
+		// include=unpublished returns published + hidden + UNPUBLISHED, still
+		// excludes trash — editors need to see images on draft / unpublished
+		// pages too (they manage them like any other page).
 		//
 		// check_access=0 is essential: findRaw() applies front-end view access by
 		// default, so the SAME selector returns fewer pages when run as a guest
@@ -4657,7 +4659,7 @@ class ProcessImageLibrary extends Process {
 		// the duplicate view). The library is an admin audit tool gated by its own
 		// image-library-access permission; per-page edit rights are still enforced
 		// separately. So enumerate EVERY managed image regardless of viewer access.
-		return 'template=' . implode('|', $eligibleTemplates) . ', include=hidden, check_access=0';
+		return 'template=' . implode('|', $eligibleTemplates) . ', include=unpublished, check_access=0';
 	}
 
 	/**
@@ -6197,7 +6199,9 @@ class ProcessImageLibrary extends Process {
 		$user = $this->wire('user');
 		if ($user->isSuperuser()) return true;
 		if (!$user->hasPermission('page-edit')) return false;
-		$selector = 'template=' . implode('|', $eligibleTemplates) . ', include=hidden';
+		// include=unpublished to match buildSelector: a user whose only
+		// editable image pages are unpublished must not be locked out.
+		$selector = 'template=' . implode('|', $eligibleTemplates) . ', include=unpublished';
 		foreach ($this->wire('pages')->findMany($selector) as $p) {
 			if ($p->editable()) return true;
 		}
