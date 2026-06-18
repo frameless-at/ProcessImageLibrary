@@ -15,7 +15,6 @@
  *   - $this->getBlacklistedFields()   (main class helper)
  *   - $this->getBlacklistedTemplates() (main class helper)
  *   - $this->customByFieldCache       (instance property)
- *   - self::STANDARD_SUBFIELDS        (class constant)
  */
 trait ImageLibraryDiscovery {
 
@@ -216,29 +215,25 @@ trait ImageLibraryDiscovery {
 	/**
 	 * Build the field list passed to $pages->findRaw().
 	 *
-	 * Standard subfields only — custom-fields-on-images live in a separate
-	 * table that findRaw doesn't join through dotted notation. The visible
-	 * slice picks up custom values via the Pageimage API in hydrateSlice.
+	 * We request each image field by its bare name (no dotted subfield). For a
+	 * field with a custom schema — which every FieldtypeImage field has — PW's
+	 * PagesRaw resolves a bare field name to "all columns" (SELECT *), so every
+	 * standard column (data, description, filesize, width, height, created,
+	 * modified, and tags when useTags is enabled) comes back without us having
+	 * to enumerate them. This sidesteps the strict per-subfield column check
+	 * that PagesRaw added in 3.0.250: naming a column that doesn't exist on a
+	 * given field (e.g. `<field>.tags` when useTags is off) throws "Unknown
+	 * column name(s) for findRaw", but a bare field name never does.
 	 *
-	 * The `tags` subfield exists ONLY when the image field has useTags enabled
-	 * (off by default). Requesting `<field>.tags` for a field without it makes
-	 * findRaw throw "Unknown column name(s) for findRaw", so we omit it
-	 * per-field; flattenRows already defaults missing tags to an empty string.
+	 * Custom-fields-on-images live in a separate table that findRaw doesn't
+	 * join through, so the visible slice still picks those up via the Pageimage
+	 * API in hydrateSlice.
 	 *
 	 * @param array<int,string> $imageFields
 	 * @return array<int,string>
 	 */
 	protected function buildRawFields(array $imageFields): array {
-		$fields = ['id', 'title', 'templates_id'];
-		foreach ($imageFields as $f) {
-			$field   = $this->wire('fields')->get($f);
-			$hasTags = $field && (int) $field->useTags;
-			foreach (self::STANDARD_SUBFIELDS as $sub) {
-				if ($sub === 'tags' && !$hasTags) continue;   // no tags column on this field
-				$fields[] = "$f.$sub";
-			}
-		}
-		return $fields;
+		return array_merge(['id', 'title', 'templates_id'], $imageFields);
 	}
 
 	/**

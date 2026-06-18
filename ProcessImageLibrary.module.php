@@ -501,26 +501,6 @@ class ProcessImageLibrary extends Process {
 	const DEFAULT_DIR  = 'asc';
 
 	/**
-	 * Image subfields requested from every FieldtypeImage field via findRaw.
-	 *
-	 * Note PW exposes the basename as the underlying DB column `data`, not
-	 * `basename` — the Pageimage API alias only exists on hydrated objects.
-	 * `ext` is derived from the basename in PHP since it isn't a column.
-	 * `tags` is only present when the field has `useTags` enabled; flatten
-	 * defaults to an empty string when missing.
-	 */
-	const STANDARD_SUBFIELDS = [
-		'data',
-		'description',
-		'tags',
-		'filesize',
-		'width',
-		'height',
-		'created',
-		'modified',
-	];
-
-	/**
 	 * Lazily-built cache of custom-fields-on-images discovery results,
 	 * keyed by image-field name. Built once per request to avoid repeated
 	 * template lookups across execute() and hydrateSlice().
@@ -4670,7 +4650,6 @@ class ProcessImageLibrary extends Process {
 	 * @return array<int,array<string,mixed>>
 	 */
 	protected function flattenRows(array $rawData, array $imageFields): array {
-		$standardKeys = array_flip(self::STANDARD_SUBFIELDS);
 		$rows = [];
 		// A physical image is uniquely (pageId, fieldName, basename). Guard
 		// against the same file being emitted more than once — e.g. duplicate
@@ -4716,7 +4695,13 @@ class ProcessImageLibrary extends Process {
 						'created'     => (string) ($img['created']  ?? ''),
 						'modified'    => (string) ($img['modified'] ?? ''),
 						'ext'         => pathinfo($basename, PATHINFO_EXTENSION),
-						'custom'      => array_diff_key($img, $standardKeys),
+						// Custom-fields-on-images are NOT findRaw columns — a bare
+						// image-field request returns SELECT *, i.e. the native
+						// Pagefile columns only (data, description, filesize, ratio,
+						// sort, …). Custom subfield values are hydrated separately
+						// via the Pageimage API in hydrateSlice, so leave this empty
+						// here rather than misclassifying stray native columns.
+						'custom'      => [],
 					];
 				}
 			}
