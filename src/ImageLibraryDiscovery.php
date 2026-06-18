@@ -220,13 +220,21 @@ trait ImageLibraryDiscovery {
 	 * table that findRaw doesn't join through dotted notation. The visible
 	 * slice picks up custom values via the Pageimage API in hydrateSlice.
 	 *
+	 * The `tags` subfield exists ONLY when the image field has useTags enabled
+	 * (off by default). Requesting `<field>.tags` for a field without it makes
+	 * findRaw throw "Unknown column name(s) for findRaw", so we omit it
+	 * per-field; flattenRows already defaults missing tags to an empty string.
+	 *
 	 * @param array<int,string> $imageFields
 	 * @return array<int,string>
 	 */
 	protected function buildRawFields(array $imageFields): array {
 		$fields = ['id', 'title', 'templates_id'];
 		foreach ($imageFields as $f) {
+			$field   = $this->wire('fields')->get($f);
+			$hasTags = $field && (int) $field->useTags;
 			foreach (self::STANDARD_SUBFIELDS as $sub) {
+				if ($sub === 'tags' && !$hasTags) continue;   // no tags column on this field
 				$fields[] = "$f.$sub";
 			}
 		}
