@@ -1754,38 +1754,32 @@ textarea.ml-langtabs-pane {
 	border: 0;
 }
 
-/* Visible toast notifications — bottom-right, auto-dismissing. Used where an
-   action's result isn't otherwise on screen (a failed replace especially,
-   which previously gave no visible feedback at all). */
-.ml-toasts {
-	position: fixed;
-	bottom: 1rem;
-	right: 1rem;
+/* Row-anchored feedback — floats next to the affected row's thumbnail so the
+   message appears where the action happened (chiefly a failed replace, which
+   previously gave no visible feedback at all). Absolutely positioned in
+   document space (JS sets top/left from the thumbnail's rect) so it scrolls
+   with the row; vertically centred on the thumbnail via translateY. */
+.ml-row-toast {
+	position: absolute;
 	z-index: 99999;
-	display: flex;
-	flex-direction: column;
-	gap: 0.5rem;
-	pointer-events: none;
-}
-.ml-toast {
-	pointer-events: auto;
-	max-width: 360px;
-	padding: 0.6rem 0.9rem;
+	transform: translateY(-50%) translateX(6px);
+	max-width: 280px;
+	padding: 0.4rem 0.65rem;
 	border-radius: 4px;
 	color: #fff;
-	font-size: 0.9rem;
-	line-height: 1.35;
-	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+	font-size: 0.85rem;
+	line-height: 1.3;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 	opacity: 0;
-	transform: translateY(8px);
-	transition: opacity 0.25s ease, transform 0.25s ease;
+	transition: opacity 0.2s ease, transform 0.2s ease;
+	pointer-events: none;
 }
-.ml-toast-show {
+.ml-row-toast-show {
 	opacity: 1;
-	transform: none;
+	transform: translateY(-50%) translateX(0);
 }
-.ml-toast-ok    { background: var(--ml-confirm, #2a8a2a); }
-.ml-toast-error { background: var(--ml-danger, #c33); }
+.ml-row-toast-ok    { background: var(--ml-confirm, #2a8a2a); }
+.ml-row-toast-error { background: var(--ml-danger, #c33); }
 
 /* Editable cells advertise themselves as buttons for keyboard
    users — show a focus ring so the active cell is obvious. */

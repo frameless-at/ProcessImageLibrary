@@ -381,28 +381,32 @@
 			}, 30);
 		}
 
-		// Visible, auto-dismissing toast for actions whose result isn't
-		// otherwise reflected on screen — chiefly a failed replace, which used
-		// to fail completely silently (the only signal went to the hidden
-		// aria-live region). Always mirrors the message to announce() too, so
-		// screen-reader users still get it in one call. type: 'error' | 'ok'.
-		var toastWrap = null;
-		function toast(msg, type) {
+		// Visible, auto-dismissing message anchored to the ROW it concerns —
+		// chiefly a failed replace, which used to fail completely silently (the
+		// only signal went to the hidden aria-live region). Floats next to the
+		// row's thumbnail so the feedback is where the action happened, and
+		// mirrors to announce() so screen-reader users still get it. The
+		// element is absolutely positioned in document space so it scrolls with
+		// the row; left is clamped so a right-edge thumbnail (grid view) can't
+		// push it off-screen. type: 'error' | 'ok'.
+		function rowToast(tr, msg, type) {
 			if (!msg) return;
 			announce(msg);
-			if (!toastWrap) {
-				toastWrap = document.createElement('div');
-				toastWrap.className = 'ml-toasts';
-				document.body.appendChild(toastWrap);
-			}
+			var anchor = (tr && tr.querySelector && tr.querySelector('.ml-cell-thumb')) || tr;
+			if (!anchor || !anchor.getBoundingClientRect) return;
+			var rect = anchor.getBoundingClientRect();
 			var t = document.createElement('div');
-			t.className = 'ml-toast ' + (type === 'error' ? 'ml-toast-error' : 'ml-toast-ok');
+			t.className = 'ml-row-toast ' + (type === 'error' ? 'ml-row-toast-error' : 'ml-row-toast-ok');
 			t.textContent = msg;
-			toastWrap.appendChild(t);
-			requestAnimationFrame(function () { t.classList.add('ml-toast-show'); });
+			document.body.appendChild(t);
+			var maxLeft = window.scrollX + document.documentElement.clientWidth - t.offsetWidth - 12;
+			var left = Math.min(window.scrollX + rect.right + 8, Math.max(window.scrollX + 12, maxLeft));
+			t.style.top  = (window.scrollY + rect.top + rect.height / 2) + 'px';
+			t.style.left = left + 'px';
+			requestAnimationFrame(function () { t.classList.add('ml-row-toast-show'); });
 			setTimeout(function () {
-				t.classList.remove('ml-toast-show');
-				setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 300);
+				t.classList.remove('ml-row-toast-show');
+				setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 250);
 			}, type === 'error' ? 6000 : 2500);
 		}
 
@@ -2101,7 +2105,7 @@
 			// failing fast saves an upload round trip. jpg/jpeg (and tif/tiff)
 			// count as a match.
 			if (normExt(rowExt(tr)) !== normExt(fileExt(file))) {
-				toast(
+				rowToast(tr,
 					(labels.error || 'Replace failed') + ': '
 					+ 'Extension mismatch (' + rowExt(tr) + ' vs ' + fileExt(file) + ')',
 					'error'
@@ -2120,7 +2124,7 @@
 				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
 			}).then(function (data) {
 				if (!data || !data.ok) {
-					toast((labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''), 'error');
+					rowToast(tr, (labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''), 'error');
 					return;
 				}
 				// Use the server-resolved thumb URL directly — it points
@@ -2144,9 +2148,9 @@
 				patch('size',       data.filesizeFormatted);
 				patch('modified',   data.modifiedFormatted);
 				patch('variations', data.variationsCount);
-				toast(labels.saved || 'Saved', 'ok');
+				rowToast(tr, labels.saved || 'Saved', 'ok');
 			}).catch(function (err) {
-				toast((labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'), 'error');
+				rowToast(tr, (labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'), 'error');
 			}).finally(function () {
 				tr.classList.remove('ml-row-uploading');
 			});
@@ -2247,7 +2251,7 @@
 				tr.classList.remove('ml-row-drop-target');
 				if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
 				if (e.dataTransfer.files.length > 1) {
-					toast((labels.error || 'Replace failed') + ': only one file at a time', 'error');
+					rowToast(tr, (labels.error || 'Replace failed') + ': only one file at a time', 'error');
 					return;
 				}
 				replaceImage(tr, e.dataTransfer.files[0]);
