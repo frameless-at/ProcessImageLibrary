@@ -32,6 +32,28 @@ require_once __DIR__ . '/src/ImageLibraryUsage.php';
  */
 class ProcessImageLibrary extends Process {
 
+	/*
+	 * Host contract for the composed traits.
+	 *
+	 * The five traits below are read-/write-side slices that lean on the host
+	 * class (this one) for shared services. The contract is by convention, not
+	 * a PHP interface — interfaces can only carry PUBLIC methods, but every one
+	 * of these is `protected`, so it can't be expressed (or enforced) as one.
+	 * Documented here so the dependency is explicit rather than only failing at
+	 * runtime. The host (or an earlier trait) must provide:
+	 *
+	 *   Filtering / sorting  : readFilterInput(), readSortInput(),
+	 *                          applyRowFilters(), applyTagFilter(), applySort(),
+	 *                          fieldValueMatches()
+	 *   Row loading / hydrate: loadRows(), loadImageRowsAll(),
+	 *                          bulkHydrateCustomFields(), resolvePageimage()
+	 *   Identity / blacklist : hashKey(), getBlacklistedFields(),
+	 *                          getBlacklistedTemplates(), splitTags()
+	 *   Usage / paging / URLs: usageRefForPage(), getDefaultPageSize(), buildUrl()
+	 *   JSON responses       : jsonResponse(), jsonError()
+	 *
+	 * Plus the instance property $customByFieldCache (used by ImageLibraryDiscovery).
+	 */
 	use ImageLibraryDiscovery;
 	use ImageLibraryMultilang;
 	use ImageLibraryExportImport;

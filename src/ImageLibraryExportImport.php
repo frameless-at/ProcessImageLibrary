@@ -360,10 +360,6 @@ trait ImageLibraryExportImport {
 	}
 
 	/**
-	 * CSV variant of the export. Same row content as the JSON path,
-	 * flattened — one row per image, with each Custom subfield
-	 * promoted to its own "custom_<name>" column (union across the
-	 * export, sorted, so the column layout stays stable across
 	 * Resolve the absolute URL for the exported "url" column. variantSize
 	 * = 0 → the original file. Any positive int → a same-axis variation
 	 * (admin-variation logic: shorter axis capped to that many pixels,
@@ -388,8 +384,11 @@ trait ImageLibraryExportImport {
 	}
 
 	/**
-	 * rows). UTF-8 BOM prepended so Excel reads umlauts correctly;
-	 * fputcsv handles quoting + newlines-in-fields.
+	 * CSV variant of the export. Same row content as the JSON path,
+	 * flattened — one row per image, with each Custom subfield promoted to
+	 * its own "custom_<name>" column (union across the export, sorted, so the
+	 * column layout stays stable across rows). UTF-8 BOM prepended so Excel
+	 * reads umlauts correctly; fputcsv handles quoting + newlines-in-fields.
 	 *
 	 * @param array<int,array<string,mixed>> $images
 	 */
