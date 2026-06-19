@@ -740,7 +740,6 @@ textarea.ml-cell-input {
 	color: var(--pw-muted-color, #555);
 	background: transparent;
 	border: 0;
-	/* padding: 0.25rem 0.4rem; */
 	cursor: pointer;
 }
 .ml-columns-toggle:hover,

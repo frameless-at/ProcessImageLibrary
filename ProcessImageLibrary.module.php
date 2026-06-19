@@ -6273,7 +6273,6 @@ class ProcessImageLibrary extends Process {
 		$addLabel = $san->entities($this->_('New'));
 		$allLabel = $san->entities($this->_('Show all'));
 		$delTitle = $san->entities($this->_('Delete bookmark'));
-		$collDelTitle = $san->entities($this->_('Delete collection'));
 
 		$out  = '<ul class="WireTabs uk-tab ml-bookmarks-tabs">';
 
@@ -6320,7 +6319,7 @@ class ProcessImageLibrary extends Process {
 				. '</li>';
 		};
 
-		$renderCollection = function (array $c, bool $shared) use ($san, $page, $currentColl, $collDelTitle, $canManageShared): string {
+		$renderCollection = function (array $c, bool $shared) use ($san, $page, $currentColl, $canManageShared): string {
 			$cid = (string) ($c['id'] ?? '');
 			if ($cid === '') return '';
 			// Only top-level collections get a tab here. Nested ones live in the
@@ -6598,10 +6597,6 @@ class ProcessImageLibrary extends Process {
 		$form->add($outer);
 
 		return $form->render();
-	}
-
-	protected function hasActiveFilter(array $filters): bool {
-		return $this->countActiveFilters($filters) > 0;
 	}
 
 	/**
