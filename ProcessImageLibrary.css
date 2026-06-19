@@ -14,6 +14,11 @@
 	--ml-confirm: #2a8a2a;    /* inline confirm green */
 	/* Neutral row hover/active tint (the tag-manager tint, reused widely). */
 	--ml-tint-hover: color-mix(in srgb, var(--pw-main-background, #f5f5f5) 60%, var(--pw-text-color, #000) 6%);
+	/* Selected (team-tab active) tint — blocks-bg nudged toward primary. */
+	--ml-tint-selected: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+	/* Curate cursors (selection active): green "+" adds, red "−" removes. */
+	--ml-cursor-add: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
+	--ml-cursor-remove: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
 }
 
 .ml-root {
@@ -1738,14 +1743,14 @@ textarea.ml-langtabs-pane {
 	}
 }
 .ml-coll-flyout-item.uk-active > a {
-	background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+	background: var(--ml-tint-selected);
 }
 /* Hover tint desktop-only — on touch :hover sticks to the last-tapped item.
    (The name keeps its hover underline via the .ml-bm-label rule above; the
    caret is a sibling of that span, so it is never underlined.) */
 @media (hover: hover) {
 	.ml-coll-flyout-item > a:hover {
-		background: color-mix(in srgb, var(--pw-blocks-background, #fff) 80%, var(--pw-primary, #3480e3) 20%);
+		background: var(--ml-tint-selected);
 	}
 }
 
@@ -2086,10 +2091,10 @@ textarea.ml-langtabs-pane {
    - the ACTIVE collection tab (you're inside it) → "−" (the click REMOVES the
      selection from it). Custom SVG cursors, native copy/pointer as fallback. */
 .ml-bookmarks-tabs.ml-has-selection li[data-coll-id] > a {
-	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
+	cursor: var(--ml-cursor-add);
 }
 .ml-bookmarks-tabs.ml-has-selection li[data-coll-id].uk-active > a {
-	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
+	cursor: var(--ml-cursor-remove);
 }
 /* Shared (team-wide) tabs are read-only for non-managers: no curate cursor —
    a click just recalls. Managers get the curate cursors back via the
@@ -2099,10 +2104,10 @@ textarea.ml-langtabs-pane {
 	cursor: pointer;
 }
 .ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared] > a {
-	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%232a8a2a'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M12%207v10M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, copy;
+	cursor: var(--ml-cursor-add);
 }
 .ml-can-manage-shared .ml-bookmarks-tabs.ml-has-selection li[data-coll-id][data-shared].uk-active > a {
-	cursor: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='24'%20height='24'%3E%3Ccircle%20cx='12'%20cy='12'%20r='10'%20fill='%23c0392b'%20stroke='white'%20stroke-width='2'/%3E%3Cpath%20d='M7%2012h10'%20stroke='white'%20stroke-width='2.6'%20stroke-linecap='round'/%3E%3C/svg%3E") 12 12, pointer;
+	cursor: var(--ml-cursor-remove);
 }
 /* Folder model: a parent collection holds its own images and is curatable like
    any leaf, so it keeps the +/− curate cursor — no read-only exception. */
