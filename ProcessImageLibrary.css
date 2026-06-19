@@ -796,6 +796,23 @@ textarea.ml-cell-input {
 .ml-view-btn .fa {
 	display: block;
 }
+/* Masonry toggle icon — FontAwesome 6 "chart-simple", bundled here as a CSS
+   mask so it renders on EVERY core regardless of the core's FontAwesome
+   version (stable cores ship FA4.7, which has no chart-simple; only the dev
+   core ships FA6). background-color: currentColor makes it inherit the same
+   muted / hover / active colours as the FA icons beside it; rotate(180deg)
+   flips the bars to hang from the top, reading as the masonry layout. The
+   mask is the official FA6 free-solid chart-simple path (viewBox 448×512),
+   URL-encoded. */
+.ml-view-btn .ml-icon-masonry {
+	display: block;
+	width: 1em;
+	height: 1em;
+	background-color: currentColor;
+	-webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20448%20512'%3E%3Cpath%20d='M160%2080c0-26.5%2021.5-48%2048-48h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H208c-26.5%200-48-21.5-48-48V80zM0%20272c0-26.5%2021.5-48%2048-48H80c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H48c-26.5%200-48-21.5-48-48V272zM368%2096h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H368c-26.5%200-48-21.5-48-48V144c0-26.5%2021.5-48%2048-48z'/%3E%3C/svg%3E") center / contain no-repeat;
+	mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20448%20512'%3E%3Cpath%20d='M160%2080c0-26.5%2021.5-48%2048-48h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H208c-26.5%200-48-21.5-48-48V80zM0%20272c0-26.5%2021.5-48%2048-48H80c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H48c-26.5%200-48-21.5-48-48V272zM368%2096h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H368c-26.5%200-48-21.5-48-48V144c0-26.5%2021.5-48%2048-48z'/%3E%3C/svg%3E") center / contain no-repeat;
+	transform: rotate(180deg);
+}
 .ml-view-btn:hover,
 .ml-view-btn:focus {
 	color: var(--pw-text-color, #111);

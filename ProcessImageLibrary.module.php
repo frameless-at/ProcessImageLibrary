@@ -1998,16 +1998,16 @@ class ProcessImageLibrary extends Process {
 		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
 		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
 		// grid (square tiles) / masonry (natural ratio) / table (data grid).
-		// fa-th-list (not fa-table-list): the FA5 name renders on stable cores
-		// AND maps to table-list as an alias under the FA6 core. fa-th is an
-		// FA6 alias too. fa-chart-simple (masonry), flipped 180° via
-		// fa-rotate-180, reads as uneven columns hanging from the top — the
-		// masonry look. NOTE: fa-chart-simple is FA6-only; on stable cores
-		// with an older FontAwesome it renders blank.
+		// Grid + table use FontAwesome (fa-th / fa-th-list — both render on
+		// stable FA4.7 cores and as aliases under the FA6 dev core). The
+		// masonry icon is FA6's chart-simple, which FA4.7 lacks, so we don't
+		// rely on the core font for it: the .ml-icon-masonry class paints the
+		// glyph from a CSS mask bundled in our stylesheet (and rotates it 180°
+		// there), so it shows identically on every core.
 		$views = [
-			[self::VIEW_GRID,    'fa-th',                       $this->_('Grid view')],
-			[self::VIEW_MASONRY, 'fa-chart-simple fa-rotate-180', $this->_('Masonry view')],
-			[self::VIEW_TABLE,   'fa-th-list',                  $this->_('Table view')],
+			[self::VIEW_GRID,    'fa fa-th',        $this->_('Grid view')],
+			[self::VIEW_MASONRY, 'ml-icon-masonry', $this->_('Masonry view')],
+			[self::VIEW_TABLE,   'fa fa-th-list',   $this->_('Table view')],
 		];
 		$out = '<span class="ml-view-toggle" role="group" aria-label="'
 			. $san->entities($this->_('Result layout')) . '">';
@@ -2019,7 +2019,7 @@ class ProcessImageLibrary extends Process {
 				. ' data-view="' . $mode . '"'
 				. ' title="' . $lbl . '" aria-label="' . $lbl . '"'
 				. ($active ? ' aria-current="true"' : '') . '>'
-				. '<i class="fa ' . $icon . '" aria-hidden="true"></i></a>';
+				. '<i class="' . $icon . '" aria-hidden="true"></i></a>';
 		}
 		$out .= '</span>';
 		return $out;
