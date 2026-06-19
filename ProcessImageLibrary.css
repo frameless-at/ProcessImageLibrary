@@ -721,7 +721,7 @@ textarea.ml-cell-input {
 	text-decoration: none;
 }
 .ml-columns-toggle {
-	font-size: 1.15rem;
+	font-size: 1rem;
 	line-height: 1;
 	color: var(--pw-muted-color, #555);
 	background: transparent;
@@ -767,21 +767,25 @@ textarea.ml-cell-input {
 	font-size: 0.95rem;
 }
 .ml-thumb-size-slider.ui-slider {
-	width: 90px;
+	width: 100px;   /* matches InputfieldImage's native size slider */
 	margin: 0;
 }
 
-/* View-mode toggle — two bare icons (table / masonry) matching the
-   columns-toggle icon next to it: same size, no button chrome. The
-   active mode renders in the admin's primary colour; the inactive
-   one is muted and brightens on hover. */
+/* View-mode toggle — three bare icons (grid / masonry / table). Sizes and
+   spacing mirror InputfieldImage's native list-mode toggle: ~1rem icons
+   (no 20px override) and a ~0.75em gap between them (native uses
+   padding-right: 0.75em on each .InputfieldImageListToggle). The active
+   mode renders in the admin's primary colour; the inactive one is muted
+   and brightens on hover. (Native instead colours all three alike and
+   dims the active with opacity: 0.5 — kept our colour model for a clearer
+   active cue.) */
 .ml-view-toggle {
 	display: inline-flex;
 	align-items: center;
-	gap: 0.45rem;
+	gap: 0.75rem;
 }
 .ml-view-btn {
-	font-size: 1.15rem;
+	font-size: 1rem;
 	line-height: 1;
 	color: var(--pw-muted-color, #555);
 	background: transparent;
@@ -791,7 +795,6 @@ textarea.ml-cell-input {
 }
 .ml-view-btn .fa {
 	display: block;
-	font-size: 20px;
 }
 .ml-view-btn:hover,
 .ml-view-btn:focus {
