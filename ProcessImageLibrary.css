@@ -1050,29 +1050,33 @@ textarea.ml-cell-input {
 	background: var(--pw-inputs-background, #fff);
 	color: var(--pw-text-color, inherit);
 }
-/* No focus indicator anywhere on module-owned UI — kills both
-   outline AND the box-shadow focus rings UIkit / PW apply to inputs
-   and buttons. !important is needed because UIkit's own focus rules
-   carry equal specificity but later cascade position; rather than
-   chase load order we just win unconditionally. Covers .ml-root
-   (the admin page region) plus every <dialog> the JS spawns into
-   <body>, and the elements themselves (not just descendants).
-   :focus-within is intentionally NOT included — it matches every
-   ancestor of the focused element, and PW uses box-shadow for the
-   structural outline on InputfieldHeader / wrapper rows. Killing it
-   on ancestors would erase those structural shadows whenever any
-   child got focused. */
-.ml-root:focus, .ml-root:focus-visible,
-.ml-root *:focus, .ml-root *:focus-visible,
-.ml-popup-editor:focus, .ml-popup-editor:focus-visible,
-.ml-popup-editor *:focus, .ml-popup-editor *:focus-visible,
-.ml-image-modal:focus, .ml-image-modal:focus-visible,
-.ml-image-modal *:focus, .ml-image-modal *:focus-visible,
-.ml-bulk-result-dialog:focus, .ml-bulk-result-dialog:focus-visible,
-.ml-bulk-result-dialog *:focus, .ml-bulk-result-dialog *:focus-visible,
-.ml-columns-dialog:focus, .ml-columns-dialog:focus-visible,
-.ml-columns-dialog *:focus, .ml-columns-dialog *:focus-visible {
+/* Focus indicators. Suppress the ring on MOUSE / programmatic focus
+   (:focus:not(:focus-visible)) — it reads as noise on click and kills both
+   the outline AND UIkit's / PW's box-shadow focus rings. But KEEP a clear ring
+   for KEYBOARD focus (:focus-visible) so tab-navigation stays usable and
+   accessible; we still drop UIkit's clashing box-shadow there and draw a
+   single clean outline of our own so the indicator is consistent, not doubled.
+   !important is needed because UIkit's focus rules carry equal specificity but
+   a later cascade position. Covers .ml-root (the admin page region) plus every
+   <dialog> the JS spawns into <body>, elements included. :focus-within is
+   intentionally NOT touched — it matches every ancestor of the focused element,
+   and PW uses box-shadow there for structural outlines on InputfieldHeader /
+   wrapper rows; killing it would erase those whenever a child got focused. */
+.ml-root:focus:not(:focus-visible), .ml-root *:focus:not(:focus-visible),
+.ml-popup-editor:focus:not(:focus-visible), .ml-popup-editor *:focus:not(:focus-visible),
+.ml-image-modal:focus:not(:focus-visible), .ml-image-modal *:focus:not(:focus-visible),
+.ml-bulk-result-dialog:focus:not(:focus-visible), .ml-bulk-result-dialog *:focus:not(:focus-visible),
+.ml-columns-dialog:focus:not(:focus-visible), .ml-columns-dialog *:focus:not(:focus-visible) {
 	outline: none !important;
+	box-shadow: none !important;
+}
+.ml-root:focus-visible, .ml-root *:focus-visible,
+.ml-popup-editor:focus-visible, .ml-popup-editor *:focus-visible,
+.ml-image-modal:focus-visible, .ml-image-modal *:focus-visible,
+.ml-bulk-result-dialog:focus-visible, .ml-bulk-result-dialog *:focus-visible,
+.ml-columns-dialog:focus-visible, .ml-columns-dialog *:focus-visible {
+	outline: 2px solid var(--pw-main-color, #5b8cd6) !important;
+	outline-offset: 1px;
 	box-shadow: none !important;
 }
 .ml-popup-editor input[type="text"],
