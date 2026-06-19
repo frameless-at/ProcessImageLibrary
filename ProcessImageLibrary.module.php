@@ -4842,7 +4842,7 @@ class ProcessImageLibrary extends Process {
 			'no_custom' => $noCustom,
 			'dupes'     => !empty($params['dupes']),
 			'tags'      => $tags,
-			'coll'      => preg_replace('/[^a-z0-9]/i', '', $coll) ?? '',
+			'coll'      => $this->sanitizeIdToken($coll),
 			'sel'       => $coll !== '' ? $this->resolveCollectionKeys($coll) : [],
 		];
 	}
@@ -4868,6 +4868,16 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function hashKey(int $pageId, string $fieldName, string $basename): string {
 		return $pageId . "\0" . $fieldName . "\0" . $basename;
+	}
+
+	/**
+	 * Strip a collection / bookmark id (or parent id) down to its safe token
+	 * charset ([A-Za-z0-9] only). These ids are client-supplied (POSTed prefs),
+	 * so every read sanitises before use; centralised so the charset can't
+	 * drift between call sites.
+	 */
+	protected function sanitizeIdToken($value): string {
+		return preg_replace('/[^a-z0-9]/i', '', (string) $value) ?? '';
 	}
 
 	/**
@@ -4931,20 +4941,20 @@ class ProcessImageLibrary extends Process {
 		if (!is_array($b)) return null;
 		$name = $this->wire('sanitizer')->text((string) ($b['name'] ?? ''), ['maxLength' => 80]);
 		if ($name === '') return null;
-		$id = preg_replace('/[^a-z0-9]/i', '', (string) ($b['id'] ?? '')) ?? '';
+		$id = $this->sanitizeIdToken($b['id'] ?? '');
 		if ($id === '') $id = $this->newBookmarkId();
 		$qs = $this->canonicalizeBookmarkQs((string) ($b['qs'] ?? ''));
 		// Parent folder id for nesting; a bookmark can never be its own parent.
 		// Structural validity (parent is a folder, depth cap) is enforced by the
 		// manager UI; array order is the display order.
-		$parent = preg_replace('/[^a-z0-9]/i', '', (string) ($b['parent'] ?? '')) ?? '';
+		$parent = $this->sanitizeIdToken($b['parent'] ?? '');
 		if ($parent === $id) $parent = '';
 		return ['id' => $id, 'name' => $name, 'qs' => $qs, 'parent' => $parent];
 	}
 
 	protected function sanitizeCollection($c): ?array {
 		if (!is_array($c)) return null;
-		$id   = preg_replace('/[^a-z0-9]/i', '', (string) ($c['id'] ?? '')) ?? '';
+		$id   = $this->sanitizeIdToken($c['id'] ?? '');
 		$name = $this->wire('sanitizer')->text((string) ($c['name'] ?? ''), ['maxLength' => 80]);
 		if ($id === '' || $name === '') return null;
 
@@ -4952,7 +4962,7 @@ class ProcessImageLibrary extends Process {
 		// never be its own parent. Structural validity (parent exists, depth cap,
 		// same store) is enforced by the manager UI; the array order is preserved
 		// as the display order (a child sits right after its parent).
-		$parent = preg_replace('/[^a-z0-9]/i', '', (string) ($c['parent'] ?? '')) ?? '';
+		$parent = $this->sanitizeIdToken($c['parent'] ?? '');
 		if ($parent === $id) $parent = '';
 
 		$keys = [];
@@ -5005,7 +5015,7 @@ class ProcessImageLibrary extends Process {
 	}
 
 	protected function resolveCollectionKeys(string $id): array {
-		$id = preg_replace('/[^a-z0-9]/i', '', $id) ?? '';
+		$id = $this->sanitizeIdToken($id);
 		if ($id === '') return [];
 		// Collections live in ONE team-wide store now (no personal split).
 		return $this->collectionUnionKeys($id, $this->getSharedPrefs()['collections']);
