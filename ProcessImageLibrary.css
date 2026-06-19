@@ -1763,7 +1763,7 @@ textarea.ml-langtabs-pane {
 	position: absolute;
 	z-index: 99999;
 	transform: translateY(-50%) translateX(6px);
-	max-width: 280px;
+	/* max-width is set in JS to the free space beside the row's thumbnail. */
 	padding: 0.4rem 0.65rem;
 	border-radius: 4px;
 	color: #fff;

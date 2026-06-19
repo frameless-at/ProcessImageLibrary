@@ -399,8 +399,16 @@
 			t.className = 'ml-row-toast ' + (type === 'error' ? 'ml-row-toast-error' : 'ml-row-toast-ok');
 			t.textContent = msg;
 			document.body.appendChild(t);
-			var maxLeft = window.scrollX + document.documentElement.clientWidth - t.offsetWidth - 12;
-			var left = Math.min(window.scrollX + rect.right + 8, Math.max(window.scrollX + 12, maxLeft));
+			// Use the free space between the thumbnail and the right edge of the
+			// results area: width grows to fit the message on one line where the
+			// row allows (the table), and only wraps once it hits that bound —
+			// rather than a fixed narrow cap. left is pulled in if the available
+			// band is too small (a right-edge grid thumbnail) so it stays on-screen.
+			var boundsRight = results ? results.getBoundingClientRect().right : document.documentElement.clientWidth;
+			var gap = 8, margin = 12, minW = 160;
+			var avail = Math.max(minW, boundsRight - rect.right - gap - margin);
+			var left  = window.scrollX + Math.min(rect.right + gap, boundsRight - margin - avail);
+			t.style.maxWidth = avail + 'px';
 			t.style.top  = (window.scrollY + rect.top + rect.height / 2) + 'px';
 			t.style.left = left + 'px';
 			requestAnimationFrame(function () { t.classList.add('ml-row-toast-show'); });
