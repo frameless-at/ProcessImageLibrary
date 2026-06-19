@@ -6485,6 +6485,45 @@ class ProcessImageLibrary extends Process {
 			: $this->_('Filters');
 		$outer->collapsed = Inputfield::collapsedYes;
 
+		$this->addSearchRow($outer, $filters, $imageFields, $eligibleTemplates);
+
+		$this->addTagsFieldset($outer, $filters, $tagFilterPool);
+
+		$this->addMissingCheckboxes($outer, $filters, $customCols);
+
+		// Apply + Reset as raw UIkit buttons inside an InputfieldMarkup.
+		// PW's InputfieldSubmit / InputfieldButton render their <button>
+		// with jQuery-UI heritage classes (ui-button …) that
+		// AdminThemeUikit styles with enough weight to override any
+		// uk-button class added alongside — so adding uk classes to the
+		// core fields has no visual effect. Hand-rendering is the only
+		// way to get true UIkit buttons that match the module's own
+		// dialog buttons (uk-button-secondary = grey, like Cancel /
+		// Close). Apply is type=submit so the form's submit handler
+		// still fires; Reset stays a real <a href="./"> the JS
+		// intercepts for the AJAX reset. Flex-left layout via
+		// .ml-filter-actions.
+		$san = $this->wire('sanitizer');
+		$actions = $modules->get('InputfieldMarkup');
+		$actions->name        = 'mlActions';
+		$actions->skipLabel   = Inputfield::skipLabelHeader;
+		$actions->columnWidth = 100;
+		$actions->value =
+			'<div class="ml-filter-actions">'
+			. '<button type="submit" name="apply" class="uk-button uk-button-primary">'
+			. $san->entities($this->_('Apply')) . '</button>'
+			. '<a href="./" class="ml-reset uk-button uk-button-secondary">'
+			. $san->entities($this->_('Reset')) . '</a>'
+			. '</div>';
+		$outer->add($actions);
+
+		$form->add($outer);
+
+		return $form->render();
+	}
+
+	protected function addSearchRow(InputfieldFieldset $outer, array $filters, array $imageFields, array $eligibleTemplates): void {
+		$modules = $this->wire('modules');
 		// Row 1: Search + Template + Image field, 33/33/34 — except in the picker,
 		// where Template / Image field are developer concepts a normal author
 		// can't use, so only Search remains (full width). Authors narrow via the
@@ -6525,7 +6564,10 @@ class ProcessImageLibrary extends Process {
 			$fld->columnWidth = 34;
 			$outer->add($fld);
 		}
+	}
 
+	protected function addTagsFieldset(InputfieldFieldset $outer, array $filters, array $tagFilterPool): void {
+		$modules = $this->wire('modules');
 		// Tags fieldset (full width, always open when present). Rendered
 		// unconditionally so the JS field-capability filter has DOM to
 		// toggle — same pattern as the template→field narrowing: PHP
@@ -6559,7 +6601,10 @@ class ProcessImageLibrary extends Process {
 
 			$outer->add($tagsFs);
 		}
+	}
 
+	protected function addMissingCheckboxes(InputfieldFieldset $outer, array $filters, array $customCols): void {
+		$modules = $this->wire('modules');
 		// Missing-X + Duplicates are AUDIT filters (find images that need
 		// metadata, or byte-identical copies). When you're picking an image to
 		// insert into a field they're just noise — skip them in the picker.
@@ -6599,36 +6644,6 @@ class ProcessImageLibrary extends Process {
 			if (!empty($filters['dupes'])) $dupCb->attr('checked', 'checked');
 			$outer->add($dupCb);
 		}
-
-		// Apply + Reset as raw UIkit buttons inside an InputfieldMarkup.
-		// PW's InputfieldSubmit / InputfieldButton render their <button>
-		// with jQuery-UI heritage classes (ui-button …) that
-		// AdminThemeUikit styles with enough weight to override any
-		// uk-button class added alongside — so adding uk classes to the
-		// core fields has no visual effect. Hand-rendering is the only
-		// way to get true UIkit buttons that match the module's own
-		// dialog buttons (uk-button-secondary = grey, like Cancel /
-		// Close). Apply is type=submit so the form's submit handler
-		// still fires; Reset stays a real <a href="./"> the JS
-		// intercepts for the AJAX reset. Flex-left layout via
-		// .ml-filter-actions.
-		$san = $this->wire('sanitizer');
-		$actions = $modules->get('InputfieldMarkup');
-		$actions->name        = 'mlActions';
-		$actions->skipLabel   = Inputfield::skipLabelHeader;
-		$actions->columnWidth = 100;
-		$actions->value =
-			'<div class="ml-filter-actions">'
-			. '<button type="submit" name="apply" class="uk-button uk-button-primary">'
-			. $san->entities($this->_('Apply')) . '</button>'
-			. '<a href="./" class="ml-reset uk-button uk-button-secondary">'
-			. $san->entities($this->_('Reset')) . '</a>'
-			. '</div>';
-		$outer->add($actions);
-
-		$form->add($outer);
-
-		return $form->render();
 	}
 
 	/**
