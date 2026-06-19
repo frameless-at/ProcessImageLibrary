@@ -1871,11 +1871,12 @@ class ProcessImageLibrary extends Process {
 			$srcH = (int) ($row['thumbHeight'] ?? 0);
 
 			$editAttrs = sprintf(
-				'data-page-id="%d" data-field="%s" data-basename="%s" data-file-hash="%s"',
+				'data-page-id="%d" data-field="%s" data-basename="%s" data-file-hash="%s" data-edit-base="%s"',
 				(int) $row['pageId'],
 				$san->entities((string) $row['fieldName']),
 				$san->entities((string) $row['basename']),
-				md5((string) $row['basename'])
+				md5((string) $row['basename']),
+				$san->entities((string) ($row['pageEditBase'] ?? ''))
 			);
 
 			// Tile identity attrs mirror the table <tr> so replace /
@@ -5823,6 +5824,17 @@ class ProcessImageLibrary extends Process {
 			}
 			$row['pageUrl']     = $displayPage->url;
 			$row['pageEditUrl'] = $displayPage->editUrl;
+			// Base URL for the per-image editor modal. It edits the STORAGE
+			// page (where the field lives — the repeater page for a repeater
+			// image), NOT the display/owner page, so use $page (not
+			// $displayPage). Crucially this resolves a User page to the
+			// access/users/edit editor rather than page/edit: page/edit
+			// redirects User pages there and drops our fields=/ml_focus_hash
+			// scope, which made the modal render the whole user form instead
+			// of the single image field. editUrl() gives the right editor for
+			// every template; for normal + repeater pages it's the same
+			// page/edit URL the modal used before.
+			$row['pageEditBase'] = (string) $page->editUrl;
 			// Title rendered in the editor's own admin language —
 			// the cached pageTitle is intentionally default-language
 			// (so sort / filter / search stay consistent across
@@ -6755,11 +6767,12 @@ class ProcessImageLibrary extends Process {
 			$size = $this->formatFilesize((int) $row['filesize']);
 
 			$editAttrs = sprintf(
-				'data-page-id="%d" data-field="%s" data-basename="%s" data-file-hash="%s"',
+				'data-page-id="%d" data-field="%s" data-basename="%s" data-file-hash="%s" data-edit-base="%s"',
 				(int) $row['pageId'],
 				$san->entities((string) $row['fieldName']),
 				$san->entities((string) $row['basename']),
-				md5((string) $row['basename'])
+				md5((string) $row['basename']),
+				$san->entities((string) ($row['pageEditBase'] ?? ''))
 			);
 			// A11y: editable cells expose themselves as buttons so
 			// keyboard users can Tab to them and Enter / Space to
