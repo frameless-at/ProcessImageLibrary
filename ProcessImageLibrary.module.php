@@ -1997,15 +1997,17 @@ class ProcessImageLibrary extends Process {
 		$viewBase = $this->buildUrl($filters, $page, $sort, $dir, $pageSize);
 		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
 		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
-		// Order + icons mirror ProcessWire's native file-view scheme:
-		// grid (square tiles), masonry (natural ratio), table (data grid).
+		// grid (square tiles) / masonry (natural ratio) / table (data grid).
 		// fa-th-list (not fa-table-list): the FA5 name renders on stable cores
-		// AND maps to table-list as an alias under the FA6 core, so the icon
-		// shows everywhere. fa-th / fa-tasks are aliases in FA6 too.
+		// AND maps to table-list as an alias under the FA6 core. fa-th is an
+		// FA6 alias too. fa-chart-simple (masonry), flipped 180° via
+		// fa-rotate-180, reads as uneven columns hanging from the top — the
+		// masonry look. NOTE: fa-chart-simple is FA6-only; on stable cores
+		// with an older FontAwesome it renders blank.
 		$views = [
-			[self::VIEW_GRID,    'fa-th',      $this->_('Grid view')],
-			[self::VIEW_MASONRY, 'fa-tasks',   $this->_('Masonry view')],
-			[self::VIEW_TABLE,   'fa-th-list', $this->_('Table view')],
+			[self::VIEW_GRID,    'fa-th',                       $this->_('Grid view')],
+			[self::VIEW_MASONRY, 'fa-chart-simple fa-rotate-180', $this->_('Masonry view')],
+			[self::VIEW_TABLE,   'fa-th-list',                  $this->_('Table view')],
 		];
 		$out = '<span class="ml-view-toggle" role="group" aria-label="'
 			. $san->entities($this->_('Result layout')) . '">';
