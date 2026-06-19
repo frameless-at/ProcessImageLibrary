@@ -324,6 +324,8 @@ trait ImageLibraryUsage {
 			try {
 				$ids = $pages->findIDs($name . '%=' . $needle . ', include=all');
 			} catch (\Throwable $e) {
+				// Don't let one bad field silently shrink the usage scan.
+				$this->wire('log')->error('ImageLibrary: usage scan query failed for field ' . $name . ': ' . $e->getMessage());
 				continue;
 			}
 			foreach ($ids as $id) $idSet[(int) $id] = true;
@@ -430,6 +432,8 @@ trait ImageLibraryUsage {
 			$stmt->execute([$imgPageId, $stem]);
 			return (int) $stmt->fetchColumn();
 		} catch (\Throwable $e) {
+			// A DB fault must not masquerade as "image used nowhere".
+			$this->wire('log')->error('ImageLibrary: usage count query failed: ' . $e->getMessage());
 			return 0;
 		}
 	}
@@ -631,6 +635,7 @@ trait ImageLibraryUsage {
 			$images     = (int) $db->query('SELECT COUNT(*) FROM (SELECT 1 FROM `' . self::USAGE_TABLE . '` GROUP BY img_page_id, img_stem) t')->fetchColumn();
 			return ['references' => $references, 'images' => $images];
 		} catch (\Throwable $e) {
+			$this->wire('log')->error('ImageLibrary: usage stats query failed: ' . $e->getMessage());
 			return ['references' => 0, 'images' => 0];
 		}
 	}

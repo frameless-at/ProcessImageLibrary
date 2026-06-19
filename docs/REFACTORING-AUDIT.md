@@ -13,6 +13,20 @@ src/*.php (3215), assets/*.js (871).
 
 ## P1 — Correctness / security (verify, then fix)
 
+> **Status: P1 complete.** 1 — `executeReplace` now validates upload content
+> (`getimagesize()` / SVG sniff) and writes via temp-name + atomic rename
+> (1.0.5). 2 — re-verified: no user-controlled basename is interpolated into a
+> JS attribute selector any more; key lookups go through `rowElsByKey()`; the
+> remaining interpolations carry safe charsets (field names, hashes, numeric
+> ids). 3 — `reclaim-live.js` runs every server value through `esc()` / numeric
+> `fmt()`; labels are static. 4 — pwimage grammar comments corrected. 5 —
+> `buildFilters()` extracted, both readers share it. 6 — silent swallow-and-
+> return-empty catches in the duplicate-cluster scan, usage count, usage stats,
+> per-field usage scan and the version-assign subfield copy now log via
+> `$this->wire('log')->error(...)`. 7 — both `@stat()` sites in `Hashing` guard
+> `!$st` before reading keys. `executeWidget` GET-without-CSRF kept as the
+> documented read-only exception.
+
 1. **`executeReplace` accepts uploads on extension string match only**
    (`module.php:~2877`). No MIME/content check — an editor can overwrite an
    image's bytes with arbitrary content under an image extension. Validate via

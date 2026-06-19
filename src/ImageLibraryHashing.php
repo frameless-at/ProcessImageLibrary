@@ -372,6 +372,9 @@ trait ImageLibraryHashing {
 				'SELECT COUNT(*) FROM `' . self::HASH_TABLE . '` WHERE content_hash IS NOT NULL'
 			)->fetchColumn();
 		} catch (\Throwable $e) {
+			// A swallowed DB fault here would read as "no duplicates" — exactly
+			// the wrong signal for an audit tool. Surface it, then degrade.
+			$this->wire('log')->error('ImageLibrary: duplicate-cluster scan failed: ' . $e->getMessage());
 			return ['scanned' => 0, 'clusters' => []];
 		}
 		if (!$scanned) return ['scanned' => 0, 'clusters' => []];

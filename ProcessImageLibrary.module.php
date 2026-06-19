@@ -1192,7 +1192,9 @@ class ProcessImageLibrary extends Process {
 					}
 				}
 				if ($touched) $persist();
-			} catch (\Throwable $e) {}
+			} catch (\Throwable $e) {
+				$this->wire('log')->error('ImageLibrary: version-assign subfield copy failed: ' . $e->getMessage());
+			}
 		}
 
 		// Immediate dedup. The live path gets this for free via the Pages::saved
