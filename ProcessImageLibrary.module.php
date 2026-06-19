@@ -6911,23 +6911,11 @@ class ProcessImageLibrary extends Process {
 				// Pre-computed here so the <img> width / height
 				// attributes prevent layout shift before the bytes
 				// land.
-				$srcW = (int) ($row['thumbWidth']  ?? 0);
-				$srcH = (int) ($row['thumbHeight'] ?? 0);
-				if ($thumb['keepRatio']) {
-					$longer = (int) $thumb['longerSide'];
-					if ($srcW >= $srcH) {
-						$dispW = $srcW > 0 ? min($longer, $srcW) : $longer;
-						$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
-					} else {
-						$dispH = $srcH > 0 ? min($longer, $srcH) : $longer;
-						$dispW = $srcH > 0 ? (int) round($srcW * $dispH / $srcH) : $srcW;
-					}
-					$cls = 'ml-thumb';
-				} else {
-					$dispW = (int) $thumb['width'];
-					$dispH = (int) $thumb['height'];
-					$cls   = 'ml-thumb ml-thumb-crop';
-				}
+				[$dispW, $dispH, $cls] = $this->thumbDisplayDims(
+					$thumb,
+					(int) ($row['thumbWidth']  ?? 0),
+					(int) ($row['thumbHeight'] ?? 0)
+				);
 				$out .= '<img class="' . $cls . '"'
 					. ' src="' . $san->entities($row['thumbUrl']) . '"'
 					. ' alt="' . $san->entities($row['basename']) . '"'
@@ -7213,6 +7201,30 @@ class ProcessImageLibrary extends Process {
 
 		$out .= '</tbody></table></div>';
 		return $out;
+	}
+
+	/**
+	 * Display width / height (px) + <img> class for one table thumbnail.
+	 * Keep-ratio mode caps the longer axis to the configured longerSide and
+	 * scales the other to the source aspect; crop mode is a fixed W×H box (CSS
+	 * object-fit absorbs any overflow). Returns [width, height, cssClass].
+	 *
+	 * @param array<string,mixed> $thumb
+	 * @return array{0:int,1:int,2:string}
+	 */
+	protected function thumbDisplayDims(array $thumb, int $srcW, int $srcH): array {
+		if ($thumb['keepRatio']) {
+			$longer = (int) $thumb['longerSide'];
+			if ($srcW >= $srcH) {
+				$dispW = $srcW > 0 ? min($longer, $srcW) : $longer;
+				$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
+			} else {
+				$dispH = $srcH > 0 ? min($longer, $srcH) : $longer;
+				$dispW = $srcH > 0 ? (int) round($srcW * $dispH / $srcH) : $srcW;
+			}
+			return [$dispW, $dispH, 'ml-thumb'];
+		}
+		return [(int) $thumb['width'], (int) $thumb['height'], 'ml-thumb ml-thumb-crop'];
 	}
 
 	/**
