@@ -6878,82 +6878,7 @@ class ProcessImageLibrary extends Process {
 				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
 				. $san->entities($selKey) . '"></td>';
 
-			// Thumbnail cell becomes clickable when the host page is
-			// editable — JS opens the PW page editor for just this
-			// image field in a modal iframe so the user gets the
-			// native crop / focus / variations UI. The file-hash
-			// (md5 of basename, matching Pagefile::hash()) lets the
-			// iframe filter find the matching gridImage via id
-			// selector instead of string-matching URLs.
-			// Thumb td only carries the hash + identity attrs when the
-			// host page is editable — that's what gates the click-
-			// through to the per-image editor iframe.
-			// Thumb td picks up the edit attrs (and a button role) only
-			// when the host page is editable — the click / keyboard
-			// activator opens the per-image editor modal.
-			if (!empty($row['pageEditUrl'])) {
-				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-					$this->_('Open editor for %s'), (string) $row['basename']
-				)));
-				$thumbAttrs = ' ' . $editAttrs . $editA11y . $thumbAria;
-			} else {
-				$thumbAttrs = '';
-			}
-			$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
-			if (!empty($row['thumbUrl'])) {
-				// Display dimensions are derived from the user's
-				// configured target, NOT the source file. In keep-
-				// ratio mode the longer axis is capped to the
-				// configured longerSide; the other axis follows the
-				// source's aspect. In crop mode the visible box is
-				// exactly W × H and CSS object-fit: cover handles
-				// any overflow from the admin-variation source.
-				// Pre-computed here so the <img> width / height
-				// attributes prevent layout shift before the bytes
-				// land.
-				[$dispW, $dispH, $cls] = $this->thumbDisplayDims(
-					$thumb,
-					(int) ($row['thumbWidth']  ?? 0),
-					(int) ($row['thumbHeight'] ?? 0)
-				);
-				$out .= '<img class="' . $cls . '"'
-					. ' src="' . $san->entities($row['thumbUrl']) . '"'
-					. ' alt="' . $san->entities($row['basename']) . '"'
-					. ' loading="lazy"'
-					. ' width="' . $dispW . '"'
-					. ' height="' . $dispH . '">';
-			}
-			// Per-row actions — both icons hang in the top-right of the
-			// thumb cell and are visible only on row hover. Replace
-			// triggers the file picker / accepts a row DnD; Delete
-			// opens a confirm dialog. Batch semantics for Delete
-			// follow the existing paintbrush: when N rows are
-			// selected, clicking Delete on any selected row's icon
-			// deletes the whole selection.
-			if (!empty($row['pageEditUrl'])) {
-				$replaceLabel = $san->entities(sprintf(
-					$this->_('Replace %s'), (string) $row['basename']
-				));
-				$deleteLabel = $san->entities(sprintf(
-					$this->_('Delete %s'), (string) $row['basename']
-				));
-				$out .= '<button type="button" class="ml-replace-btn"'
-					. ' title="' . $replaceLabel . '"'
-					. ' aria-label="' . $replaceLabel . '">'
-					. '<i class="fa fa-upload" aria-hidden="true"></i>'
-					. '</button>';
-				$out .= '<button type="button" class="ml-delete-btn"'
-					. ' title="' . $deleteLabel . '"'
-					. ' aria-label="' . $deleteLabel . '">'
-					. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
-					. '</button>';
-			}
-			// Head of a duplicate cluster → expand/collapse toggle. Copy rows
-			// and unique images carry no indicator.
-			if ($isDupHead) {
-				$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
-			}
-			$out .= '</td>';
+			$out .= $this->renderThumbCell($row, $editAttrs, $editA11y, $isDupHead, $rowDupHash, $thumb);
 
 			$pageTitle = $this->normalizeDescription($row['pageTitle']);
 			$out .= '<td class="ml-cell-page" data-col="page">';
@@ -7200,6 +7125,95 @@ class ProcessImageLibrary extends Process {
 		}
 
 		$out .= '</tbody></table></div>';
+		return $out;
+	}
+
+	/**
+	 * Render the thumbnail <td> for one table row. Clickable (opens the
+	 * per-image editor modal) with hover replace / delete actions when the host
+	 * page is editable; a duplicate-cluster head also carries the expand toggle.
+	 * <img> dimensions come from thumbDisplayDims() so the box is reserved
+	 * before the bytes land.
+	 */
+	protected function renderThumbCell(array $row, string $editAttrs, string $editA11y, bool $isDupHead, string $rowDupHash, array $thumb): string {
+		$san = $this->wire('sanitizer');
+		$out = '';
+		// Thumbnail cell becomes clickable when the host page is
+		// editable — JS opens the PW page editor for just this
+		// image field in a modal iframe so the user gets the
+		// native crop / focus / variations UI. The file-hash
+		// (md5 of basename, matching Pagefile::hash()) lets the
+		// iframe filter find the matching gridImage via id
+		// selector instead of string-matching URLs.
+		// Thumb td only carries the hash + identity attrs when the
+		// host page is editable — that's what gates the click-
+		// through to the per-image editor iframe.
+		// Thumb td picks up the edit attrs (and a button role) only
+		// when the host page is editable — the click / keyboard
+		// activator opens the per-image editor modal.
+		if (!empty($row['pageEditUrl'])) {
+			$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Open editor for %s'), (string) $row['basename']
+			)));
+			$thumbAttrs = ' ' . $editAttrs . $editA11y . $thumbAria;
+		} else {
+			$thumbAttrs = '';
+		}
+		$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
+		if (!empty($row['thumbUrl'])) {
+			// Display dimensions are derived from the user's
+			// configured target, NOT the source file. In keep-
+			// ratio mode the longer axis is capped to the
+			// configured longerSide; the other axis follows the
+			// source's aspect. In crop mode the visible box is
+			// exactly W × H and CSS object-fit: cover handles
+			// any overflow from the admin-variation source.
+			// Pre-computed here so the <img> width / height
+			// attributes prevent layout shift before the bytes
+			// land.
+			[$dispW, $dispH, $cls] = $this->thumbDisplayDims(
+				$thumb,
+				(int) ($row['thumbWidth']  ?? 0),
+				(int) ($row['thumbHeight'] ?? 0)
+			);
+			$out .= '<img class="' . $cls . '"'
+				. ' src="' . $san->entities($row['thumbUrl']) . '"'
+				. ' alt="' . $san->entities($row['basename']) . '"'
+				. ' loading="lazy"'
+				. ' width="' . $dispW . '"'
+				. ' height="' . $dispH . '">';
+		}
+		// Per-row actions — both icons hang in the top-right of the
+		// thumb cell and are visible only on row hover. Replace
+		// triggers the file picker / accepts a row DnD; Delete
+		// opens a confirm dialog. Batch semantics for Delete
+		// follow the existing paintbrush: when N rows are
+		// selected, clicking Delete on any selected row's icon
+		// deletes the whole selection.
+		if (!empty($row['pageEditUrl'])) {
+			$replaceLabel = $san->entities(sprintf(
+				$this->_('Replace %s'), (string) $row['basename']
+			));
+			$deleteLabel = $san->entities(sprintf(
+				$this->_('Delete %s'), (string) $row['basename']
+			));
+			$out .= '<button type="button" class="ml-replace-btn"'
+				. ' title="' . $replaceLabel . '"'
+				. ' aria-label="' . $replaceLabel . '">'
+				. '<i class="fa fa-upload" aria-hidden="true"></i>'
+				. '</button>';
+			$out .= '<button type="button" class="ml-delete-btn"'
+				. ' title="' . $deleteLabel . '"'
+				. ' aria-label="' . $deleteLabel . '">'
+				. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
+				. '</button>';
+		}
+		// Head of a duplicate cluster → expand/collapse toggle. Copy rows
+		// and unique images carry no indicator.
+		if ($isDupHead) {
+			$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
+		}
+		$out .= '</td>';
 		return $out;
 	}
 
