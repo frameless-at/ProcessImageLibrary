@@ -6746,38 +6746,7 @@ class ProcessImageLibrary extends Process {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
 		}
 
-		// Outer scroller so the wide table can overflow horizontally
-		// on narrow viewports without breaking the table layout.
-		// pw-table-responsive + uk-overflow-auto handle horizontal
-		// scroll on narrow viewports the same way every other PW
-		// data table does. pw-table-sortable is included because
-		// the inner table carries .AdminDataTableSortable; the
-		// wrapper class is what some PW-side JS hooks check.
-		$out  = '<div class="ml-table-scroll pw-table-responsive uk-overflow-auto pw-table-sortable">';
-		// Class set is intentional, every entry carries weight:
-		//   ml-table         — module-side hooks
-		//   AdminDataTable   — non-Uikit themes (Reno, Default) pick
-		//                      up their own admin-table chrome here
-		//   AdminDataTableSortable — paired with tablesorter-* classes
-		//                      below to inherit the theme's sort
-		//                      styling (active-asc / desc colour,
-		//                      FontAwesome arrow glyphs) without
-		//                      re-implementing it module-side
-		//   uk-table*        — active styling under AdminThemeUikit
-		$out .= '<table class="ml-table AdminDataTable AdminDataTableSortable uk-table uk-table-divider uk-table-small">';
-		// tablesorter-headerRow matches AdminThemeUikit's compound
-		// selector for the sort-state visuals.
-		$out .= '<thead><tr class="tablesorter-headerRow">';
-		$out .= '<th class="ml-cell-select">'
-			. '<input type="checkbox" class="uk-checkbox ml-select-all" title="'
-			. $san->entities($this->_('Select all on page')) . '"></th>';
-		foreach ($headers as [$colKey, $label, $sortKey]) {
-			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters);
-		}
-		foreach ($customCols as $name) {
-			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters);
-		}
-		$out .= '</tr></thead><tbody>';
+		$out = $this->renderTableHead($headers, $customCols, $sort, $dir, $filters);
 
 		// Collections column: index every team collection's row-keys once, so each
 		// row can list (and link) the collections it appears under in O(1). UNION
@@ -7224,6 +7193,51 @@ class ProcessImageLibrary extends Process {
 			$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
 		}
 		$out .= '</td>';
+		return $out;
+	}
+
+	/**
+	 * Render the table's opening chrome: the responsive scroller wrapper, the
+	 * <table>, and the <thead> (select-all box + sortable column headers, base
+	 * and custom), through the opening <tbody>. The caller appends the rows.
+	 *
+	 * @param array<int,array{0:string,1:string,2:?string}> $headers
+	 * @param array<int,string> $customCols
+	 */
+	protected function renderTableHead(array $headers, array $customCols, string $sort, string $dir, array $filters): string {
+		$san = $this->wire('sanitizer');
+		// Outer scroller so the wide table can overflow horizontally
+		// on narrow viewports without breaking the table layout.
+		// pw-table-responsive + uk-overflow-auto handle horizontal
+		// scroll on narrow viewports the same way every other PW
+		// data table does. pw-table-sortable is included because
+		// the inner table carries .AdminDataTableSortable; the
+		// wrapper class is what some PW-side JS hooks check.
+		$out  = '<div class="ml-table-scroll pw-table-responsive uk-overflow-auto pw-table-sortable">';
+		// Class set is intentional, every entry carries weight:
+		//   ml-table         — module-side hooks
+		//   AdminDataTable   — non-Uikit themes (Reno, Default) pick
+		//                      up their own admin-table chrome here
+		//   AdminDataTableSortable — paired with tablesorter-* classes
+		//                      below to inherit the theme's sort
+		//                      styling (active-asc / desc colour,
+		//                      FontAwesome arrow glyphs) without
+		//                      re-implementing it module-side
+		//   uk-table*        — active styling under AdminThemeUikit
+		$out .= '<table class="ml-table AdminDataTable AdminDataTableSortable uk-table uk-table-divider uk-table-small">';
+		// tablesorter-headerRow matches AdminThemeUikit's compound
+		// selector for the sort-state visuals.
+		$out .= '<thead><tr class="tablesorter-headerRow">';
+		$out .= '<th class="ml-cell-select">'
+			. '<input type="checkbox" class="uk-checkbox ml-select-all" title="'
+			. $san->entities($this->_('Select all on page')) . '"></th>';
+		foreach ($headers as [$colKey, $label, $sortKey]) {
+			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters);
+		}
+		foreach ($customCols as $name) {
+			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters);
+		}
+		$out .= '</tr></thead><tbody>';
 		return $out;
 	}
 
