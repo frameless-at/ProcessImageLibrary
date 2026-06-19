@@ -1998,16 +1998,14 @@ class ProcessImageLibrary extends Process {
 		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
 		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
 		// grid (square tiles) / masonry (natural ratio) / table (data grid).
-		// Grid + table use FontAwesome (fa-th / fa-th-list — both render on
-		// stable FA4.7 cores and as aliases under the FA6 dev core). The
-		// masonry icon is FA6's chart-simple, which FA4.7 lacks, so we don't
-		// rely on the core font for it: the .ml-icon-masonry class paints the
-		// glyph from a CSS mask bundled in our stylesheet (and rotates it 180°
-		// there), so it shows identically on every core.
+		// All three icons are painted from CSS masks bundling the official
+		// FontAwesome 6 glyphs (.ml-vicon-* in our stylesheet), NOT the core
+		// font — so they render identically on every core (stable cores ship
+		// FA4.7, the dev core FA6) instead of mixing FA4.7 and FA6 styles.
 		$views = [
-			[self::VIEW_GRID,    'fa fa-th',        $this->_('Grid view')],
-			[self::VIEW_MASONRY, 'ml-icon-masonry', $this->_('Masonry view')],
-			[self::VIEW_TABLE,   'fa fa-th-list',   $this->_('Table view')],
+			[self::VIEW_GRID,    'ml-vicon ml-vicon-grid',    $this->_('Grid view')],
+			[self::VIEW_MASONRY, 'ml-vicon ml-vicon-masonry', $this->_('Masonry view')],
+			[self::VIEW_TABLE,   'ml-vicon ml-vicon-table',   $this->_('Table view')],
 		];
 		$out = '<span class="ml-view-toggle" role="group" aria-label="'
 			. $san->entities($this->_('Result layout')) . '">';

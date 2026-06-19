@@ -793,25 +793,38 @@ textarea.ml-cell-input {
 	cursor: pointer;
 	text-decoration: none;
 }
-.ml-view-btn .fa {
-	display: block;
-}
-/* Masonry toggle icon — FontAwesome 6 "chart-simple", bundled here as a CSS
-   mask so it renders on EVERY core regardless of the core's FontAwesome
-   version (stable cores ship FA4.7, which has no chart-simple; only the dev
-   core ships FA6). background-color: currentColor makes it inherit the same
-   muted / hover / active colours as the FA icons beside it; rotate(180deg)
-   flips the bars to hang from the top, reading as the masonry layout. The
-   mask is the official FA6 free-solid chart-simple path (viewBox 448×512),
-   URL-encoded. */
-.ml-view-btn .ml-icon-masonry {
+.ml-view-btn .ml-vicon {
+	/* Each view icon is painted from a CSS mask that bundles the official
+	   FontAwesome 6 glyph, so all three render identically on EVERY core
+	   regardless of its FontAwesome version (stable cores ship FA4.7, the dev
+	   core FA6) instead of half FA4.7 / half FA6. background-color:
+	   currentColor makes them follow the same muted / hover / active colours
+	   the toggle sets. Sources: FA6 free-solid table-cells (grid, 512),
+	   chart-simple (masonry, 448) and table-list (table, 512), URL-encoded. */
 	display: block;
 	width: 1em;
 	height: 1em;
 	background-color: currentColor;
-	-webkit-mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20448%20512'%3E%3Cpath%20d='M160%2080c0-26.5%2021.5-48%2048-48h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H208c-26.5%200-48-21.5-48-48V80zM0%20272c0-26.5%2021.5-48%2048-48H80c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H48c-26.5%200-48-21.5-48-48V272zM368%2096h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H368c-26.5%200-48-21.5-48-48V144c0-26.5%2021.5-48%2048-48z'/%3E%3C/svg%3E") center / contain no-repeat;
-	mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20448%20512'%3E%3Cpath%20d='M160%2080c0-26.5%2021.5-48%2048-48h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H208c-26.5%200-48-21.5-48-48V80zM0%20272c0-26.5%2021.5-48%2048-48H80c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H48c-26.5%200-48-21.5-48-48V272zM368%2096h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H368c-26.5%200-48-21.5-48-48V144c0-26.5%2021.5-48%2048-48z'/%3E%3C/svg%3E") center / contain no-repeat;
+	-webkit-mask-repeat: no-repeat;
+	mask-repeat: no-repeat;
+	-webkit-mask-position: center;
+	mask-position: center;
+	-webkit-mask-size: contain;
+	mask-size: contain;
+}
+.ml-view-btn .ml-vicon-grid {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M64%2032C28.7%2032%200%2060.7%200%2096V416c0%2035.3%2028.7%2064%2064%2064H448c35.3%200%2064-28.7%2064-64V96c0-35.3-28.7-64-64-64H64zm88%2064v64H64V96h88zm56%200h88v64H208V96zm240%200v64H360V96h88zM64%20224h88v64H64V224zm232%200v64H208V224h88zm64%200h88v64H360V224zM152%20352v64H64V352h88zm56%200h88v64H208V352zm240%200v64H360V352h88z'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M64%2032C28.7%2032%200%2060.7%200%2096V416c0%2035.3%2028.7%2064%2064%2064H448c35.3%200%2064-28.7%2064-64V96c0-35.3-28.7-64-64-64H64zm88%2064v64H64V96h88zm56%200h88v64H208V96zm240%200v64H360V96h88zM64%20224h88v64H64V224zm232%200v64H208V224h88zm64%200h88v64H360V224zM152%20352v64H64V352h88zm56%200h88v64H208V352zm240%200v64H360V352h88z'/%3E%3C/svg%3E");
+}
+.ml-view-btn .ml-vicon-masonry {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20448%20512'%3E%3Cpath%20d='M160%2080c0-26.5%2021.5-48%2048-48h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H208c-26.5%200-48-21.5-48-48V80zM0%20272c0-26.5%2021.5-48%2048-48H80c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H48c-26.5%200-48-21.5-48-48V272zM368%2096h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H368c-26.5%200-48-21.5-48-48V144c0-26.5%2021.5-48%2048-48z'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20448%20512'%3E%3Cpath%20d='M160%2080c0-26.5%2021.5-48%2048-48h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H208c-26.5%200-48-21.5-48-48V80zM0%20272c0-26.5%2021.5-48%2048-48H80c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H48c-26.5%200-48-21.5-48-48V272zM368%2096h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H368c-26.5%200-48-21.5-48-48V144c0-26.5%2021.5-48%2048-48z'/%3E%3C/svg%3E");
+	/* flip the bars to hang from the top — reads as the masonry layout */
 	transform: rotate(180deg);
+}
+.ml-view-btn .ml-vicon-table {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M0%2096C0%2060.7%2028.7%2032%2064%2032H448c35.3%200%2064%2028.7%2064%2064V416c0%2035.3-28.7%2064-64%2064H64c-35.3%200-64-28.7-64-64V96zm64%200v64h64V96H64zm384%200H192v64H448V96zM64%20224v64h64V224H64zm384%200H192v64H448V224zM64%20352v64h64V352H64zm384%200H192v64H448V352z'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M0%2096C0%2060.7%2028.7%2032%2064%2032H448c35.3%200%2064%2028.7%2064%2064V416c0%2035.3-28.7%2064-64%2064H64c-35.3%200-64-28.7-64-64V96zm64%200v64h64V96H64zm384%200H192v64H448V96zM64%20224v64h64V224H64zm384%200H192v64H448V224zM64%20352v64h64V352H64zm384%200H192v64H448V352z'/%3E%3C/svg%3E");
 }
 .ml-view-btn:hover,
 .ml-view-btn:focus {
