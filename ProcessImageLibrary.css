@@ -793,15 +793,17 @@ textarea.ml-cell-input {
 	cursor: pointer;
 	text-decoration: none;
 }
-.ml-view-btn .ml-vicon {
-	/* Each view icon is painted from a CSS mask that bundles the official
-	   FontAwesome 6 glyph, so all three render identically on EVERY core
-	   regardless of its FontAwesome version (stable cores ship FA4.7, the dev
-	   core FA6) instead of half FA4.7 / half FA6. background-color:
-	   currentColor makes them follow the same muted / hover / active colours
-	   the toggle sets. Sources: FA6 free-solid table-cells (grid, 512),
-	   chart-simple (masonry, 448) and table-list (table, 512), URL-encoded. */
-	display: block;
+.ml-vicon {
+	/* Mask-painted icon shared by the view toggle, the columns opener and the
+	   bookmarks/collections "Manage" gear. Each modifier bundles the official
+	   FontAwesome 6 glyph as a CSS mask, so all of them render identically on
+	   EVERY core regardless of its FontAwesome version (stable cores ship
+	   FA4.7, the dev core FA6). background-color: currentColor makes each icon
+	   follow the colour its host link sets (muted / hover / active). Sources:
+	   FA6 free-solid table-cells, chart-simple, table-list, table-columns,
+	   sliders — URL-encoded. */
+	display: inline-block;
+	vertical-align: middle;
 	width: 1em;
 	height: 1em;
 	background-color: currentColor;
@@ -812,19 +814,27 @@ textarea.ml-cell-input {
 	-webkit-mask-size: contain;
 	mask-size: contain;
 }
-.ml-view-btn .ml-vicon-grid {
+.ml-vicon-grid {
 	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M64%2032C28.7%2032%200%2060.7%200%2096V416c0%2035.3%2028.7%2064%2064%2064H448c35.3%200%2064-28.7%2064-64V96c0-35.3-28.7-64-64-64H64zm88%2064v64H64V96h88zm56%200h88v64H208V96zm240%200v64H360V96h88zM64%20224h88v64H64V224zm232%200v64H208V224h88zm64%200h88v64H360V224zM152%20352v64H64V352h88zm56%200h88v64H208V352zm240%200v64H360V352h88z'/%3E%3C/svg%3E");
 	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M64%2032C28.7%2032%200%2060.7%200%2096V416c0%2035.3%2028.7%2064%2064%2064H448c35.3%200%2064-28.7%2064-64V96c0-35.3-28.7-64-64-64H64zm88%2064v64H64V96h88zm56%200h88v64H208V96zm240%200v64H360V96h88zM64%20224h88v64H64V224zm232%200v64H208V224h88zm64%200h88v64H360V224zM152%20352v64H64V352h88zm56%200h88v64H208V352zm240%200v64H360V352h88z'/%3E%3C/svg%3E");
 }
-.ml-view-btn .ml-vicon-masonry {
+.ml-vicon-masonry {
 	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20448%20512'%3E%3Cpath%20d='M160%2080c0-26.5%2021.5-48%2048-48h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H208c-26.5%200-48-21.5-48-48V80zM0%20272c0-26.5%2021.5-48%2048-48H80c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H48c-26.5%200-48-21.5-48-48V272zM368%2096h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H368c-26.5%200-48-21.5-48-48V144c0-26.5%2021.5-48%2048-48z'/%3E%3C/svg%3E");
 	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20448%20512'%3E%3Cpath%20d='M160%2080c0-26.5%2021.5-48%2048-48h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H208c-26.5%200-48-21.5-48-48V80zM0%20272c0-26.5%2021.5-48%2048-48H80c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H48c-26.5%200-48-21.5-48-48V272zM368%2096h32c26.5%200%2048%2021.5%2048%2048V432c0%2026.5-21.5%2048-48%2048H368c-26.5%200-48-21.5-48-48V144c0-26.5%2021.5-48%2048-48z'/%3E%3C/svg%3E");
 	/* flip the bars to hang from the top — reads as the masonry layout */
 	transform: rotate(180deg);
 }
-.ml-view-btn .ml-vicon-table {
+.ml-vicon-table {
 	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M0%2096C0%2060.7%2028.7%2032%2064%2032H448c35.3%200%2064%2028.7%2064%2064V416c0%2035.3-28.7%2064-64%2064H64c-35.3%200-64-28.7-64-64V96zm64%200v64h64V96H64zm384%200H192v64H448V96zM64%20224v64h64V224H64zm384%200H192v64H448V224zM64%20352v64h64V352H64zm384%200H192v64H448V352z'/%3E%3C/svg%3E");
 	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M0%2096C0%2060.7%2028.7%2032%2064%2032H448c35.3%200%2064%2028.7%2064%2064V416c0%2035.3-28.7%2064-64%2064H64c-35.3%200-64-28.7-64-64V96zm64%200v64h64V96H64zm384%200H192v64H448V96zM64%20224v64h64V224H64zm384%200H192v64H448V224zM64%20352v64h64V352H64zm384%200H192v64H448V352z'/%3E%3C/svg%3E");
+}
+.ml-vicon-columns {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M0%2096C0%2060.7%2028.7%2032%2064%2032H448c35.3%200%2064%2028.7%2064%2064V416c0%2035.3-28.7%2064-64%2064H64c-35.3%200-64-28.7-64-64V96zm64%2064V416H224V160H64zm384%200H288V416H448V160z'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M0%2096C0%2060.7%2028.7%2032%2064%2032H448c35.3%200%2064%2028.7%2064%2064V416c0%2035.3-28.7%2064-64%2064H64c-35.3%200-64-28.7-64-64V96zm64%2064V416H224V160H64zm384%200H288V416H448V160z'/%3E%3C/svg%3E");
+}
+.ml-vicon-sliders {
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M0%20416c0%2017.7%2014.3%2032%2032%2032l54.7%200c12.3%2028.3%2040.5%2048%2073.3%2048s61-19.7%2073.3-48L480%20448c17.7%200%2032-14.3%2032-32s-14.3-32-32-32l-246.7%200c-12.3-28.3-40.5-48-73.3-48s-61%2019.7-73.3%2048L32%20384c-17.7%200-32%2014.3-32%2032zm128%200a32%2032%200%201%201%2064%200%2032%2032%200%201%201%20-64%200zM320%20256a32%2032%200%201%201%2064%200%2032%2032%200%201%201%20-64%200zm32-80c-32.8%200-61%2019.7-73.3%2048L32%20224c-17.7%200-32%2014.3-32%2032s14.3%2032%2032%2032l246.7%200c12.3%2028.3%2040.5%2048%2073.3%2048s61-19.7%2073.3-48l54.7%200c17.7%200%2032-14.3%2032-32s-14.3-32-32-32l-54.7%200c-12.3-28.3-40.5-48-73.3-48zM192%20128a32%2032%200%201%201%200-64%2032%2032%200%201%201%200%2064zm73.3-64C253%2035.7%20224.8%2016%20192%2016s-61%2019.7-73.3%2048L32%2064C14.3%2064%200%2078.3%200%2096s14.3%2032%2032%2032l86.7%200c12.3%2028.3%2040.5%2048%2073.3%2048s61-19.7%2073.3-48L480%20128c17.7%200%2032-14.3%2032-32s-14.3-32-32-32L265.3%2064z'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20512%20512'%3E%3Cpath%20d='M0%20416c0%2017.7%2014.3%2032%2032%2032l54.7%200c12.3%2028.3%2040.5%2048%2073.3%2048s61-19.7%2073.3-48L480%20448c17.7%200%2032-14.3%2032-32s-14.3-32-32-32l-246.7%200c-12.3-28.3-40.5-48-73.3-48s-61%2019.7-73.3%2048L32%20384c-17.7%200-32%2014.3-32%2032zm128%200a32%2032%200%201%201%2064%200%2032%2032%200%201%201%20-64%200zM320%20256a32%2032%200%201%201%2064%200%2032%2032%200%201%201%20-64%200zm32-80c-32.8%200-61%2019.7-73.3%2048L32%20224c-17.7%200-32%2014.3-32%2032s14.3%2032%2032%2032l246.7%200c12.3%2028.3%2040.5%2048%2073.3%2048s61-19.7%2073.3-48l54.7%200c17.7%200%2032-14.3%2032-32s-14.3-32-32-32l-54.7%200c-12.3-28.3-40.5-48-73.3-48zM192%20128a32%2032%200%201%201%200-64%2032%2032%200%201%201%200%2064zm73.3-64C253%2035.7%20224.8%2016%20192%2016s-61%2019.7-73.3%2048L32%2064C14.3%2064%200%2078.3%200%2096s14.3%2032%2032%2032l86.7%200c12.3%2028.3%2040.5%2048%2073.3%2048s61-19.7%2073.3-48L480%20128c17.7%200%2032-14.3%2032-32s-14.3-32-32-32L265.3%2064z'/%3E%3C/svg%3E");
 }
 .ml-view-btn:hover,
 .ml-view-btn:focus {
@@ -1622,13 +1632,14 @@ textarea.ml-langtabs-pane {
 	padding: 0.25rem 0.3rem;
 }
 /* "Manage" — icon-only, sitting directly after the bookmarks/collections (the
-   "New" link follows it), NOT floated to the far right. Nudged ~3px down so the
-   gear lines up optically with the tab text baseline. */
+   "New" link follows it), NOT floated to the far right. Nudged down so the gear
+   lines up optically with the tab text baseline. The icon is now a mask glyph
+   (vertical-align: middle), so this top offset is the single alignment knob. */
 .ml-collections-manage > a {
 	margin-right: 0;     /* override the tab strip's 30px del-button gutter */
 	color: var(--pw-muted-color, #888);
 	position: relative;
-	top: 3px;
+	top: 4px;
 }
 .ml-collections-manage > a:hover { color: var(--pw-text-color, inherit); }
 

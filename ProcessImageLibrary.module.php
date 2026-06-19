@@ -6320,7 +6320,7 @@ class ProcessImageLibrary extends Process {
 			$manageTitle = $this->_('Manage bookmarks & collections');   // literal &, no entities (see renderCollectionsDialog)
 			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
 				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
-				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
+				. '<i class="ml-vicon ml-vicon-sliders" aria-hidden="true"></i></a></li>';
 		}
 
 		// Add ("New") button — opens the name-dialog. Server-side it's hidden
@@ -7294,7 +7294,7 @@ class ProcessImageLibrary extends Process {
 			$out .= '<a class="ml-columns-toggle"'
 				. ' title="' . $colsLabel . '"'
 				. ' aria-label="' . $colsLabel . '">'
-				. '<i class="fa fa-columns" aria-hidden="true"></i>'
+				. '<i class="ml-vicon ml-vicon-columns" aria-hidden="true"></i>'
 				. '</a>';
 		}
 		$out .= '</div>';
