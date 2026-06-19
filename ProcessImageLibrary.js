@@ -381,6 +381,43 @@
 			}, 30);
 		}
 
+		// Visible, auto-dismissing message anchored to the ROW it concerns —
+		// chiefly a failed replace, which used to fail completely silently (the
+		// only signal went to the hidden aria-live region). Floats next to the
+		// row's thumbnail so the feedback is where the action happened, and
+		// mirrors to announce() so screen-reader users still get it. The
+		// element is absolutely positioned in document space so it scrolls with
+		// the row; left is clamped so a right-edge thumbnail (grid view) can't
+		// push it off-screen. type: 'error' | 'ok'.
+		function rowToast(tr, msg, type) {
+			if (!msg) return;
+			announce(msg);
+			var anchor = (tr && tr.querySelector && tr.querySelector('.ml-cell-thumb')) || tr;
+			if (!anchor || !anchor.getBoundingClientRect) return;
+			var rect = anchor.getBoundingClientRect();
+			var t = document.createElement('div');
+			t.className = 'ml-row-toast ' + (type === 'error' ? 'ml-row-toast-error' : 'ml-row-toast-ok');
+			t.textContent = msg;
+			document.body.appendChild(t);
+			// Use the free space between the thumbnail and the right edge of the
+			// results area: width grows to fit the message on one line where the
+			// row allows (the table), and only wraps once it hits that bound —
+			// rather than a fixed narrow cap. left is pulled in if the available
+			// band is too small (a right-edge grid thumbnail) so it stays on-screen.
+			var boundsRight = results ? results.getBoundingClientRect().right : document.documentElement.clientWidth;
+			var gap = 8, margin = 12, minW = 160;
+			var avail = Math.max(minW, boundsRight - rect.right - gap - margin);
+			var left  = window.scrollX + Math.min(rect.right + gap, boundsRight - margin - avail);
+			t.style.maxWidth = avail + 'px';
+			t.style.top  = (window.scrollY + rect.top + rect.height / 2) + 'px';
+			t.style.left = left + 'px';
+			requestAnimationFrame(function () { t.classList.add('ml-row-toast-show'); });
+			setTimeout(function () {
+				t.classList.remove('ml-row-toast-show');
+				setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 250);
+			}, type === 'error' ? 6000 : 2500);
+		}
+
 		// Column header text for the cell, used as the popup dialog's
 		// label. Falls back to the raw subfield name if the <th> isn't
 		// findable (defensive — shouldn't happen with the current table).
@@ -2048,6 +2085,23 @@
 			return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
 		}
 
+		// jpg/jpeg and tif/tiff are the same format — Replace writes the bytes
+		// onto the original filename either way, so treat them as equivalent
+		// (server mirrors this) instead of rejecting a .jpeg over a .jpg.
+		function normExt(e) {
+			if (e === 'jpeg') return 'jpg';
+			if (e === 'tiff') return 'tif';
+			return e;
+		}
+		// File-dialog filter: offer the equivalent extensions, not just the
+		// exact one, so the user can actually pick a .jpeg to replace a .jpg.
+		function acceptFor(ext) {
+			var n = normExt(ext);
+			if (n === 'jpg') return '.jpg,.jpeg';
+			if (n === 'tif') return '.tif,.tiff';
+			return ext ? '.' + ext : '';
+		}
+
 		function replaceImage(tr, file) {
 			if (!config.replaceUrl || !tr || !file) return;
 			var pageId = tr.getAttribute('data-page-id');
@@ -2056,11 +2110,13 @@
 			if (!pageId || !field || !basename) return;
 
 			// Client-side extension guard — server enforces too, but
-			// failing fast saves an upload round trip.
-			if (rowExt(tr) !== fileExt(file)) {
-				announce(
+			// failing fast saves an upload round trip. jpg/jpeg (and tif/tiff)
+			// count as a match.
+			if (normExt(rowExt(tr)) !== normExt(fileExt(file))) {
+				rowToast(tr,
 					(labels.error || 'Replace failed') + ': '
-					+ 'Extension mismatch (' + rowExt(tr) + ' vs ' + fileExt(file) + ')'
+					+ 'Extension mismatch (' + rowExt(tr) + ' vs ' + fileExt(file) + ')',
+					'error'
 				);
 				return;
 			}
@@ -2076,7 +2132,7 @@
 				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
 			}).then(function (data) {
 				if (!data || !data.ok) {
-					announce((labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''));
+					rowToast(tr, (labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''), 'error');
 					return;
 				}
 				// Use the server-resolved thumb URL directly — it points
@@ -2100,9 +2156,9 @@
 				patch('size',       data.filesizeFormatted);
 				patch('modified',   data.modifiedFormatted);
 				patch('variations', data.variationsCount);
-				announce(labels.saved || 'Saved');
+				rowToast(tr, labels.saved || 'Saved', 'ok');
 			}).catch(function (err) {
-				announce((labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'));
+				rowToast(tr, (labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'), 'error');
 			}).finally(function () {
 				tr.classList.remove('ml-row-uploading');
 			});
@@ -2140,7 +2196,7 @@
 			// row's existing file. The user can still override but it
 			// reduces accidental wrong-format picks.
 			var ext = rowExt(tr);
-			replaceFileInput.accept = ext ? '.' + ext : '';
+			replaceFileInput.accept = acceptFor(ext);
 			replaceFileInput._mlRow = tr;
 			replaceFileInput.click();
 		});
@@ -2203,7 +2259,7 @@
 				tr.classList.remove('ml-row-drop-target');
 				if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
 				if (e.dataTransfer.files.length > 1) {
-					announce((labels.error || 'Replace failed') + ': only one file at a time');
+					rowToast(tr, (labels.error || 'Replace failed') + ': only one file at a time', 'error');
 					return;
 				}
 				replaceImage(tr, e.dataTransfer.files[0]);

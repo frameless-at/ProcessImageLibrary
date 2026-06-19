@@ -1765,6 +1765,33 @@ textarea.ml-langtabs-pane {
 	border: 0;
 }
 
+/* Row-anchored feedback — floats next to the affected row's thumbnail so the
+   message appears where the action happened (chiefly a failed replace, which
+   previously gave no visible feedback at all). Absolutely positioned in
+   document space (JS sets top/left from the thumbnail's rect) so it scrolls
+   with the row; vertically centred on the thumbnail via translateY. */
+.ml-row-toast {
+	position: absolute;
+	z-index: 99999;
+	transform: translateY(-50%) translateX(6px);
+	/* max-width is set in JS to the free space beside the row's thumbnail. */
+	padding: 0.4rem 0.65rem;
+	border-radius: 4px;
+	color: #fff;
+	font-size: 0.85rem;
+	line-height: 1.3;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+	opacity: 0;
+	transition: opacity 0.2s ease, transform 0.2s ease;
+	pointer-events: none;
+}
+.ml-row-toast-show {
+	opacity: 1;
+	transform: translateY(-50%) translateX(0);
+}
+.ml-row-toast-ok    { background: var(--ml-confirm, #2a8a2a); }
+.ml-row-toast-error { background: var(--ml-danger, #c33); }
+
 /* Editable cells advertise themselves as buttons for keyboard
    users — show a focus ring so the active cell is obvious. */
 
