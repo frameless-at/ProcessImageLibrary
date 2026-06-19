@@ -2863,11 +2863,29 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Original file not found on disk');
 		}
 
-		// move_uploaded_file (vs rename) keeps PHP's safe-upload check
-		// intact — refuses tmp paths that aren't from a real upload.
-		if (!@move_uploaded_file($tmpPath, $targetPath)) {
+		// Land the upload on a temp name in the target's OWN directory, then
+		// atomically rename it into place — do NOT move_uploaded_file()
+		// straight onto $targetPath. When PHP's upload tmp dir sits on a
+		// different filesystem than the assets dir (common in containers / a
+		// separate /tmp mount), a direct move can't rename across filesystems
+		// and falls back to copying bytes INTO the existing file, which needs
+		// that file itself to be writable by the web user — and fails
+		// ("Could not write…") when the original was deployed with a different
+		// owner or mode 644. Moving to a fresh temp name needs only DIRECTORY
+		// write (which uploads already rely on), and rename() over an existing
+		// same-filesystem path is an atomic directory-entry swap unaffected by
+		// the old file's own permissions. move_uploaded_file keeps PHP's
+		// safe-upload check intact (refuses tmp paths that aren't real uploads).
+		$files   = $this->wire('files');
+		$tmpDest = $targetPath . '.mlupload';
+		if (!@move_uploaded_file($tmpPath, $tmpDest)) {
 			return $this->jsonError('Could not write replacement file');
 		}
+		if (!@rename($tmpDest, $targetPath)) {
+			@unlink($tmpDest);
+			return $this->jsonError('Could not write replacement file');
+		}
+		$files->chmod($targetPath);
 
 		$page->of(false);
 		try {
