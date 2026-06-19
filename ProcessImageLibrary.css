@@ -853,7 +853,7 @@ textarea.ml-cell-input {
 /* Fallback before JS hydrates: CSS multi-column — still no crop, still
    full width, just column-major order. */
 .ml-masonry:not([data-cols]) {
-	column-width: calc(220px * var(--ml-thumb-scale, 1));
+	column-width: calc(150px * var(--ml-thumb-scale, 1));
 	column-gap: var(--ml-gap);
 }
 .ml-masonry:not([data-cols]) > .ml-card {
