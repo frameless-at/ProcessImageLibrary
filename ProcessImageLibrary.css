@@ -805,8 +805,6 @@ textarea.ml-cell-input {
 }
 .ml-view-btn .fa {
 	display: block;
-}
-.ml-view-btn .fa-table {
 	font-size: 20px;
 }
 .ml-view-btn:hover,
@@ -887,6 +885,34 @@ textarea.ml-cell-input {
 	outline-offset: -2px;
 }
 
+/* Grid view — uniform SQUARE tiles in a plain CSS grid, mirroring
+   ProcessWire's native "grid" file view. No JS column-packing (that's the
+   masonry path): a single auto-fill grid whose cell size tracks the
+   thumbnail-size slider via --ml-thumb-scale. Each thumb is cropped to a
+   square with object-fit: cover. The .ml-card tile markup is shared with
+   masonry; only the wrapper + these overrides differ. */
+.ml-grid {
+	--ml-grid-cell: calc(120px * var(--ml-thumb-scale, 1));
+	--ml-gap: calc(10px * var(--ml-thumb-scale, 1));
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(var(--ml-grid-cell), 1fr));
+	gap: var(--ml-gap);
+	margin: 1.5rem 0 1.75rem;
+}
+.ml-grid .ml-card .ml-cell-thumb {
+	display: block;
+	width: 100%;
+	aspect-ratio: 1 / 1;
+}
+.ml-grid .ml-card .ml-cell-thumb img,
+.ml-grid .ml-card .ml-cell-thumb img.ml-thumb-crop {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	max-width: none;
+	max-height: none;
+}
+
 /* Pure-integer count columns (Variations, Used in) are centre-aligned —
    header and cells — so single-digit counts read consistently down the
    column instead of drifting to an edge. */
@@ -936,6 +962,10 @@ textarea.ml-cell-input {
 	   gets its column count from layoutGallery in JS.) */
 	.ml-masonry:not([data-cols]) {
 		column-width: calc(88px * var(--ml-thumb-scale, 1));
+	}
+	/* Smaller square cells on phones so several tiles fit per row. */
+	.ml-grid {
+		--ml-grid-cell: calc(88px * var(--ml-thumb-scale, 1));
 	}
 	/* Table view keeps the small inline thumbnail cap. */
 	.ml-table .ml-cell-thumb img {
