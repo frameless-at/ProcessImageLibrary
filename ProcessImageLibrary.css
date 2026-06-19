@@ -1754,6 +1754,39 @@ textarea.ml-langtabs-pane {
 	border: 0;
 }
 
+/* Visible toast notifications — bottom-right, auto-dismissing. Used where an
+   action's result isn't otherwise on screen (a failed replace especially,
+   which previously gave no visible feedback at all). */
+.ml-toasts {
+	position: fixed;
+	bottom: 1rem;
+	right: 1rem;
+	z-index: 99999;
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+	pointer-events: none;
+}
+.ml-toast {
+	pointer-events: auto;
+	max-width: 360px;
+	padding: 0.6rem 0.9rem;
+	border-radius: 4px;
+	color: #fff;
+	font-size: 0.9rem;
+	line-height: 1.35;
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25);
+	opacity: 0;
+	transform: translateY(8px);
+	transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.ml-toast-show {
+	opacity: 1;
+	transform: none;
+}
+.ml-toast-ok    { background: var(--ml-confirm, #2a8a2a); }
+.ml-toast-error { background: var(--ml-danger, #c33); }
+
 /* Editable cells advertise themselves as buttons for keyboard
    users — show a focus ring so the active cell is obvious. */
 

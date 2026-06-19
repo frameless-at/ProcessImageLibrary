@@ -2808,13 +2808,17 @@ class ProcessImageLibrary extends Process {
 
 		// Extension match enforcement — Replace preserves the basename
 		// (and therefore the URL); changing the extension would break
-		// every reference that points at the old URL.
+		// every reference that points at the old URL. jpg/jpeg and tif/tiff
+		// are the SAME format though (the bytes land on the original filename
+		// either way), so normalise those equivalences rather than rejecting
+		// a .jpeg over a .jpg. The client mirrors this normalisation.
+		$equivExt = ['jpeg' => 'jpg', 'tiff' => 'tif'];
 		$oldExt = strtolower(pathinfo($basename, PATHINFO_EXTENSION));
 		$newExt = strtolower(pathinfo($uploadName, PATHINFO_EXTENSION));
 		if ($newExt === '' || $oldExt === '') {
 			return $this->jsonError('Both files must have an extension');
 		}
-		if ($oldExt !== $newExt) {
+		if (($equivExt[$oldExt] ?? $oldExt) !== ($equivExt[$newExt] ?? $newExt)) {
 			return $this->jsonError(sprintf(
 				'Extension mismatch: existing is .%s, upload is .%s. Replace keeps the original format.',
 				$oldExt, $newExt

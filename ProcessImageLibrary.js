@@ -381,6 +381,31 @@
 			}, 30);
 		}
 
+		// Visible, auto-dismissing toast for actions whose result isn't
+		// otherwise reflected on screen — chiefly a failed replace, which used
+		// to fail completely silently (the only signal went to the hidden
+		// aria-live region). Always mirrors the message to announce() too, so
+		// screen-reader users still get it in one call. type: 'error' | 'ok'.
+		var toastWrap = null;
+		function toast(msg, type) {
+			if (!msg) return;
+			announce(msg);
+			if (!toastWrap) {
+				toastWrap = document.createElement('div');
+				toastWrap.className = 'ml-toasts';
+				document.body.appendChild(toastWrap);
+			}
+			var t = document.createElement('div');
+			t.className = 'ml-toast ' + (type === 'error' ? 'ml-toast-error' : 'ml-toast-ok');
+			t.textContent = msg;
+			toastWrap.appendChild(t);
+			requestAnimationFrame(function () { t.classList.add('ml-toast-show'); });
+			setTimeout(function () {
+				t.classList.remove('ml-toast-show');
+				setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 300);
+			}, type === 'error' ? 6000 : 2500);
+		}
+
 		// Column header text for the cell, used as the popup dialog's
 		// label. Falls back to the raw subfield name if the <th> isn't
 		// findable (defensive — shouldn't happen with the current table).
@@ -2048,6 +2073,23 @@
 			return dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
 		}
 
+		// jpg/jpeg and tif/tiff are the same format — Replace writes the bytes
+		// onto the original filename either way, so treat them as equivalent
+		// (server mirrors this) instead of rejecting a .jpeg over a .jpg.
+		function normExt(e) {
+			if (e === 'jpeg') return 'jpg';
+			if (e === 'tiff') return 'tif';
+			return e;
+		}
+		// File-dialog filter: offer the equivalent extensions, not just the
+		// exact one, so the user can actually pick a .jpeg to replace a .jpg.
+		function acceptFor(ext) {
+			var n = normExt(ext);
+			if (n === 'jpg') return '.jpg,.jpeg';
+			if (n === 'tif') return '.tif,.tiff';
+			return ext ? '.' + ext : '';
+		}
+
 		function replaceImage(tr, file) {
 			if (!config.replaceUrl || !tr || !file) return;
 			var pageId = tr.getAttribute('data-page-id');
@@ -2056,11 +2098,13 @@
 			if (!pageId || !field || !basename) return;
 
 			// Client-side extension guard — server enforces too, but
-			// failing fast saves an upload round trip.
-			if (rowExt(tr) !== fileExt(file)) {
-				announce(
+			// failing fast saves an upload round trip. jpg/jpeg (and tif/tiff)
+			// count as a match.
+			if (normExt(rowExt(tr)) !== normExt(fileExt(file))) {
+				toast(
 					(labels.error || 'Replace failed') + ': '
-					+ 'Extension mismatch (' + rowExt(tr) + ' vs ' + fileExt(file) + ')'
+					+ 'Extension mismatch (' + rowExt(tr) + ' vs ' + fileExt(file) + ')',
+					'error'
 				);
 				return;
 			}
@@ -2076,7 +2120,7 @@
 				return res.json().catch(function () { return { ok: false, error: 'HTTP ' + res.status }; });
 			}).then(function (data) {
 				if (!data || !data.ok) {
-					announce((labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''));
+					toast((labels.error || 'Replace failed') + (data && data.error ? ': ' + data.error : ''), 'error');
 					return;
 				}
 				// Use the server-resolved thumb URL directly — it points
@@ -2100,9 +2144,9 @@
 				patch('size',       data.filesizeFormatted);
 				patch('modified',   data.modifiedFormatted);
 				patch('variations', data.variationsCount);
-				announce(labels.saved || 'Saved');
+				toast(labels.saved || 'Saved', 'ok');
 			}).catch(function (err) {
-				announce((labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'));
+				toast((labels.error || 'Replace failed') + ': ' + (err && err.message ? err.message : 'network error'), 'error');
 			}).finally(function () {
 				tr.classList.remove('ml-row-uploading');
 			});
@@ -2140,7 +2184,7 @@
 			// row's existing file. The user can still override but it
 			// reduces accidental wrong-format picks.
 			var ext = rowExt(tr);
-			replaceFileInput.accept = ext ? '.' + ext : '';
+			replaceFileInput.accept = acceptFor(ext);
 			replaceFileInput._mlRow = tr;
 			replaceFileInput.click();
 		});
@@ -2203,7 +2247,7 @@
 				tr.classList.remove('ml-row-drop-target');
 				if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
 				if (e.dataTransfer.files.length > 1) {
-					announce((labels.error || 'Replace failed') + ': only one file at a time');
+					toast((labels.error || 'Replace failed') + ': only one file at a time', 'error');
 					return;
 				}
 				replaceImage(tr, e.dataTransfer.files[0]);
