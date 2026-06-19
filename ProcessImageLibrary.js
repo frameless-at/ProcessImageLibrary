@@ -3676,11 +3676,14 @@
 		function galleryColumnCount(masonry) {
 			var w = masonry.clientWidth || 0;
 			if (w <= 0) return 1;
-			// Target column width: the 220px design size at zoom 1, with a
+			// Target column width: the 150px design size at zoom 1, with a
 			// smaller base on phones / tablets so narrow screens still show
 			// several columns. Scaled live by the slider (bigger zoom →
-			// wider target → fewer, larger columns).
-			var base = w <= 640 ? 88 : (w <= 1024 ? 132 : 220);
+			// wider target → fewer, larger columns). 150 (not the old 220)
+			// keeps masonry tiles closer to the grid view's 120px cell so the
+			// views don't jump in scale, while leaving room for the natural-
+			// ratio variety masonry is for.
+			var base = w <= 640 ? 88 : (w <= 1024 ? 132 : 150);
 			var gap = 10;
 			var n = Math.floor((w + gap) / (base * thumbScale + gap));
 			return Math.max(1, n);
