@@ -7028,97 +7028,7 @@ class ProcessImageLibrary extends Process {
 
 			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
-				$colAttr = ' data-col="custom:' . $san->entities($name) . '"';
-				// Type-class lives on every custom cell (NA + editable
-				// alike) so column-level width rules apply uniformly
-				// regardless of whether a given row has that subfield.
-				// Keyed by Inputfield type, not by field name, so the
-				// CSS scales to new custom subfields without per-name
-				// rules.
-				$inputType = $customInputTypes[$name] ?? 'text';
-				$typeClass = 'ml-cell-' . $san->entities($inputType);
-				// When the customCols list is the union across image
-				// fields (no field filter), some rows won't host every
-				// listed subfield — render those as visually disabled
-				// instead of editable so a click can't trigger an editor
-				// for a field the server would reject anyway.
-				if (!in_array($name, $rowCustoms, true)) {
-					$out .= '<td class="ml-cell-na ' . $typeClass . '"' . $colAttr . ' title="'
-						. $san->entities(sprintf(
-							$this->_('%1$s is not configured on %2$s'),
-							$name,
-							(string) $row['fieldName']
-						)) . '">—</td>';
-					continue;
-				}
-				$raw = $row['custom'][$name] ?? '';
-				$val = $this->normalizeDescription($raw);
-				// Page-reference fields render PW's configured inputfield
-				// (PageAutocomplete / PageListSelect / ASMSelect / …) in
-				// the popup — JS fetches the rendered HTML from
-				// ___executeWidget, injects it, fires the 'reloaded' DOM
-				// event so each inputfield's own JS initialises on the
-				// new nodes. No more inline checkbox-list / multi-select.
-				$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select', 'page'], true);
-				if (in_array($inputType, ['text', 'textarea'], true)) {
-					// Inline-editable prose cell.
-					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
-					)));
-					// Only textarea-backed customs get the clamp box; single-
-					// line text customs are short and stay a plain text node.
-					$customInner = $inputType === 'textarea'
-						? $this->clampCell((string) $val)
-						: $san->entities((string) $val);
-					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
-						. ' data-subfield="' . $san->entities($name) . '"'
-						. ' data-input="' . $san->entities($inputType) . '"'
-						. $this->buildLangAttrs($raw) . '>'
-						. $customInner . '</td>';
-				} elseif ($inlineTyped && !empty($row['pageEditUrl'])) {
-					// Inline-editable typed cell. Display shows the typed
-					// value (glyph / date / label); data-value carries
-					// the editor-RAW value. select + date carry their
-					// type-specific config attrs. page-ref defers the
-					// inputfield render to ___executeWidget; the cell
-					// just needs the rawVal for change-detection.
-					$rawVal = (string) ($row['customRaw'][$name] ?? '');
-					$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
-					if ($inputType === 'select') {
-						$typedExtra .= " data-options='" . $san->entities(
-							json_encode($this->getCustomOptions($name), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-						) . "'";
-						$sf = $this->wire('fields')->get($name);
-						if ($sf instanceof Field && !$this->isSingleValueInput($sf)) {
-							$typedExtra .= ' data-multiple="1"';
-						}
-					} elseif ($inputType === 'date') {
-						$df = $this->wire('fields')->get($name);
-						if ($df instanceof Field && $this->dateHasTime($df)) $typedExtra .= ' data-datetime="1"';
-					}
-					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
-					)));
-					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
-						. ' data-subfield="' . $san->entities($name) . '"'
-						. ' data-input="' . $san->entities($inputType) . '"' . $typedExtra . '>'
-						. $san->entities((string) $val) . '</td>';
-				} elseif (!empty($row['pageEditUrl'])) {
-					// Only page-refs whose selectable set can't be a bounded
-					// inline select (autocomplete / huge / custom find code)
-					// fall back to the native per-image editor.
-					$nativeAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-						$this->_('Edit %1$s of %2$s in the image editor'), $name, (string) $row['basename']
-					)));
-					$out .= '<td class="ml-cell-native ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . ' role="button" tabindex="0"' . $nativeAria
-						. ' data-subfield="' . $san->entities($name) . '"'
-						. ' data-input="' . $san->entities($inputType) . '">'
-						. $san->entities((string) $val) . '</td>';
-				} else {
-					// Typed subfield on a non-editable page → display only.
-					$out .= '<td class="' . $typeClass . '"' . $colAttr . '>'
-						. $san->entities((string) $val) . '</td>';
-				}
+				$out .= $this->renderCustomCell($name, $row, $rowCustoms, $customInputTypes, $editAttrs, $editA11y);
 			}
 
 			$out .= '</tr>';
@@ -7126,6 +7036,106 @@ class ProcessImageLibrary extends Process {
 
 		$out .= '</tbody></table></div>';
 		return $out;
+	}
+
+	/**
+	 * Render one custom-subfield <td> for a row. Branches: text/textarea inline-
+	 * editable, other typed inputs inline-editable (on editable pages), page-ref
+	 * fallback to the native editor, else display-only. A subfield the row's field
+	 * doesn't declare renders as a disabled N/A cell.
+	 */
+	protected function renderCustomCell(string $name, array $row, array $rowCustoms, array $customInputTypes, string $editAttrs, string $editA11y): string {
+		$san = $this->wire('sanitizer');
+		$colAttr = ' data-col="custom:' . $san->entities($name) . '"';
+		// Type-class lives on every custom cell (NA + editable
+		// alike) so column-level width rules apply uniformly
+		// regardless of whether a given row has that subfield.
+		// Keyed by Inputfield type, not by field name, so the
+		// CSS scales to new custom subfields without per-name
+		// rules.
+		$inputType = $customInputTypes[$name] ?? 'text';
+		$typeClass = 'ml-cell-' . $san->entities($inputType);
+		// When the customCols list is the union across image
+		// fields (no field filter), some rows won't host every
+		// listed subfield — render those as visually disabled
+		// instead of editable so a click can't trigger an editor
+		// for a field the server would reject anyway.
+		if (!in_array($name, $rowCustoms, true)) {
+			return '<td class="ml-cell-na ' . $typeClass . '"' . $colAttr . ' title="'
+				. $san->entities(sprintf(
+					$this->_('%1$s is not configured on %2$s'),
+					$name,
+					(string) $row['fieldName']
+				)) . '">—</td>';
+		}
+		$raw = $row['custom'][$name] ?? '';
+		$val = $this->normalizeDescription($raw);
+		// Page-reference fields render PW's configured inputfield
+		// (PageAutocomplete / PageListSelect / ASMSelect / …) in
+		// the popup — JS fetches the rendered HTML from
+		// ___executeWidget, injects it, fires the 'reloaded' DOM
+		// event so each inputfield's own JS initialises on the
+		// new nodes. No more inline checkbox-list / multi-select.
+		$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select', 'page'], true);
+		if (in_array($inputType, ['text', 'textarea'], true)) {
+			// Inline-editable prose cell.
+			$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+			)));
+			// Only textarea-backed customs get the clamp box; single-
+			// line text customs are short and stay a plain text node.
+			$customInner = $inputType === 'textarea'
+				? $this->clampCell((string) $val)
+				: $san->entities((string) $val);
+			return '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+				. ' data-subfield="' . $san->entities($name) . '"'
+				. ' data-input="' . $san->entities($inputType) . '"'
+				. $this->buildLangAttrs($raw) . '>'
+				. $customInner . '</td>';
+		} elseif ($inlineTyped && !empty($row['pageEditUrl'])) {
+			// Inline-editable typed cell. Display shows the typed
+			// value (glyph / date / label); data-value carries
+			// the editor-RAW value. select + date carry their
+			// type-specific config attrs. page-ref defers the
+			// inputfield render to ___executeWidget; the cell
+			// just needs the rawVal for change-detection.
+			$rawVal = (string) ($row['customRaw'][$name] ?? '');
+			$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
+			if ($inputType === 'select') {
+				$typedExtra .= " data-options='" . $san->entities(
+					json_encode($this->getCustomOptions($name), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+				) . "'";
+				$sf = $this->wire('fields')->get($name);
+				if ($sf instanceof Field && !$this->isSingleValueInput($sf)) {
+					$typedExtra .= ' data-multiple="1"';
+				}
+			} elseif ($inputType === 'date') {
+				$df = $this->wire('fields')->get($name);
+				if ($df instanceof Field && $this->dateHasTime($df)) $typedExtra .= ' data-datetime="1"';
+			}
+			$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+			)));
+			return '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+				. ' data-subfield="' . $san->entities($name) . '"'
+				. ' data-input="' . $san->entities($inputType) . '"' . $typedExtra . '>'
+				. $san->entities((string) $val) . '</td>';
+		} elseif (!empty($row['pageEditUrl'])) {
+			// Only page-refs whose selectable set can't be a bounded
+			// inline select (autocomplete / huge / custom find code)
+			// fall back to the native per-image editor.
+			$nativeAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Edit %1$s of %2$s in the image editor'), $name, (string) $row['basename']
+			)));
+			return '<td class="ml-cell-native ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . ' role="button" tabindex="0"' . $nativeAria
+				. ' data-subfield="' . $san->entities($name) . '"'
+				. ' data-input="' . $san->entities($inputType) . '">'
+				. $san->entities((string) $val) . '</td>';
+		} else {
+			// Typed subfield on a non-editable page → display only.
+			return '<td class="' . $typeClass . '"' . $colAttr . '>'
+				. $san->entities((string) $val) . '</td>';
+		}
 	}
 
 	/**
