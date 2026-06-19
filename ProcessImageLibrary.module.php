@@ -6067,6 +6067,10 @@ class ProcessImageLibrary extends Process {
 		$cssVer  = @filemtime($baseDir . 'ProcessImageLibrary.css') ?: $version;
 		$jsVer   = @filemtime($baseDir . 'ProcessImageLibrary.js')  ?: $version;
 		$config->styles->add($baseUrl . 'ProcessImageLibrary.css?v=' . $cssVer);
+		// The pure tree model must load BEFORE the main script, which aliases
+		// window.MLCollectionsModel at IIFE-init time (see collections-model.js).
+		$modelVer = @filemtime($baseDir . 'assets/collections-model.js') ?: $version;
+		$config->scripts->add($baseUrl . 'assets/collections-model.js?v=' . $modelVer);
 		$config->scripts->add($baseUrl . 'ProcessImageLibrary.js?v=' . $jsVer);
 
 		$imageFields = $this->discoverImageFields();
