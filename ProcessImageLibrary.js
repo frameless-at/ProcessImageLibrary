@@ -1854,17 +1854,27 @@
 		// renders only the one matching file (other Pagefiles in the
 		// field don't even hit thumbnail generation). modal=1 strips
 		// the admin chrome.
+		//
+		// The base is the storage page's own editUrl (data-edit-base),
+		// NOT a hardcoded page/edit/ URL: User pages edit via
+		// access/users/edit/, and page/edit/ redirects them there while
+		// dropping our fields=/ml_focus_hash scope — which rendered the
+		// whole user form instead of the one image field. Fall back to
+		// page/edit/ when the attribute is absent (older cached markup).
 		function openImageEditor(td) {
 			if (!config.adminUrl) return;
 			var pageId    = td.dataset.pageId;
 			var fieldName = td.dataset.field;
 			var basename  = td.dataset.basename || '';
 			var fileHash  = td.dataset.fileHash || '';
+			var editBase  = td.dataset.editBase || '';
 			if (!pageId || !fieldName || !basename || !fileHash) return;
 
-			var url = config.adminUrl + 'page/edit/'
-				+ '?id=' + encodeURIComponent(pageId)
-				+ '&fields=' + encodeURIComponent(fieldName)
+			var base = editBase
+				|| (config.adminUrl + 'page/edit/?id=' + encodeURIComponent(pageId));
+			var sep = base.indexOf('?') !== -1 ? '&' : '?';
+			var url = base + sep
+				+ 'fields=' + encodeURIComponent(fieldName)
 				+ '&modal=1'
 				+ '&ml_focus_hash=' + encodeURIComponent(fileHash);
 
