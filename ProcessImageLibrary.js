@@ -3537,11 +3537,12 @@
 			return null;
 		}
 
-		// Current result layout ('table' | 'masonry'). The server is the
-		// source of truth (it persists ?view= toggles), but saveUserPrefs
+		// Current result layout ('table' | 'masonry' | 'grid'). The server is
+		// the source of truth (it persists ?view= toggles), but saveUserPrefs
 		// does a full overwrite of the prefs blob, so we carry the current
 		// value here and include it in every save to avoid clobbering it.
-		var viewMode = (userPrefs.viewMode === 'masonry') ? 'masonry' : 'table';
+		var viewMode = (userPrefs.viewMode === 'masonry' || userPrefs.viewMode === 'grid')
+			? userPrefs.viewMode : 'table';
 
 		function saveUserPrefs() {
 			if (!config.userPrefsUrl) return;

@@ -90,12 +90,15 @@ class ProcessImageLibrary extends Process {
 	const THUMB_SCALE_DEFAULT = 1.0;
 
 	// Result layout. 'table' is the default data-grid; 'masonry' is a
-	// thumbnail-only gallery (click a tile to open the per-image editor);
-	// 'duplicates' groups byte-identical (and, later, near-identical) copies
-	// into clusters from the fingerprint store. Persisted per-user in
-	// $user->meta alongside the other view prefs.
+	// natural-ratio thumbnail gallery; 'grid' is a uniform square-tile
+	// gallery (both click a tile to open the per-image editor). Mirrors
+	// ProcessWire's own grid / list file views. 'duplicates' groups
+	// byte-identical (and, later, near-identical) copies into clusters from
+	// the fingerprint store. Persisted per-user in $user->meta alongside the
+	// other view prefs.
 	const VIEW_TABLE      = 'table';
 	const VIEW_MASONRY    = 'masonry';
+	const VIEW_GRID       = 'grid';
 
 	// Masonry base column width in px at zoom 1. The gallery is now laid
 	// out client-side (layoutGallery distributes natural-ratio tiles into
@@ -392,12 +395,12 @@ class ProcessImageLibrary extends Process {
 		$user->meta('imageLibraryBmMigrated', 1);
 	}
 
-	/** The whitelist of persisted result-layout modes (table vs masonry).
+	/** The whitelist of persisted result-layout modes (table, masonry, grid).
 	 *  Duplicates is NOT here — it's a transient filtered view (?view=
 	 *  duplicates), entered from the bookmarks bar and left by picking any
 	 *  other tab, never persisted as the user's default layout. */
 	protected function viewModes(): array {
-		return [self::VIEW_TABLE, self::VIEW_MASONRY];
+		return [self::VIEW_TABLE, self::VIEW_MASONRY, self::VIEW_GRID];
 	}
 
 	/**
@@ -1683,7 +1686,7 @@ class ProcessImageLibrary extends Process {
 			$pageSize = self::PICKER_DEFAULT_PAGE_SIZE;
 		}
 
-		if ($this->getViewMode() !== self::VIEW_MASONRY) {
+		if ($this->getViewMode() === self::VIEW_TABLE) {
 			// Table view ALWAYS collapses (contextual) duplicates: every image
 			// shows one row (the head, with the expand toggle); its other
 			// copies become hidden rows revealed on click. Paginate by display
@@ -1699,11 +1702,11 @@ class ProcessImageLibrary extends Process {
 				foreach ($unit as $r) $slice[] = $r;
 			}
 		} else {
-			// Masonry collapses (contextual) duplicates the SAME way the table
-			// does: one tile per image (the cluster head), the "N×" badge marking
-			// the copies — otherwise a duplicated image showed once per copy
-			// (20 unique images rendered as 40 tiles). Paginate by unit so the
-			// count matches the table.
+			// Tile views (masonry / grid) collapse (contextual) duplicates the
+			// SAME way the table does: one tile per image (the cluster head), the
+			// "N×" badge marking the copies — otherwise a duplicated image showed
+			// once per copy (20 unique images rendered as 40 tiles). Paginate by
+			// unit so the count matches the table.
 			$units      = $this->buildDisplayUnits($rows, $keyHash, $ctxCount);
 			$total      = count($units);
 			$totalPages = max(1, (int) ceil($total / $pageSize));
@@ -1727,12 +1730,13 @@ class ProcessImageLibrary extends Process {
 
 		$pager = $this->renderPagination($total, $page, $totalPages, $filters, $sort, $dir, $pageSize);
 
-		// Masonry is a thumbnail-only gallery — no inline-editable cells,
-		// so it skips the tag datalists (autocomplete is an editor-only
-		// concern) and the per-column custom config the table needs.
-		if ($this->getViewMode() === self::VIEW_MASONRY) {
+		// Tile views (masonry / grid) are thumbnail-only galleries — no
+		// inline-editable cells, so they skip the tag datalists (autocomplete
+		// is an editor-only concern) and the per-column custom config the
+		// table needs.
+		if ($this->getViewMode() !== self::VIEW_TABLE) {
 			return $pager
-				. $this->renderMasonry($slice)
+				. $this->renderTiles($slice)
 				. $pager;
 		}
 
@@ -1834,17 +1838,18 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
-	 * Masonry / gallery layout: a CSS-grid of thumbnail tiles packed by
-	 * row span, nothing else. Each tile spans an integer number of fine
-	 * grid rows computed from the image's natural aspect ratio, so tiles
-	 * tile left-to-right (reading order) with no column-flow holes. Each
-	 * editable tile carries the SAME identity attrs + .ml-cell-thumb
-	 * element as a table row, so the existing JS handlers (thumb-click →
-	 * image editor, replace, delete, drag-drop, bulk selection) work
-	 * unchanged via their shared .ml-row / class-based delegation. Tiles
-	 * for non-editable host pages are display-only.
+	 * Thumbnail-tile gallery, shared by the masonry and grid views. The two
+	 * differ only in the wrapper class (and therefore the CSS that lays the
+	 * tiles out): `.ml-masonry` keeps each thumbnail at its natural aspect
+	 * ratio and JS packs the flat tiles into equal columns; `.ml-grid` is a
+	 * uniform square-tile CSS grid (no JS, thumbs cropped square). The tile
+	 * markup is identical for both. Each editable tile carries the SAME
+	 * identity attrs + .ml-cell-thumb element as a table row, so the existing
+	 * JS handlers (thumb-click → image editor, replace, delete, drag-drop,
+	 * bulk selection) work unchanged via their shared .ml-row / class-based
+	 * delegation. Tiles for non-editable host pages are display-only.
 	 */
-	protected function renderMasonry(array $slice): string {
+	protected function renderTiles(array $slice): string {
 		$san = $this->wire('sanitizer');
 
 		if (!$slice) {
@@ -1852,7 +1857,8 @@ class ProcessImageLibrary extends Process {
 				. $san->entities($this->_('No images match the current filters.')) . '</p>';
 		}
 
-		$out = '<div class="ml-masonry">';
+		$wrapClass = $this->getViewMode() === self::VIEW_GRID ? 'ml-grid' : 'ml-masonry';
+		$out = '<div class="' . $wrapClass . '">';
 		foreach ($slice as $row) {
 			$editable = !empty($row['pageEditUrl']);
 
@@ -1991,9 +1997,12 @@ class ProcessImageLibrary extends Process {
 		$viewBase = $this->buildUrl($filters, $page, $sort, $dir, $pageSize);
 		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
 		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
+		// Order + icons mirror ProcessWire's native file-view scheme:
+		// grid (square tiles), masonry (natural ratio), table (data grid).
 		$views = [
-			[self::VIEW_TABLE,   'fa-table',     $this->_('Table view')],
-			[self::VIEW_MASONRY, 'fa-picture-o', $this->_('Masonry view')],
+			[self::VIEW_GRID,    'fa-th',         $this->_('Grid view')],
+			[self::VIEW_MASONRY, 'fa-tasks',      $this->_('Masonry view')],
+			[self::VIEW_TABLE,   'fa-table-list', $this->_('Table view')],
 		];
 		$out = '<span class="ml-view-toggle" role="group" aria-label="'
 			. $san->entities($this->_('Result layout')) . '">';
