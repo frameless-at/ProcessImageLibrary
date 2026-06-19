@@ -1997,15 +1997,15 @@ class ProcessImageLibrary extends Process {
 		$viewBase = $this->buildUrl($filters, $page, $sort, $dir, $pageSize);
 		$viewSep  = (strpos($viewBase, '?') !== false) ? '&' : '?';
 		if ($viewBase === './') { $viewBase = ''; $viewSep = '?'; }
-		// Order + icons mirror ProcessWire's native file-view scheme:
-		// grid (square tiles), masonry (natural ratio), table (data grid).
-		// fa-th-list (not fa-table-list): the FA5 name renders on stable cores
-		// AND maps to table-list as an alias under the FA6 core, so the icon
-		// shows everywhere. fa-th / fa-tasks are aliases in FA6 too.
+		// grid (square tiles) / masonry (natural ratio) / table (data grid).
+		// All three icons are painted from CSS masks bundling the official
+		// FontAwesome 6 glyphs (.ml-vicon-* in our stylesheet), NOT the core
+		// font — so they render identically on every core (stable cores ship
+		// FA4.7, the dev core FA6) instead of mixing FA4.7 and FA6 styles.
 		$views = [
-			[self::VIEW_GRID,    'fa-th',      $this->_('Grid view')],
-			[self::VIEW_MASONRY, 'fa-tasks',   $this->_('Masonry view')],
-			[self::VIEW_TABLE,   'fa-th-list', $this->_('Table view')],
+			[self::VIEW_GRID,    'ml-vicon ml-vicon-grid',    $this->_('Grid view')],
+			[self::VIEW_MASONRY, 'ml-vicon ml-vicon-masonry', $this->_('Masonry view')],
+			[self::VIEW_TABLE,   'ml-vicon ml-vicon-table',   $this->_('Table view')],
 		];
 		$out = '<span class="ml-view-toggle" role="group" aria-label="'
 			. $san->entities($this->_('Result layout')) . '">';
@@ -2017,7 +2017,7 @@ class ProcessImageLibrary extends Process {
 				. ' data-view="' . $mode . '"'
 				. ' title="' . $lbl . '" aria-label="' . $lbl . '"'
 				. ($active ? ' aria-current="true"' : '') . '>'
-				. '<i class="fa ' . $icon . '" aria-hidden="true"></i></a>';
+				. '<i class="' . $icon . '" aria-hidden="true"></i></a>';
 		}
 		$out .= '</span>';
 		return $out;
@@ -6320,7 +6320,7 @@ class ProcessImageLibrary extends Process {
 			$manageTitle = $this->_('Manage bookmarks & collections');   // literal &, no entities (see renderCollectionsDialog)
 			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
 				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
-				. '<i class="fa fa-sliders" aria-hidden="true"></i></a></li>';
+				. '<i class="ml-vicon ml-vicon-sliders" aria-hidden="true"></i></a></li>';
 		}
 
 		// Add ("New") button — opens the name-dialog. Server-side it's hidden
@@ -7294,7 +7294,7 @@ class ProcessImageLibrary extends Process {
 			$out .= '<a class="ml-columns-toggle"'
 				. ' title="' . $colsLabel . '"'
 				. ' aria-label="' . $colsLabel . '">'
-				. '<i class="fa fa-columns" aria-hidden="true"></i>'
+				. '<i class="ml-vicon ml-vicon-columns" aria-hidden="true"></i>'
 				. '</a>';
 		}
 		$out .= '</div>';
