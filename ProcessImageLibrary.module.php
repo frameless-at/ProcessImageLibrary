@@ -1367,58 +1367,9 @@ class ProcessImageLibrary extends Process {
 		$tagFilterPool = $this->flatUsedTags($this->loadRows($filters));
 		$resultsHtml  = $this->renderResultsHtml($filters, $sort, $dir, $requestedPg, $customCols);
 
-		$session   = $this->wire('session');
 		$sanitizer = $this->wire('sanitizer');
-		$thumbDims = $this->getThumbDims();
-		// CSS custom properties carry the configured thumb dims so the
-		// stylesheet's --ml-thumb-w / --ml-thumb-h / --ml-thumb-longer
-		// references reflect the user's settings without inline width
-		// / height per image. The "longer" variable drives keep-ratio
-		// display (proportional, capped to that side), the W / H pair
-		// drives the crop variant (exact box with object-fit: cover).
-		// --ml-thumb-cell-width pins the THUMB column width to the
-		// configured maximum so cells stay uniform regardless of
-		// each image's actual orientation. Keep-ratio mode caps both
-		// axes at longerSide (bounding square); crop mode is exactly
-		// width × height. Without this pin, the table's auto layout
-		// stretches the column to the widest single row.
-		$cellWidth = $thumbDims['keepRatio']
-			? (int) $thumbDims['longerSide']
-			: (int) $thumbDims['width'];
-		// --ml-thumb-scale is the per-user size-slider multiplier on top
-		// of the configured dims; server-rendered here so the initial
-		// paint already reflects the saved scale (no flash), then updated
-		// live by the slider.
-		$rootStyle = sprintf(
-			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;--ml-thumb-cell-width:%dpx;--ml-thumb-scale:%s;',
-			(int) $thumbDims['width'], (int) $thumbDims['height'],
-			(int) $thumbDims['longerSide'], $cellWidth,
-			rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.')
-		);
-		$pickerAttrs = '';
-		if ($this->pickerMode) {
-			$pickerAttrs = sprintf(
-				' data-picker="1" data-target-page="%d" data-target-field="%s"',
-				$this->pickerTargetPage, $sanitizer->entities($this->pickerTargetField)
-			);
-			if ($this->pickerTargetVersion > 0) {
-				$pickerAttrs .= ' data-target-version="' . $this->pickerTargetVersion . '"';
-			}
-			if ($this->pickerInsertMode) $pickerAttrs .= ' data-pick-mode="insert"';
-		}
-		$rootAttrs = sprintf(
-			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-assign-url="%s"'
-			. ' data-cluster-url="%s" data-csrf-name="%s" data-csrf-value="%s"%s style="%s"',
-			$sanitizer->entities($this->wire('page')->url . 'save/'),
-			$sanitizer->entities($this->wire('page')->url . 'data/'),
-			$sanitizer->entities($this->wire('page')->url . 'bulk/'),
-			$sanitizer->entities($this->wire('page')->url . 'assign/'),
-			$sanitizer->entities($this->wire('page')->url . 'cluster-table/'),
-			$sanitizer->entities($session->CSRF->getTokenName()),
-			$sanitizer->entities($session->CSRF->getTokenValue()),
-			$pickerAttrs,
-			$sanitizer->entities($rootStyle)
-		);
+		$rootStyle = $this->buildRootStyleVars();
+		$rootAttrs = $this->buildRootAttrs($rootStyle);
 
 		$out  = '<div class="ml-root' . ($this->pickerMode ? ' ml-root--picker' : '') . '"' . $rootAttrs . '>';
 		// Visually-hidden status region for JS to announce inline-edit
@@ -1484,6 +1435,76 @@ class ProcessImageLibrary extends Process {
 		$out .= '</div>';
 
 		return $out;
+	}
+
+	/**
+	 * Build the root element's CSS custom-property string (--ml-thumb-* dims +
+	 * the per-user size-slider scale), so the initial paint reflects the saved
+	 * thumbnail config without a flash. See the inline notes for each var.
+	 */
+	protected function buildRootStyleVars(): string {
+		$thumbDims = $this->getThumbDims();
+		// CSS custom properties carry the configured thumb dims so the
+		// stylesheet's --ml-thumb-w / --ml-thumb-h / --ml-thumb-longer
+		// references reflect the user's settings without inline width
+		// / height per image. The "longer" variable drives keep-ratio
+		// display (proportional, capped to that side), the W / H pair
+		// drives the crop variant (exact box with object-fit: cover).
+		// --ml-thumb-cell-width pins the THUMB column width to the
+		// configured maximum so cells stay uniform regardless of
+		// each image's actual orientation. Keep-ratio mode caps both
+		// axes at longerSide (bounding square); crop mode is exactly
+		// width × height. Without this pin, the table's auto layout
+		// stretches the column to the widest single row.
+		$cellWidth = $thumbDims['keepRatio']
+			? (int) $thumbDims['longerSide']
+			: (int) $thumbDims['width'];
+		// --ml-thumb-scale is the per-user size-slider multiplier on top
+		// of the configured dims; server-rendered here so the initial
+		// paint already reflects the saved scale (no flash), then updated
+		// live by the slider.
+		$rootStyle = sprintf(
+			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;--ml-thumb-cell-width:%dpx;--ml-thumb-scale:%s;',
+			(int) $thumbDims['width'], (int) $thumbDims['height'],
+			(int) $thumbDims['longerSide'], $cellWidth,
+			rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.')
+		);
+		return $rootStyle;
+	}
+
+	/**
+	 * Build the .ml-root data-* attributes (endpoint URLs, CSRF token, picker
+	 * target, and the style vars) the JS reads to bootstrap. $rootStyle comes
+	 * from buildRootStyleVars().
+	 */
+	protected function buildRootAttrs(string $rootStyle): string {
+		$session = $this->wire('session');
+		$sanitizer = $this->wire('sanitizer');
+		$pickerAttrs = '';
+		if ($this->pickerMode) {
+			$pickerAttrs = sprintf(
+				' data-picker="1" data-target-page="%d" data-target-field="%s"',
+				$this->pickerTargetPage, $sanitizer->entities($this->pickerTargetField)
+			);
+			if ($this->pickerTargetVersion > 0) {
+				$pickerAttrs .= ' data-target-version="' . $this->pickerTargetVersion . '"';
+			}
+			if ($this->pickerInsertMode) $pickerAttrs .= ' data-pick-mode="insert"';
+		}
+		$rootAttrs = sprintf(
+			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-assign-url="%s"'
+			. ' data-cluster-url="%s" data-csrf-name="%s" data-csrf-value="%s"%s style="%s"',
+			$sanitizer->entities($this->wire('page')->url . 'save/'),
+			$sanitizer->entities($this->wire('page')->url . 'data/'),
+			$sanitizer->entities($this->wire('page')->url . 'bulk/'),
+			$sanitizer->entities($this->wire('page')->url . 'assign/'),
+			$sanitizer->entities($this->wire('page')->url . 'cluster-table/'),
+			$sanitizer->entities($session->CSRF->getTokenName()),
+			$sanitizer->entities($session->CSRF->getTokenValue()),
+			$pickerAttrs,
+			$sanitizer->entities($rootStyle)
+		);
+		return $rootAttrs;
 	}
 
 	/**
