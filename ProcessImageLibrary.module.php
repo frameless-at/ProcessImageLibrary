@@ -3985,38 +3985,18 @@ class ProcessImageLibrary extends Process {
 					: $this->resolveRenamePattern((string) $value, $ctx);
 
 				if ($subfield === 'tags') {
-					$tokens = $this->splitTags($itemValue);
-					// Whitelist gate per item: tag whitelist can differ per
-					// field, so we check per item rather than rejecting the
-					// whole batch up front.
-					$tagCfg = $tagsCfg[$fn] ?? ['mode' => 0, 'allowed' => []];
-					if ($tagCfg['mode'] === 2) {
-						$disallowed = array_diff($tokens, $tagCfg['allowed']);
-						if ($disallowed) {
-							$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $disallowed));
-							continue;
-						}
-					} elseif ($tagCfg['mode'] === 3 && $mode !== 'remove') {
-						// Remember newly-entered tags to promote into the field's
-						// predefined list after the batch (so they're offered on
-						// every image, not just this one).
-						foreach ($tokens as $t) $mode3TagTokens[$fn][$t] = true;
+					// Whitelist gate per item: tag config can differ per field,
+					// so resolve per row rather than rejecting the whole batch.
+					$tagCfg   = $tagsCfg[$fn] ?? ['mode' => 0, 'allowed' => []];
+					$resolved = $this->resolveBulkTagValue((string) $img->tags, $itemValue, $mode, $tagCfg);
+					if ($resolved['rejected']) {
+						$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $resolved['rejected']));
+						continue;
 					}
-					if ($mode === 'add') {
-						// Union with the row's existing tags, dedup.
-						$existing = $this->splitImageTags((string) $img->tags);
-						$tokens   = array_values(array_unique(array_merge($existing, $tokens)));
-					} elseif ($mode === 'remove') {
-						// Set difference: drop every token the user
-						// listed from the row's existing tag set. No-op
-						// for rows that don't carry any of them.
-						$existing = $this->splitImageTags((string) $img->tags);
-						$drop     = array_flip($tokens);
-						$tokens   = array_values(array_filter($existing, function ($t) use ($drop) {
-							return !isset($drop[$t]);
-						}));
-					}
-					$itemValue = implode(' ', $tokens);
+					// Promote newly-entered mode-3 tags into the field's
+					// predefined list after the batch (offered on every image).
+					foreach ($resolved['newTags'] as $t) $mode3TagTokens[$fn][$t] = true;
+					$itemValue = $resolved['value'];
 				} elseif ($mode === 'add') {
 					// Add of an empty delta is a no-op — don't append a
 					// trailing space to every selected row.
@@ -4096,6 +4076,41 @@ class ProcessImageLibrary extends Process {
 			'renamed'   => (object) $renamed,
 			'tagsAllowed' => (object) $tagsAllowed,
 		]);
+	}
+
+	/**
+	 * Pure resolver for a bulk tag write on one row: given the row's existing
+	 * tag string, the user's input, the mode (replace / add / remove) and the
+	 * field's tag config, return the final tag-string value, the new tokens to
+	 * promote into a mode-3 predefined list, and any whitelist-rejected tokens
+	 * (mode 2). The caller owns the side effects (fail on rejected, accumulate
+	 * newTags); no DOM / save / page state here.
+	 *
+	 * @param array{mode:int,allowed:array<int,string>} $tagCfg
+	 * @return array{value:string,newTags:array<int,string>,rejected:array<int,string>}
+	 */
+	protected function resolveBulkTagValue(string $existingTags, string $input, string $mode, array $tagCfg): array {
+		$tokens   = $this->splitTags($input);
+		$rejected = [];
+		$newTags  = [];
+		if ($tagCfg['mode'] === 2) {
+			$rejected = array_values(array_diff($tokens, $tagCfg['allowed']));
+		} elseif ($tagCfg['mode'] === 3 && $mode !== 'remove') {
+			$newTags = $tokens;
+		}
+		if ($mode === 'add') {
+			// Union with the row's existing tags, dedup.
+			$existing = $this->splitImageTags($existingTags);
+			$tokens   = array_values(array_unique(array_merge($existing, $tokens)));
+		} elseif ($mode === 'remove') {
+			// Set difference: drop every listed token from the row's set.
+			$existing = $this->splitImageTags($existingTags);
+			$drop     = array_flip($tokens);
+			$tokens   = array_values(array_filter($existing, function ($t) use ($drop) {
+				return !isset($drop[$t]);
+			}));
+		}
+		return ['value' => implode(' ', $tokens), 'newTags' => $newTags, 'rejected' => $rejected];
 	}
 
 	/**
