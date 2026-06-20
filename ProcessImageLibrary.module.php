@@ -2531,40 +2531,10 @@ class ProcessImageLibrary extends Process {
 		// re-fetch reads it. Matches the behavior in executeBulk.
 		$this->wire('cache')->deleteFor($this);
 
-		// Return the value PW actually stored — may differ from input after
-		// sanitization (e.g. tags lowercased, whitespace normalized, etc.).
-		// Multilang values get reduced to the current-user-language string
-		// so the inline cell display matches what the editor sees.
-		$stored = $this->normalizeDescription($img->get($subfield));
-
-		$response = [
-			'ok'    => true,
-			'value' => (string) $stored,
-		];
-		// Mode 3 ("predefined + can input their own"): make any new tag part of
-		// the field's predefined list so it's offered on every other image too.
-		// Hand the updated list back so the client can refresh open cells without
-		// a reload.
-		if ($subfield === 'tags' && ($tagsCfg['mode'] ?? 0) === 3) {
-			$response['tagsAllowed'] = array_values($this->registerFieldTags($fieldName, (string) $stored));
-			$response['field']       = $fieldName;
-		}
-		// Multilang fields: also hand back every language's value so
-		// the client can refresh the cell's data-lang-<id> attrs in
-		// place. Without this the next popup-open reads stale
-		// pre-save attrs and shows the old text in every tab.
-		$langValues = $this->readLangValues($img, $subfield);
-		if ($langValues !== null) {
-			$response['langValues'] = $langValues;
-		}
-		// Match-aware UX: tell the client whether the saved row still
-		// passes the active filter set, so it can fade rows out that
-		// dropped out of scope (e.g. "missing tags" → user adds a tag).
-		$key   = $this->rowKey($pageId, $fieldName, $basename);
-		$match = $this->matchTouchedRows([$key]);
-		$response['stillMatches'] = !in_array($key, $match['vanished'], true);
-		$response['newTotal']     = $match['newTotal'];
-		return $this->jsonResponse($response);
+		$tagsMode = $subfield === 'tags' ? (int) ($tagsCfg['mode'] ?? 0) : 0;
+		return $this->jsonResponse(
+			$this->buildSaveResponse($img, $subfield, $fieldName, $pageId, $basename, $tagsMode)
+		);
 	}
 
 	/**
@@ -2596,6 +2566,47 @@ class ProcessImageLibrary extends Process {
 			'stillMatches' => !in_array($key, $match['vanished'], true),
 			'newTotal'     => $match['newTotal'],
 		]);
+	}
+
+	/**
+	 * Assemble the JSON response payload for a (non-typed) inline save: the
+	 * stored value, plus — when relevant — the refreshed predefined-tag list
+	 * (tags mode 3), every-language values for multilang cells, and the match-
+	 * aware stillMatches / newTotal so the client can fade rows that dropped
+	 * out of the active filter.
+	 *
+	 * @return array<string,mixed>
+	 */
+	protected function buildSaveResponse(Pageimage $img, string $subfield, string $fieldName, int $pageId, string $basename, int $tagsMode): array {
+		// The value PW actually stored — may differ from input after
+		// sanitization (tags lowercased / whitespace normalized, etc.).
+		// Multilang values reduce to the current-user-language string.
+		$stored = $this->normalizeDescription($img->get($subfield));
+
+		$response = [
+			'ok'    => true,
+			'value' => (string) $stored,
+		];
+		// Mode 3 ("predefined + can input their own"): promote any new tag into
+		// the field's predefined list and hand the updated list back so open
+		// cells can refresh without a reload.
+		if ($subfield === 'tags' && $tagsMode === 3) {
+			$response['tagsAllowed'] = array_values($this->registerFieldTags($fieldName, (string) $stored));
+			$response['field']       = $fieldName;
+		}
+		// Multilang fields: hand back every language's value so the client can
+		// refresh the cell's data-lang-<id> attrs in place (else the next popup
+		// reads stale pre-save attrs).
+		$langValues = $this->readLangValues($img, $subfield);
+		if ($langValues !== null) {
+			$response['langValues'] = $langValues;
+		}
+		// Match-aware UX: does the saved row still pass the active filter set?
+		$key   = $this->rowKey($pageId, $fieldName, $basename);
+		$match = $this->matchTouchedRows([$key]);
+		$response['stillMatches'] = !in_array($key, $match['vanished'], true);
+		$response['newTotal']     = $match['newTotal'];
+		return $response;
 	}
 
 	/**
