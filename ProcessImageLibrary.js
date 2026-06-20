@@ -4197,70 +4197,30 @@
 		}
 		// Make `id` a child of `parentId` (cycle-safe, depth-capped). For bookmarks
 		// the parent must be a FOLDER (filter bookmarks can't hold children).
+		// Tree mutators: the pure transform (validation + reorder, depth-capped)
+		// lives in MLCollectionsModel and is unit-tested; here we resolve the
+		// store, run it, and persist only when it actually changed.
+		function nestOpts(kind) {
+			return { canParent: function (item) { return mgrCanParent(kind, item); }, maxDepth: COLL_MAX_DEPTH };
+		}
 		function collNest(kind, id, parentId) {
-			var arr = collStoreArr(kind);
-			var c = collById(arr, id), p = collById(arr, parentId);
-			if (!c || !p || id === parentId) return;
-			if (!mgrCanParent(kind, p)) return;                                          // bookmarks: folders only
-			if (collIsDescendant(arr, parentId, id)) return;                              // no cycle
-			if (collDepth(arr, parentId) + 1 + collHeight(arr, id) > COLL_MAX_DEPTH - 1) return;  // depth cap
-			c.parent = parentId;
-			collPersist(kind);
+			if (MLCollectionsModel.collNest(collStoreArr(kind), id, parentId, nestOpts(kind))) collPersist(kind);
 		}
 		// Indent: become a child of the previous sibling.
 		function collIndent(kind, id) {
-			var arr = collStoreArr(kind);
-			var prev = collPrevSibling(arr, id);
-			if (prev) collNest(kind, id, prev.id);
+			if (MLCollectionsModel.collIndent(collStoreArr(kind), id, nestOpts(kind))) collPersist(kind);
 		}
 		// Outdent: rise one level (become a sibling of the current parent).
 		function collOutdent(kind, id) {
-			var arr = collStoreArr(kind);
-			var c = collById(arr, id);
-			if (!c || (c.parent || '') === '') return;
-			var p = collById(arr, c.parent);
-			c.parent = p ? (p.parent || '') : '';
-			collPersist(kind);
+			if (MLCollectionsModel.collOutdent(collStoreArr(kind), id)) collPersist(kind);
 		}
 		// Reorder: swap with the adjacent sibling (subtrees move together).
 		function collMove(kind, id, dir) {
-			var arr = collStoreArr(kind);
-			var c = collById(arr, id);
-			if (!c) return;
-			var p = c.parent || '';
-			var sibs = arr.filter(function (x) { return (x.parent || '') === p; });
-			var i = sibs.indexOf(c), j = dir === 'up' ? i - 1 : i + 1;
-			if (j < 0 || j >= sibs.length) return;
-			var roots = [], cm = {};
-			arr.forEach(function (x) { var pp = x.parent || ''; (pp === '' ? roots : (cm[pp] = cm[pp] || [])).push(x); });
-			var lst = p === '' ? roots : cm[p];
-			var a = lst.indexOf(c), b = lst.indexOf(sibs[j]);
-			var t = lst[a]; lst[a] = lst[b]; lst[b] = t;
-			var out = [];
-			(function () { function walk(n) { out.push(n); (cm[n.id] || []).forEach(walk); } roots.forEach(walk); })();
-			arr.length = 0; Array.prototype.push.apply(arr, out);
-			collPersist(kind);
+			if (MLCollectionsModel.collMove(collStoreArr(kind), id, dir)) collPersist(kind);
 		}
 		// Drag-place: make `id` a sibling of `targetId`, before / after its subtree.
 		function collPlace(kind, id, targetId, after) {
-			var arr = collStoreArr(kind);
-			var c = collById(arr, id), t = collById(arr, targetId);
-			if (!c || !t || id === targetId) return;
-			if (collIsDescendant(arr, targetId, id)) return;                          // not into own subtree
-			if (collDepth(arr, targetId) + collHeight(arr, id) > COLL_MAX_DEPTH - 1) return;
-			var set = collSubtreeSet(arr, id);
-			var blk = arr.filter(function (x) { return set[x.id]; });
-			var rest = arr.filter(function (x) { return !set[x.id]; });
-			c.parent = t.parent || '';
-			var ti = collIndexOf(rest, targetId);
-			if (ti < 0) { Array.prototype.push.apply(rest, blk); }
-			else {
-				var at = after ? ti + 1 : ti;
-				if (after) { var td = collDepth(rest, targetId); while (at < rest.length && collDepth(rest, rest[at].id) > td) at++; }
-				rest.splice.apply(rest, [at, 0].concat(blk));
-			}
-			arr.length = 0; Array.prototype.push.apply(arr, rest);
-			collPersist(kind);
+			if (MLCollectionsModel.collPlace(collStoreArr(kind), id, targetId, after, { maxDepth: COLL_MAX_DEPTH })) collPersist(kind);
 		}
 
 		function mkCollBtn(act, icon, title) {

@@ -64,5 +64,68 @@ function collPrevSibling(arr, id) {
 	}
 	return null;
 }
-	return { collKey: collKey, collIndexOf: collIndexOf, collById: collById, collChildren: collChildren, collIsParent: collIsParent, collDepth: collDepth, collHeight: collHeight, collIsDescendant: collIsDescendant, collSubtreeSet: collSubtreeSet, collFlatten: collFlatten, collPrevSibling: collPrevSibling };
+// --- Mutators: validate + transform the tree, mutating `arr` in place and
+// returning true iff something changed (so the caller knows to persist). The
+// store / persistence / DOM are the caller's concern. opts.canParent(item)
+// gates whether a target may hold children (bookmarks: folders only);
+// opts.maxDepth caps nesting depth.
+function collNest(arr, id, parentId, opts) {
+	opts = opts || {};
+	var c = collById(arr, id), p = collById(arr, parentId);
+	if (!c || !p || id === parentId) return false;
+	if (opts.canParent && !opts.canParent(p)) return false;
+	if (collIsDescendant(arr, parentId, id)) return false;
+	if (collDepth(arr, parentId) + 1 + collHeight(arr, id) > (opts.maxDepth || Infinity) - 1) return false;
+	c.parent = parentId;
+	return true;
+}
+function collIndent(arr, id, opts) {
+	var prev = collPrevSibling(arr, id);
+	return prev ? collNest(arr, id, prev.id, opts) : false;
+}
+function collOutdent(arr, id) {
+	var c = collById(arr, id);
+	if (!c || (c.parent || '') === '') return false;
+	var p = collById(arr, c.parent);
+	c.parent = p ? (p.parent || '') : '';
+	return true;
+}
+function collMove(arr, id, dir) {
+	var c = collById(arr, id);
+	if (!c) return false;
+	var p = c.parent || '';
+	var sibs = arr.filter(function (x) { return (x.parent || '') === p; });
+	var i = sibs.indexOf(c), j = dir === 'up' ? i - 1 : i + 1;
+	if (j < 0 || j >= sibs.length) return false;
+	var roots = [], cm = {};
+	arr.forEach(function (x) { var pp = x.parent || ''; (pp === '' ? roots : (cm[pp] = cm[pp] || [])).push(x); });
+	var lst = p === '' ? roots : cm[p];
+	var a = lst.indexOf(c), b = lst.indexOf(sibs[j]);
+	var t = lst[a]; lst[a] = lst[b]; lst[b] = t;
+	var out = [];
+	(function () { function walk(n) { out.push(n); (cm[n.id] || []).forEach(walk); } roots.forEach(walk); })();
+	arr.length = 0; Array.prototype.push.apply(arr, out);
+	return true;
+}
+function collPlace(arr, id, targetId, after, opts) {
+	opts = opts || {};
+	var c = collById(arr, id), t = collById(arr, targetId);
+	if (!c || !t || id === targetId) return false;
+	if (collIsDescendant(arr, targetId, id)) return false;
+	if (collDepth(arr, targetId) + collHeight(arr, id) > (opts.maxDepth || Infinity) - 1) return false;
+	var set = collSubtreeSet(arr, id);
+	var blk = arr.filter(function (x) { return set[x.id]; });
+	var rest = arr.filter(function (x) { return !set[x.id]; });
+	c.parent = t.parent || '';
+	var ti = collIndexOf(rest, targetId);
+	if (ti < 0) { Array.prototype.push.apply(rest, blk); }
+	else {
+		var at = after ? ti + 1 : ti;
+		if (after) { var td = collDepth(rest, targetId); while (at < rest.length && collDepth(rest, rest[at].id) > td) at++; }
+		rest.splice.apply(rest, [at, 0].concat(blk));
+	}
+	arr.length = 0; Array.prototype.push.apply(arr, rest);
+	return true;
+}
+	return { collKey: collKey, collIndexOf: collIndexOf, collById: collById, collChildren: collChildren, collIsParent: collIsParent, collDepth: collDepth, collHeight: collHeight, collIsDescendant: collIsDescendant, collSubtreeSet: collSubtreeSet, collFlatten: collFlatten, collPrevSibling: collPrevSibling, collNest: collNest, collIndent: collIndent, collOutdent: collOutdent, collMove: collMove, collPlace: collPlace };
 });

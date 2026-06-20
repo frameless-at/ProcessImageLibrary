@@ -96,3 +96,68 @@ test('collKey', () => {
 	assert.strictEqual(M.collKey('bm', '7'), 'bm:7');
 	assert.strictEqual(M.collKey('coll', 'x'), 'coll:x');
 });
+
+// --- Mutators (mutate arr in place, return changed bool) ---
+
+const D3 = { maxDepth: 3 }; // mirrors COLL_MAX_DEPTH = 3 (levels 0,1,2)
+
+test('collNest: nests a leaf under a root', () => {
+	const arr = [node('a'), node('b')];
+	assert.strictEqual(M.collNest(arr, 'b', 'a', D3), true);
+	assert.strictEqual(M.collById(arr, 'b').parent, 'a');
+});
+
+test('collNest: rejects self, missing nodes, and cycles', () => {
+	const arr = [node('a'), node('b', 'a')];
+	assert.strictEqual(M.collNest(arr, 'a', 'a', D3), false);   // self
+	assert.strictEqual(M.collNest(arr, 'a', 'x', D3), false);   // missing parent
+	assert.strictEqual(M.collNest(arr, 'a', 'b', D3), false);   // a is ancestor of b → cycle
+	assert.strictEqual(M.collById(arr, 'a').parent, '');        // unchanged
+});
+
+test('collNest: enforces depth cap (3 levels)', () => {
+	const arr = [node('a'), node('b', 'a'), node('c')]; // a > b (depth 1)
+	assert.strictEqual(M.collNest(arr, 'c', 'b', D3), true);    // depth 2 ok
+	const arr2 = [node('a'), node('b', 'a'), node('c', 'b'), node('d')]; // a>b>c (c depth 2)
+	assert.strictEqual(M.collNest(arr2, 'd', 'c', D3), false);  // would be depth 3 → rejected
+});
+
+test('collNest: canParent gate (bookmark folders only)', () => {
+	const arr = [node('a'), node('b')];
+	const noChildren = { canParent: () => false, maxDepth: 3 };
+	assert.strictEqual(M.collNest(arr, 'b', 'a', noChildren), false);
+	assert.strictEqual(M.collById(arr, 'b').parent, '');
+});
+
+test('collIndent / collOutdent', () => {
+	const arr = [node('a'), node('a1', 'a'), node('a2', 'a')];
+	assert.strictEqual(M.collIndent(arr, 'a2', D3), true);      // a2 → child of prev sibling a1
+	assert.strictEqual(M.collById(arr, 'a2').parent, 'a1');
+	assert.strictEqual(M.collOutdent(arr, 'a2'), true);         // a2 rises to a1's parent (a)
+	assert.strictEqual(M.collById(arr, 'a2').parent, 'a');
+	assert.strictEqual(M.collOutdent(arr, 'a'), false);         // root can't outdent
+});
+
+test('collIndent: no-op for a first child (no prev sibling)', () => {
+	const arr = [node('a'), node('a1', 'a')];
+	assert.strictEqual(M.collIndent(arr, 'a1', D3), false);
+});
+
+test('collMove: reorders siblings (subtrees move together)', () => {
+	const arr = [node('a'), node('a1', 'a'), node('a1x', 'a1'), node('a2', 'a')];
+	assert.strictEqual(M.collMove(arr, 'a2', 'up'), true);      // swap a2 before a1
+	assert.deepStrictEqual(arr.map(c => c.id), ['a', 'a2', 'a1', 'a1x']);
+	assert.strictEqual(M.collMove(arr, 'a2', 'up'), false);     // already first child → no-op
+});
+
+test('collPlace: moves a subtree to a sibling slot, before/after', () => {
+	const arr = [node('a'), node('a1', 'a'), node('b')];
+	assert.strictEqual(M.collPlace(arr, 'a1', 'b', true, D3), true); // a1 after b at root
+	assert.deepStrictEqual(arr.map(c => c.id), ['a', 'b', 'a1']);
+	assert.strictEqual(M.collById(arr, 'a1').parent, '');
+});
+
+test('collPlace: rejects dropping a node into its own subtree', () => {
+	const arr = [node('a'), node('b', 'a'), node('c', 'b')];
+	assert.strictEqual(M.collPlace(arr, 'a', 'c', false, D3), false); // c is inside a's subtree
+});
