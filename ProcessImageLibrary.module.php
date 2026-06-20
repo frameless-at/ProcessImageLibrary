@@ -2467,28 +2467,7 @@ class ProcessImageLibrary extends Process {
 		// / tag handling applies to these.
 		$customType = $this->getCustomTypes()[$subfield] ?? null;
 		if (in_array($customType, ['checkbox', 'date', 'number', 'select', 'page'], true)) {
-			$field   = $this->wire('fields')->get($subfield);
-			$coerced = $this->coerceCustomValue($page, $field, $customType, $value);
-			try {
-				$img->set($subfield, $coerced);
-				$saved = $page->save($fieldName);
-			} catch (\Throwable $e) {
-				return $this->jsonError('Save error: ' . $e->getMessage());
-			}
-			if (!$saved) {
-				return $this->jsonError('Save returned false — value may not have persisted');
-			}
-			$this->wire('cache')->deleteFor($this);
-
-			$key   = $this->rowKey($pageId, $fieldName, $basename);
-			$match = $this->matchTouchedRows([$key]);
-			return $this->jsonResponse([
-				'ok'           => true,
-				'value'        => (string) $this->readCustomValue($img, $subfield),
-				'rawValue'     => $this->readCustomRaw($img, $subfield),
-				'stillMatches' => !in_array($key, $match['vanished'], true),
-				'newTotal'     => $match['newTotal'],
-			]);
+			return $this->saveTypedCustom($page, $img, $fieldName, $subfield, $customType, $value);
 		}
 
 		// Multilang popup ships a per-language map alongside the
@@ -2586,6 +2565,37 @@ class ProcessImageLibrary extends Process {
 		$response['stillMatches'] = !in_array($key, $match['vanished'], true);
 		$response['newTotal']     = $match['newTotal'];
 		return $this->jsonResponse($response);
+	}
+
+	/**
+	 * Save a typed custom subfield (checkbox / date / number / select / page):
+	 * coerce to the Fieldtype's stored shape, set + save, and return the typed
+	 * display + editor-raw value. No placeholder / multilang / tag handling
+	 * applies to these. Returns the JSON response string.
+	 */
+	protected function saveTypedCustom(Page $page, Pageimage $img, string $fieldName, string $subfield, string $customType, string $value): string {
+		$field   = $this->wire('fields')->get($subfield);
+		$coerced = $this->coerceCustomValue($page, $field, $customType, $value);
+		try {
+			$img->set($subfield, $coerced);
+			$saved = $page->save($fieldName);
+		} catch (\Throwable $e) {
+			return $this->jsonError('Save error: ' . $e->getMessage());
+		}
+		if (!$saved) {
+			return $this->jsonError('Save returned false — value may not have persisted');
+		}
+		$this->wire('cache')->deleteFor($this);
+
+		$key   = $this->rowKey((int) $page->id, $fieldName, (string) $img->basename);
+		$match = $this->matchTouchedRows([$key]);
+		return $this->jsonResponse([
+			'ok'           => true,
+			'value'        => (string) $this->readCustomValue($img, $subfield),
+			'rawValue'     => $this->readCustomRaw($img, $subfield),
+			'stillMatches' => !in_array($key, $match['vanished'], true),
+			'newTotal'     => $match['newTotal'],
+		]);
 	}
 
 	/**
