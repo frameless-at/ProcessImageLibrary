@@ -2777,6 +2777,46 @@
 			openDeleteConfirm(items, function () { deleteItems(items); });
 		});
 
+		// Download button. A single file is a native <a download> and needs no
+		// JS. But when the clicked row is part of a MULTI-selection, the click
+		// instead streams the whole selection as one ZIP (cross-page selections
+		// included — the client can't see off-page URLs, so the server resolves
+		// the item list) — same paintbrush semantics as batch delete.
+		function downloadSelectionZip(items, tr) {
+			if (!config.zipUrl || !items.length) return;
+			rowToast(tr, labels.preparingZip || 'Preparing ZIP…', 'ok');
+			var fd = new FormData();
+			fd.append('items', JSON.stringify(items));
+			postForm(config.zipUrl, fd).then(function (res) {
+				if (!res.ok) throw new Error('HTTP ' + res.status);
+				return res.blob();
+			}).then(function (blob) {
+				var url = URL.createObjectURL(blob);
+				var a = document.createElement('a');
+				a.href = url;
+				a.download = 'images.zip';
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+				setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+			}).catch(function (err) {
+				rowToast(tr, (labels.error || 'Download failed') + ': ' + (err && err.message ? err.message : 'network error'), 'error');
+			});
+		}
+		results && results.addEventListener('click', function (e) {
+			var btn = e.target.closest && e.target.closest('.ml-download-btn');
+			if (!btn) return;
+			var tr = btn.closest('.ml-row');
+			var rowItm = tr && rowItem(tr);
+			if (!rowItm || !rowItm.pageId) return;   // non-editable row → native single download
+			if (selection.size > 1 && selection.has(itemKey(rowItm))) {
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				downloadSelectionZip(selectionItems(), tr);
+			}
+			// else: let the native <a download> fetch the single file
+		});
+
 		// -- AJAX re-render --------------------------------------------
 
 		function replaceFromHref(href) {

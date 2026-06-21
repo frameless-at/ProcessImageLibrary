@@ -3792,6 +3792,108 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Emit a short plain-text error + status and exit. Used by the binary
+	 * download endpoint, which streams a file rather than JSON.
+	 */
+	protected function emitDownloadError(int $status, string $message): void {
+		while (ob_get_level() > 0) ob_end_clean();
+		http_response_code($status);
+		if (!headers_sent()) header('Content-Type: text/plain; charset=utf-8');
+		echo $message;
+		exit;
+	}
+
+	/**
+	 * Pick a collision-free entry name for a zip. Basenames are unique within
+	 * one page/field but can repeat across a multi-page selection, so a second
+	 * "hero.jpg" becomes "hero (2).jpg" rather than silently overwriting.
+	 *
+	 * @param array<string,bool> $used  names already taken, by reference
+	 */
+	protected function uniqueZipEntry(string $basename, array &$used): string {
+		if (!isset($used[$basename])) { $used[$basename] = true; return $basename; }
+		$dot  = strrpos($basename, '.');
+		$stem = $dot === false ? $basename : substr($basename, 0, $dot);
+		$ext  = $dot === false ? '' : substr($basename, $dot);
+		$i = 2;
+		do { $cand = $stem . ' (' . $i . ')' . $ext; $i++; } while (isset($used[$cand]));
+		$used[$cand] = true;
+		return $cand;
+	}
+
+	/**
+	 * Bulk download: stream the selected images as a single ZIP. POSTed the
+	 * same { pageId, fieldName, basename } item list the bulk endpoints use, so
+	 * a cross-page selection is resolved server-side (the client can't see
+	 * off-page file URLs). Read-only — no per-page edit check, only the
+	 * module's image-library-access permission (already enforced on this page)
+	 * plus POST + CSRF. Streams binary, so it does NOT go through beginJsonPost.
+	 */
+	public function ___executeDownloadZip() {
+		$input = $this->wire('input');
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			$this->emitDownloadError(405, 'POST required');
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			$this->emitDownloadError(403, 'Invalid CSRF token');
+		}
+		if (!class_exists('\ZipArchive')) {
+			$this->emitDownloadError(500, 'ZipArchive is not available on this server');
+		}
+
+		$sanitizer = $this->wire('sanitizer');
+		$items = json_decode((string) $input->post('items'), true);
+		if (!is_array($items) || !$items) {
+			$this->emitDownloadError(400, 'No items selected');
+		}
+
+		$imageFields = $this->discoverImageFields();
+		$paths = [];   // entryName => absolute path
+		$used  = [];
+		foreach ($items as $item) {
+			$pid = (int) ($item['pageId'] ?? 0);
+			$fn  = $sanitizer->fieldName((string) ($item['fieldName'] ?? ''));
+			$bn  = basename((string) ($item['basename'] ?? ''));
+			if (!$pid || !$fn || !$bn) continue;
+			if (!in_array($fn, $imageFields, true)) continue;
+			$page = $this->wire('pages')->get($pid);
+			if (!$page->id) continue;
+			$img = $this->resolvePageimage($page, $fn, $bn);
+			if (!$img) continue;
+			$path = (string) $img->filename;
+			if ($path === '' || !is_file($path)) continue;
+			$paths[$this->uniqueZipEntry($bn, $used)] = $path;
+		}
+		if (!$paths) {
+			$this->emitDownloadError(404, 'No downloadable files found');
+		}
+
+		$tmp = (string) @tempnam(sys_get_temp_dir(), 'mlzip');
+		if ($tmp === '') {
+			$this->emitDownloadError(500, 'Could not allocate a temp file');
+		}
+		$zip = new \ZipArchive();
+		if ($zip->open($tmp, \ZipArchive::OVERWRITE) !== true) {
+			@unlink($tmp);
+			$this->emitDownloadError(500, 'Could not create the archive');
+		}
+		foreach ($paths as $entry => $path) {
+			$zip->addFile($path, $entry);
+		}
+		$zip->close();
+
+		while (ob_get_level() > 0) ob_end_clean();
+		if (!headers_sent()) {
+			header('Content-Type: application/zip');
+			header('Content-Length: ' . (string) filesize($tmp));
+			header('Content-Disposition: attachment; filename="images.zip"');
+		}
+		readfile($tmp);
+		@unlink($tmp);
+		exit;
+	}
+
+	/**
 	 * AJAX endpoint: apply one action to a batch of selected images.
 	 *
 	 * Action:
@@ -6123,6 +6225,7 @@ class ProcessImageLibrary extends Process {
 			'renameUrl'  => $this->wire('page')->url . 'rename/',
 			'replaceUrl' => $this->wire('page')->url . 'replace/',
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
+			'zipUrl'     => $this->wire('page')->url . 'download-zip/',
 			'usageUrl'   => $this->wire('page')->url . 'usage/',
 			'usageDetailUrl' => $this->wire('page')->url . 'usage-detail/',
 			'widgetUrl'  => $this->wire('page')->url . 'widget/',
