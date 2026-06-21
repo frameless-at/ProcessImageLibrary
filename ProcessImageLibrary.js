@@ -2811,13 +2811,19 @@
 			if (!btn) return;
 			var tr = btn.closest('.ml-row');
 			var rowItm = tr && rowItem(tr);
-			if (!rowItm || !rowItm.pageId) return;   // non-editable row → native single download
-			if (selection.size > 1 && selection.has(itemKey(rowItm))) {
+			if (!rowItm || !rowItm.pageId) return;        // non-editable row → native single, no selection
+			if (!selection.has(itemKey(rowItm))) return;  // not part of the selection → native single, leave it
+			// The clicked row IS selected → the download consumes the selection.
+			if (selection.size > 1) {
+				// 2+ selected → one ZIP of all; clears the selection on success.
 				e.preventDefault();
 				e.stopImmediatePropagation();
 				downloadSelectionZip(selectionItems(), tr);
+			} else {
+				// Exactly this one selected → native single download; clear it too,
+				// so a selected single behaves the same as a selected batch.
+				clearSelectionConfirm();
 			}
-			// else: let the native <a download> fetch the single file
 		});
 
 		// -- AJAX re-render --------------------------------------------
