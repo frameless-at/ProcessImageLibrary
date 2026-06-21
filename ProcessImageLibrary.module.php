@@ -2016,7 +2016,7 @@ class ProcessImageLibrary extends Process {
 				$deleteLabel  = $san->entities(sprintf($this->_('Delete %s'),  (string) $row['basename']));
 				$out .= '<button type="button" class="ml-replace-btn"'
 					. ' title="' . $replaceLabel . '" aria-label="' . $replaceLabel . '">'
-					. '<i class="fa fa-upload" aria-hidden="true"></i></button>';
+					. '<i class="ml-vicon ml-vicon-rotate" aria-hidden="true"></i></button>';
 				$out .= '<button type="button" class="ml-delete-btn"'
 					. ' title="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
@@ -7308,7 +7308,7 @@ class ProcessImageLibrary extends Process {
 		return '<a class="ml-download-btn" href="' . $san->entities((string) $row['downloadUrl']) . '"'
 			. ' download="' . $san->entities((string) $row['basename']) . '"'
 			. ' title="' . $label . '" aria-label="' . $label . '">'
-			. '<i class="fa fa-download" aria-hidden="true"></i></a>';
+			. '<i class="fa fa-arrow-down" aria-hidden="true"></i></a>';
 	}
 
 	/**
@@ -7383,7 +7383,7 @@ class ProcessImageLibrary extends Process {
 			$out .= '<button type="button" class="ml-replace-btn"'
 				. ' title="' . $replaceLabel . '"'
 				. ' aria-label="' . $replaceLabel . '">'
-				. '<i class="fa fa-upload" aria-hidden="true"></i>'
+				. '<i class="ml-vicon ml-vicon-rotate" aria-hidden="true"></i>'
 				. '</button>';
 			$out .= '<button type="button" class="ml-delete-btn"'
 				. ' title="' . $deleteLabel . '"'
