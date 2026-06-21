@@ -403,11 +403,11 @@
 		// element is absolutely positioned in document space so it scrolls with
 		// the row; left is clamped so a right-edge thumbnail (grid view) can't
 		// push it off-screen. type: 'error' | 'ok'.
-		function rowToast(tr, msg, type) {
-			if (!msg) return;
+		function rowToast(tr, msg, type, sticky) {
+			if (!msg) return function () {};
 			announce(msg);
 			var anchor = (tr && tr.querySelector && tr.querySelector('.ml-cell-thumb')) || tr;
-			if (!anchor || !anchor.getBoundingClientRect) return;
+			if (!anchor || !anchor.getBoundingClientRect) return function () {};
 			var rect = anchor.getBoundingClientRect();
 			var t = document.createElement('div');
 			t.className = 'ml-row-toast ' + (type === 'error' ? 'ml-row-toast-error' : 'ml-row-toast-ok');
@@ -426,10 +426,17 @@
 			t.style.top  = (window.scrollY + rect.top + rect.height / 2) + 'px';
 			t.style.left = left + 'px';
 			requestAnimationFrame(function () { t.classList.add('ml-row-toast-show'); });
-			setTimeout(function () {
+			var dismissed = false;
+			function dismiss() {
+				if (dismissed) return;
+				dismissed = true;
 				t.classList.remove('ml-row-toast-show');
 				setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 250);
-			}, type === 'error' ? 6000 : 2500);
+			}
+			// Sticky toasts (e.g. "Preparing ZIP…") stay until the caller dismisses
+			// them; everything else auto-dismisses. Always return a dismiss handle.
+			if (!sticky) setTimeout(dismiss, type === 'error' ? 6000 : 2500);
+			return dismiss;
 		}
 
 		// Column header text for the cell, used as the popup dialog's
@@ -2784,7 +2791,11 @@
 		// the item list) — same paintbrush semantics as batch delete.
 		function downloadSelectionZip(items, tr) {
 			if (!config.zipUrl || !items.length) return;
-			rowToast(tr, labels.preparingZip || 'Preparing ZIP…', 'ok');
+			// Sticky toast: building the zip server-side (and, on iOS, the OS
+			// "download?" prompt) can lag well past the normal toast lifetime, so
+			// keep it up until the blob is actually in hand — otherwise the toast
+			// vanishes mid-wait and reads as a failure.
+			var dismiss = rowToast(tr, labels.preparingZip || 'Preparing ZIP…', 'ok', true);
 			var fd = new FormData();
 			fd.append('items', JSON.stringify(items));
 			postForm(config.zipUrl, fd).then(function (res) {
@@ -2799,10 +2810,12 @@
 				a.click();
 				a.remove();
 				setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+				dismiss();   // zip delivered → drop the "preparing" toast
 				// Download is a terminal "consume the selection" action (like
 				// assigning to a collection) — clear it once the zip is delivered.
 				clearSelectionConfirm();
 			}).catch(function (err) {
+				dismiss();
 				rowToast(tr, (labels.error || 'Download failed') + ': ' + (err && err.message ? err.message : 'network error'), 'error');
 			});
 		}
