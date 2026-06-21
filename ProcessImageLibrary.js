@@ -2799,6 +2799,9 @@
 				a.click();
 				a.remove();
 				setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+				// Download is a terminal "consume the selection" action (like
+				// assigning to a collection) — clear it once the zip is delivered.
+				clearSelectionConfirm();
 			}).catch(function (err) {
 				rowToast(tr, (labels.error || 'Download failed') + ': ' + (err && err.message ? err.message : 'network error'), 'error');
 			});
