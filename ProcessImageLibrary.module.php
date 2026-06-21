@@ -7196,6 +7196,10 @@ class ProcessImageLibrary extends Process {
 	 */
 	protected function renderDownloadButton(array $row): string {
 		if ($this->pickerMode || empty($row['downloadUrl'])) return '';
+		// Duplicates carry no per-file download: the tile / row represents N
+		// byte-identical copies, so a single "download this one" is ambiguous
+		// (and the masonry dup tile opens the cluster modal instead).
+		if ((int) ($row['dupCount'] ?? 0) >= 2) return '';
 		$san   = $this->wire('sanitizer');
 		$label = $san->entities(sprintf($this->_('Download %s'), (string) $row['basename']));
 		return '<a class="ml-download-btn" href="' . $san->entities((string) $row['downloadUrl']) . '"'
