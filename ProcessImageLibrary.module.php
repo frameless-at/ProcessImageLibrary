@@ -2024,6 +2024,7 @@ class ProcessImageLibrary extends Process {
 			if (!$this->pickerMode) {
 				$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
 			}
+			$out .= $this->renderDownloadButton($row);
 			$out .= '</div>'; // .ml-cell-thumb
 			$out .= '</div>'; // .ml-card
 		}
@@ -5922,6 +5923,7 @@ class ProcessImageLibrary extends Process {
 
 		foreach ($slice as &$row) {
 			$row['thumbUrl']        = '';
+			$row['downloadUrl']     = '';
 			$row['pageUrl']         = '';
 			$row['pageEditUrl']     = '';
 			$row['variationsCount'] = 0;
@@ -5965,6 +5967,8 @@ class ProcessImageLibrary extends Process {
 			$row['thumbUrl']    = $thumbInfo['url'];
 			$row['thumbWidth']  = $thumbInfo['width'];
 			$row['thumbHeight'] = $thumbInfo['height'];
+			// Original (full-size) file URL for the per-thumbnail download button.
+			$row['downloadUrl'] = (string) $img->url;
 			// Variations count — Phase 2 column from the concept,
 			// useful for pre-warm diagnosis and cleanup. getVariations()
 			// does a filesystem scan per image, but only for the 50-ish
@@ -7184,6 +7188,23 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Hover-revealed download button (bottom-right of the thumb) for one row —
+	 * a native <a download> pointing at the ORIGINAL file. Read-only, so it's
+	 * shown on every row regardless of edit rights; suppressed in the picker
+	 * (you're choosing an image there, not managing files) and when the row
+	 * carries no resolved file URL. Shared by the table + tile renderers.
+	 */
+	protected function renderDownloadButton(array $row): string {
+		if ($this->pickerMode || empty($row['downloadUrl'])) return '';
+		$san   = $this->wire('sanitizer');
+		$label = $san->entities(sprintf($this->_('Download %s'), (string) $row['basename']));
+		return '<a class="ml-download-btn" href="' . $san->entities((string) $row['downloadUrl']) . '"'
+			. ' download="' . $san->entities((string) $row['basename']) . '"'
+			. ' title="' . $label . '" aria-label="' . $label . '">'
+			. '<i class="fa fa-download" aria-hidden="true"></i></a>';
+	}
+
+	/**
 	 * Render the thumbnail <td> for one table row. Clickable (opens the
 	 * per-image editor modal) with hover replace / delete actions when the host
 	 * page is editable; a duplicate-cluster head also carries the expand toggle.
@@ -7268,6 +7289,7 @@ class ProcessImageLibrary extends Process {
 		if ($isDupHead) {
 			$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
 		}
+		$out .= $this->renderDownloadButton($row);
 		$out .= '</td>';
 		return $out;
 	}

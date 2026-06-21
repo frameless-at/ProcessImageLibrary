@@ -3054,7 +3054,9 @@
 					// editable, so unauthorised users just see the thumb
 					// without a clickable cursor.
 					var nativeTd = e.target.closest('.ml-cell-thumb[data-file-hash], .ml-cell-native[data-file-hash]');
-					if (nativeTd) {
+					// A link / button inside the thumb (the download <a>, …) must do
+					// its own thing — don't open the editor or preventDefault its click.
+					if (nativeTd && !e.target.closest('a, button')) {
 						e.preventDefault();
 						openImageEditor(nativeTd);
 						return;

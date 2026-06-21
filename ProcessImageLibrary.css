@@ -174,7 +174,8 @@
    hover, sized at 32 px for a comfortable touch target without
    eating the thumbnail. */
 .ml-replace-btn,
-.ml-delete-btn {
+.ml-delete-btn,
+.ml-download-btn {
 	position: absolute;
 	top: 4px;
 	display: inline-flex;
@@ -190,23 +191,32 @@
 	font-size: 1rem;
 	line-height: 1;
 	cursor: pointer;
+	text-decoration: none;   /* download is an <a> — never underline */
 	opacity: 0;
 	transition: opacity 0.12s ease-out;
 }
 .ml-delete-btn  { left: 4px; }
 .ml-replace-btn { right: 4px; }
+/* Download sits in the opposite (bottom-right) corner — clear of the top-corner
+   replace / delete and the bottom-left selection checkbox. */
+.ml-download-btn { top: auto; bottom: 4px; right: 4px; }
 .ml-table tbody tr:hover .ml-replace-btn,
 .ml-table tbody tr:hover .ml-delete-btn,
+.ml-table tbody tr:hover .ml-download-btn,
 .ml-card:hover .ml-replace-btn,
 .ml-card:hover .ml-delete-btn,
+.ml-card:hover .ml-download-btn,
 .ml-card:focus-within .ml-replace-btn,
 .ml-card:focus-within .ml-delete-btn,
+.ml-card:focus-within .ml-download-btn,
 .ml-replace-btn:focus-visible,
-.ml-delete-btn:focus-visible {
+.ml-delete-btn:focus-visible,
+.ml-download-btn:focus-visible {
 	opacity: 1;
 }
 .ml-replace-btn:hover { color: var(--pw-main-color, #5b8cd6); }
 .ml-delete-btn:hover  { color: var(--ml-danger); }
+.ml-download-btn:hover { color: var(--pw-main-color, #5b8cd6); text-decoration: none; }
 
 /* Picker mode: the library embedded (modal iframe) to choose existing
    image(s) for a page's image field. Selection is via the normal checkboxes
