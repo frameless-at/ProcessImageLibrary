@@ -1392,7 +1392,7 @@ class ProcessImageLibrary extends Process {
 			$cfgTitle = $this->_('Module settings');
 			$cfgLabel = $this->_('Config');
 			$out .= '<a class="ml-config-link" href="' . $sanitizer->entities($cfgUrl) . '"'
-				. ' title="' . $sanitizer->entities($cfgTitle) . '"'
+				. ' data-tip="' . $sanitizer->entities($cfgTitle) . '"'
 				. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
 				. $sanitizer->entities($cfgLabel)
 				. '</a>';
@@ -1580,10 +1580,10 @@ class ProcessImageLibrary extends Process {
 				// Up / Down buttons for keyboard users — same effect as
 				// drag-reorder. JS wires them; the icons stay decorative.
 				. '<button type="button" class="ml-col-move ml-col-move-up"'
-				. ' data-dir="up" aria-label="' . $upLabel . '" title="' . $upLabel . '">'
+				. ' data-dir="up" aria-label="' . $upLabel . '" data-tip="' . $upLabel . '">'
 				. '<i class="fa fa-chevron-up" aria-hidden="true"></i></button>'
 				. '<button type="button" class="ml-col-move ml-col-move-down"'
-				. ' data-dir="down" aria-label="' . $downLabel . '" title="' . $downLabel . '">'
+				. ' data-dir="down" aria-label="' . $downLabel . '" data-tip="' . $downLabel . '">'
 				. '<i class="fa fa-chevron-down" aria-hidden="true"></i></button>'
 				. '</li>';
 		}
@@ -1823,7 +1823,7 @@ class ProcessImageLibrary extends Process {
 		$label = $san->entities(sprintf(
 			$this->_('%d identical copies'), $count
 		));
-		return '<span class="ml-dup-count" title="' . $label . '" aria-label="' . $label . '">'
+		return '<span class="ml-dup-count" data-tip="' . $label . '" aria-label="' . $label . '">'
 			. (int) $count . '</span>';
 	}
 
@@ -1842,7 +1842,7 @@ class ProcessImageLibrary extends Process {
 		));
 		return '<span class="ml-dup-count ml-dup-toggle" data-dup-hash="' . $san->entities($hash) . '"'
 			. ' role="button" tabindex="0" aria-expanded="false"'
-			. ' title="' . $label . '" aria-label="' . $label . '">'
+			. ' data-tip="' . $label . '" aria-label="' . $label . '">'
 			. (int) $count . '</span>';
 	}
 
@@ -2015,10 +2015,10 @@ class ProcessImageLibrary extends Process {
 				$replaceLabel = $san->entities(sprintf($this->_('Replace %s'), (string) $row['basename']));
 				$deleteLabel  = $san->entities(sprintf($this->_('Delete %s'),  (string) $row['basename']));
 				$out .= '<button type="button" class="ml-replace-btn"'
-					. ' title="' . $replaceLabel . '" aria-label="' . $replaceLabel . '">'
+					. ' data-tip="' . $replaceLabel . '" aria-label="' . $replaceLabel . '">'
 					. '<i class="ml-vicon ml-vicon-rotate" aria-hidden="true"></i></button>';
 				$out .= '<button type="button" class="ml-delete-btn"'
-					. ' title="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
+					. ' data-tip="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
 			}
 			if (!$this->pickerMode) {
@@ -2062,7 +2062,7 @@ class ProcessImageLibrary extends Process {
 			$out .= '<a class="ml-view-btn' . ($active ? ' ml-view-active' : '') . '"'
 				. ' href="' . $san->entities($viewBase . $viewSep . 'view=' . $mode) . '"'
 				. ' data-view="' . $mode . '"'
-				. ' title="' . $lbl . '" aria-label="' . $lbl . '"'
+				. ' data-tip="' . $lbl . '" aria-label="' . $lbl . '"'
 				. ($active ? ' aria-current="true"' : '') . '>'
 				. '<i class="' . $icon . '" aria-hidden="true"></i></a>';
 		}
@@ -6278,6 +6278,10 @@ class ProcessImageLibrary extends Process {
 			'labels' => [
 				'saving'           => $this->_('Saving…'),
 				'loading'          => $this->_('Loading…'),
+				'preparingZip'     => $this->_('Preparing ZIP…'),
+				// %d is filled in client-side with the live selection count.
+				'tipDownloadBatch' => $this->_('Download %d selected as ZIP'),
+				'tipDeleteBatch'   => $this->_('Delete %d selected'),
 				'saved'            => $this->_('Saved'),
 				'error'            => $this->_('Save failed'),
 				'done'             => $this->_('Done'),
@@ -6513,7 +6517,7 @@ class ProcessImageLibrary extends Process {
 				. '</a>'
 				. ($canManageShared
 					? '<button type="button" class="ml-bookmark-del"'
-						. ' aria-label="' . $delTitle . '" title="' . $delTitle . '">'
+						. ' aria-label="' . $delTitle . '" data-tip="' . $delTitle . '">'
 						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
 					: '')
 				. '</li>';
@@ -6554,7 +6558,7 @@ class ProcessImageLibrary extends Process {
 		if ($canManageShared) {
 			$manageTitle = $this->_('Manage bookmarks & collections');   // literal &, no entities (see renderCollectionsDialog)
 			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
-				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
+				. ' data-tip="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
 				. '<i class="ml-vicon ml-vicon-sliders" aria-hidden="true"></i></a></li>';
 		}
 
@@ -6563,7 +6567,7 @@ class ProcessImageLibrary extends Process {
 		// whenever a checkbox selection exists (→ "save as collection").
 		$addHidden = (!$canManageShared || $currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
 		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
-			. ' title="' . $addTitle . '">'
+			. ' data-tip="' . $addTitle . '">'
 			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
 			. '</a></li>';
 
@@ -7058,7 +7062,7 @@ class ProcessImageLibrary extends Process {
 			$fid = $fieldIdCache[$fname];
 			$out .= '<td data-col="field"><code>';
 			if ($fid) {
-				$out .= '<a href="' . $san->entities($fieldEditBase . $fid) . '" title="'
+				$out .= '<a href="' . $san->entities($fieldEditBase . $fid) . '" data-tip="'
 					. $san->entities(sprintf($this->_('Edit the “%s” field'), $fname)) . '">'
 					. $fieldLabel . '</a>';
 			} else {
@@ -7095,7 +7099,7 @@ class ProcessImageLibrary extends Process {
 					// some OTHER image field in the union has tags on. This
 					// row's cell can't be edited; render as N/A to match
 					// the custom-field "not configured" treatment.
-					$out .= '<td class="ml-cell-na" data-col="tags" title="'
+					$out .= '<td class="ml-cell-na" data-col="tags" data-tip="'
 						. $san->entities(sprintf(
 							$this->_('tags is not configured on %s'),
 							(string) $row['fieldName']
@@ -7142,7 +7146,7 @@ class ProcessImageLibrary extends Process {
 					. ' data-page-id="' . (int) $row['pageId'] . '"'
 					. ' data-field="' . $san->entities((string) $row['fieldName']) . '"'
 					. ' data-basename="' . $san->entities((string) $row['basename']) . '"'
-					. ' title="' . $san->entities(sprintf(
+					. ' data-tip="' . $san->entities(sprintf(
 						$this->_('Embedded on %d page(s) — click to list'), $usageCount
 					)) . '">' . $usageCount . '</a>';
 			} else {
@@ -7156,7 +7160,7 @@ class ProcessImageLibrary extends Process {
 			// tree to assign / unassign the image (JS reads the row identity attrs).
 			$out .= '<td class="ml-cell-collections' . ($canAssignColl ? ' ml-cell-coll-edit' : '') . '" data-col="collections"';
 			if ($canAssignColl) {
-				$out .= ' ' . $editAttrs . ' role="button" tabindex="0" title="'
+				$out .= ' ' . $editAttrs . ' role="button" tabindex="0" data-tip="'
 					. $san->entities($this->_('Assign to collections')) . '"';
 			}
 			$out .= '>';
@@ -7213,7 +7217,7 @@ class ProcessImageLibrary extends Process {
 		// instead of editable so a click can't trigger an editor
 		// for a field the server would reject anyway.
 		if (!in_array($name, $rowCustoms, true)) {
-			return '<td class="ml-cell-na ' . $typeClass . '"' . $colAttr . ' title="'
+			return '<td class="ml-cell-na ' . $typeClass . '"' . $colAttr . ' data-tip="'
 				. $san->entities(sprintf(
 					$this->_('%1$s is not configured on %2$s'),
 					$name,
@@ -7307,7 +7311,7 @@ class ProcessImageLibrary extends Process {
 		$label = $san->entities(sprintf($this->_('Download %s'), (string) $row['basename']));
 		return '<a class="ml-download-btn" href="' . $san->entities((string) $row['downloadUrl']) . '"'
 			. ' download="' . $san->entities((string) $row['basename']) . '"'
-			. ' title="' . $label . '" aria-label="' . $label . '">'
+			. ' data-tip="' . $label . '" aria-label="' . $label . '">'
 			. '<i class="fa fa-arrow-down" aria-hidden="true"></i></a>';
 	}
 
@@ -7381,12 +7385,12 @@ class ProcessImageLibrary extends Process {
 				$this->_('Delete %s'), (string) $row['basename']
 			));
 			$out .= '<button type="button" class="ml-replace-btn"'
-				. ' title="' . $replaceLabel . '"'
+				. ' data-tip="' . $replaceLabel . '"'
 				. ' aria-label="' . $replaceLabel . '">'
 				. '<i class="ml-vicon ml-vicon-rotate" aria-hidden="true"></i>'
 				. '</button>';
 			$out .= '<button type="button" class="ml-delete-btn"'
-				. ' title="' . $deleteLabel . '"'
+				. ' data-tip="' . $deleteLabel . '"'
 				. ' aria-label="' . $deleteLabel . '">'
 				. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
 				. '</button>';
@@ -7434,7 +7438,7 @@ class ProcessImageLibrary extends Process {
 		// selector for the sort-state visuals.
 		$out .= '<thead><tr class="tablesorter-headerRow">';
 		$out .= '<th class="ml-cell-select">'
-			. '<input type="checkbox" class="uk-checkbox ml-select-all" title="'
+			. '<input type="checkbox" class="uk-checkbox ml-select-all" data-tip="'
 			. $san->entities($this->_('Select all on page')) . '"></th>';
 		foreach ($headers as [$colKey, $label, $sortKey]) {
 			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters);
@@ -7572,7 +7576,7 @@ class ProcessImageLibrary extends Process {
 		// saved value ride in data-* so the slider is configured before
 		// init; the JS reads them.
 		$sizeLabel = $san->entities($this->_('Thumbnail size'));
-		$out .= '<span class="ml-thumb-size" title="' . $sizeLabel . '">'
+		$out .= '<span class="ml-thumb-size" data-tip="' . $sizeLabel . '">'
 			. '<span class="ml-thumb-size-slider"'
 			. ' data-min="' . self::THUMB_SCALE_MIN . '" data-max="' . self::THUMB_SCALE_MAX . '" data-step="0.1"'
 			. ' data-value="' . rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.') . '"'
@@ -7611,7 +7615,7 @@ class ProcessImageLibrary extends Process {
 		if ($currentView === self::VIEW_TABLE) {
 			$colsLabel = $san->entities($this->_('Columns'));
 			$out .= '<a class="ml-columns-toggle"'
-				. ' title="' . $colsLabel . '"'
+				. ' data-tip="' . $colsLabel . '"'
 				. ' aria-label="' . $colsLabel . '">'
 				. '<i class="ml-vicon ml-vicon-columns" aria-hidden="true"></i>'
 				. '</a>';

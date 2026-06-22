@@ -439,6 +439,66 @@
 			return dismiss;
 		}
 
+		// --- Tooltips: one styled pill, event-delegated on document so it covers
+		// the admin page AND the body-level <dialog>s. Reads data-tip; the per-row
+		// action icons get batch-aware text from the live selection. aria-label
+		// stays the accessible name; native title= was dropped so there's no double
+		// (slow, unstyled) browser tooltip.
+		(function () {
+			var tip = null, timer = null, current = null;
+			function el() {
+				if (!tip) { tip = document.createElement('div'); tip.className = 'ml-tip'; tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip); }
+				return tip;
+			}
+			function textFor(node) {
+				var base = node.getAttribute('data-tip') || '';
+				var row = node.closest && node.closest('.ml-row[data-page-id]');
+				if (row && selection.size > 1 && selection.has(itemKey(rowItem(row)))) {
+					if (node.classList.contains('ml-download-btn')) return (labels.tipDownloadBatch || 'Download %d as ZIP').replace('%d', selection.size);
+					if (node.classList.contains('ml-delete-btn'))   return (labels.tipDeleteBatch || 'Delete %d').replace('%d', selection.size);
+				}
+				return base;
+			}
+			function place(node) {
+				var t = el(), r = node.getBoundingClientRect();
+				var tw = t.offsetWidth, th = t.offsetHeight;
+				var left = window.scrollX + r.left + r.width / 2 - tw / 2;
+				var top  = window.scrollY + r.top - th - 8;
+				if (r.top - th - 8 < 4) top = window.scrollY + r.bottom + 8;
+				var maxL = window.scrollX + document.documentElement.clientWidth - tw - 6;
+				left = Math.max(window.scrollX + 6, Math.min(left, maxL));
+				t.style.left = left + 'px';
+				t.style.top  = top + 'px';
+			}
+			function show(node) {
+				var txt = textFor(node);
+				if (!txt) return;
+				var t = el();
+				t.textContent = txt;
+				place(node);
+				t.classList.add('ml-tip-show');
+			}
+			function hide() { clearTimeout(timer); timer = null; current = null; if (tip) tip.classList.remove('ml-tip-show'); }
+			document.addEventListener('mouseover', function (e) {
+				var node = e.target.closest && e.target.closest('[data-tip]');
+				if (!node) { if (current) hide(); return; }
+				if (node === current) return;
+				current = node; clearTimeout(timer);
+				timer = setTimeout(function () { show(node); }, 350);
+			});
+			document.addEventListener('mouseout', function (e) {
+				var node = e.target.closest && e.target.closest('[data-tip]');
+				if (node && node === current) hide();
+			});
+			document.addEventListener('focusin', function (e) {
+				var node = e.target.closest && e.target.closest('[data-tip]');
+				if (node) { current = node; show(node); }
+			});
+			document.addEventListener('focusout', hide);
+			window.addEventListener('scroll', hide, true);
+			document.addEventListener('keydown', function (e) { if (e.key === 'Escape') hide(); });
+		})();
+
 		// Column header text for the cell, used as the popup dialog's
 		// label. Falls back to the raw subfield name if the <th> isn't
 		// findable (defensive — shouldn't happen with the current table).
@@ -921,7 +981,7 @@
 			var b = document.createElement('button');
 			b.type = 'button';
 			b.className = 'ml-tag-manage ' + cls;
-			b.title = title;
+			b.dataset.tip = title;
 			b.setAttribute('aria-label', title);
 			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
 			// mousedown preventDefault keeps focus on the inline-edit input so a
@@ -1035,7 +1095,7 @@
 
 				function setIcon(btn, name, title) {
 					var i = btn.querySelector('i'); if (i) i.className = 'fa ' + name;
-					btn.title = title; btn.setAttribute('aria-label', title);
+					btn.dataset.tip = title; btn.setAttribute('aria-label', title);
 				}
 				function setRenIcon(name, title) {
 					setIcon(renBtn, name, title);
@@ -4069,7 +4129,7 @@
 				del.type = 'button';
 				del.className = 'ml-bookmark-del';
 				del.setAttribute('aria-label', label);
-				del.title = label;
+				del.dataset.tip = label;
 				del.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
 				return del;
 			}
@@ -4199,7 +4259,7 @@
 				var ma = document.createElement('a');
 				ma.href = '#';
 				ma.setAttribute('role', 'button');
-				ma.title = labels.collectionsManage || 'Manage bookmarks & collections';
+				ma.dataset.tip = labels.collectionsManage || 'Manage bookmarks & collections';
 				ma.setAttribute('aria-label', ma.title);
 				ma.innerHTML = '<i class="fa fa-sliders" aria-hidden="true"></i>';
 				manageLi.appendChild(ma);
@@ -4292,7 +4352,7 @@
 			b.type = 'button';
 			b.className = 'ml-coll-move';
 			b.dataset.act = act;
-			b.title = title || '';
+			b.dataset.tip = title || '';
 			b.setAttribute('aria-label', title || '');
 			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
 			// Keep focus on the inline-rename input when its ✓ (or any control) is
@@ -4303,7 +4363,7 @@
 		// Inline delete-confirm for a manager row (tag-manager pattern).
 		function collDelSetIcon(btn, icon, title) {
 			var i = btn.querySelector('i'); if (i) i.className = 'fa ' + icon;
-			btn.title = title; btn.setAttribute('aria-label', title);
+			btn.dataset.tip = title; btn.setAttribute('aria-label', title);
 		}
 		function collDelArm(btn, li) {
 			collDelArmedBtn = btn;
@@ -4431,7 +4491,7 @@
 				car.type = 'button';
 				car.className = 'ml-coll-caret';
 				car.dataset.act = 'toggle';
-				car.title = collapsed ? (labels.collExpand || 'Expand') : (labels.collCollapse || 'Collapse');
+				car.dataset.tip = collapsed ? (labels.collExpand || 'Expand') : (labels.collCollapse || 'Collapse');
 				car.setAttribute('aria-label', car.title);
 				car.innerHTML = '<i class="fa ' + (collapsed ? 'fa-caret-right' : 'fa-caret-down') + '" aria-hidden="true"></i>';
 				li.appendChild(car);

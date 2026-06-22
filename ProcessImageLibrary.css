@@ -1790,6 +1790,28 @@ textarea.ml-langtabs-pane {
    previously gave no visible feedback at all). Absolutely positioned in
    document space (JS sets top/left from the thumbnail's rect) so it scrolls
    with the row; vertically centred on the thumbnail via translateY. */
+/* Custom tooltip — one styled pill, positioned in document space by the JS.
+   Replaces the slow / unstyled native title= on the action icons, toggles and
+   manager controls; appears fast, themes to the admin, and works on focus. */
+.ml-tip {
+	position: absolute;
+	z-index: 100000;
+	max-width: 280px;
+	padding: 4px 8px;
+	border-radius: 4px;
+	background: rgba(33, 37, 41, 0.95);
+	color: #fff;
+	font-size: 12px;
+	line-height: 1.35;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.1s ease;
+}
+.ml-tip-show {
+	opacity: 1;
+}
+
 .ml-row-toast {
 	position: absolute;
 	z-index: 99999;
