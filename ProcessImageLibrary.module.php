@@ -560,6 +560,20 @@ class ProcessImageLibrary extends Process {
 	 */
 	public function init() {
 		parent::init();
+
+		// Anonymous requests — practically the entire public front-end traffic —
+		// never need this module, so bail before the config read and any hooks:
+		// the public front end carries zero overhead, while the admin and any
+		// signed-in editor still get the full behaviour. The gate is login state,
+		// not the admin template, for two reasons: the only front-end work (the
+		// rich-text insert glue) renders solely for logged-in editors, since
+		// PageFrontEdit emits no editable markup to a guest; and $page isn't
+		// resolved yet at init() (ProcessPageView sets it after module init),
+		// whereas $user is already established here. Saves left to a logged-in /
+		// admin request reconcile the dedup + where-used index via the LazyCron
+		// maintenance pass.
+		if (!$this->wire('user')->isLoggedin()) return;
+
 		// Pull the saved module config onto this instance so the
 		// runtime helpers ($this->get('thumbWidth') etc.) actually
 		// see the values the admin saved. PW does this for
