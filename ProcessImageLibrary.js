@@ -3650,7 +3650,12 @@
 		}
 
 		function applyColumnVisibility() {
-			var cells = document.querySelectorAll('[data-col]');
+			// The picker checkboxes in the Columns dialog also carry data-col, so
+			// exclude them: otherwise a hidden column would toggle ml-col-hidden
+			// (display:none) onto its OWN checkbox and the box would vanish. Only
+			// the table/tile cells should be hidden; the checkbox state is driven
+			// separately (cb.checked = !isColumnHidden).
+			var cells = document.querySelectorAll('[data-col]:not(.ml-col-toggle)');
 			Array.prototype.forEach.call(cells, function (cell) {
 				cell.classList.toggle('ml-col-hidden', isColumnHidden(cell.dataset.col));
 			});

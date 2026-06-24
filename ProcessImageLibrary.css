@@ -1454,21 +1454,6 @@ textarea.ml-langtabs-pane {
 	padding: 0.2rem 0.3rem;
 	min-width: 0;
 }
-/* The picker uses bare .uk-checkbox inputs. On admin themes that paint only the
-   CHECKED state, the unchecked box drew nothing, so a hidden column showed as a
-   label with no box ("empty checkboxes missing"). Re-assert the empty-box look
-   for the unchecked state so it reads like the tag-popup boxes; the checked
-   state is left untouched (:not(:checked)) so the theme keeps its fill. */
-.ml-columns-list .ml-col-toggle:not(:checked) {
-	-webkit-appearance: none;
-	appearance: none;
-	flex: 0 0 auto;
-	width: 16px;
-	height: 16px;
-	border: 1px solid var(--pw-border-color, #ccc);
-	border-radius: 0;
-	background: transparent;
-}
 .ml-col-move,
 .ml-coll-move {
 	flex: 0 0 auto;
