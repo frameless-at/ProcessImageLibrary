@@ -394,12 +394,14 @@ When a single rename touched at least one embed, a summary dialog confirms the n
 
 Each editable row carries a replace icon in the **top-right** corner of the thumb cell, visible on row hover, plus the row itself is a drop target for files dragged from the OS. Both paths swap the file bytes of an existing image while keeping the basename, every URL pointing at it, and the Pagefile metadata (description, tags, customs, multilang) intact.
 
+![A table row hovered to reveal its thumb-cell actions: the replace (rotate) icon in the top-right with a tooltip reading "Replace rosebud_rename.jpeg", the trash icon top-left and the download arrow bottom-right, alongside the row's filename / page / used-in / tags / collections / dimensions columns](docs/screenshots/31-replace.png)
+
 - **Click-to-pick** — the replace icon opens a file picker pre-filtered to the row's existing extension.
 - **Drag-and-drop** — drop a file onto the row. Every editable row tints in the inline-edit colour while the drop target is hovered. A non-editable row (no `page-edit` permission) gets a `not-allowed` cursor and rejects the drop.
 
 The server enforces an extension match — a `.jpg` slot stays a `.jpg`. Format conversions (jpg ↔ png) would change the basename, which would break references in CKEditor content, sitemaps, OG tags etc.; for those, delete + re-upload.
 
-Process: `move_uploaded_file()` → `$img->removeVariations()` → `$page->save($field)`. The thumbnail variation the table displays is then regenerated server-side and returned in the response so the JS can swap the `<img src>` without a 404 round trip. Dimensions, file size, modified date and the variations counter are re-formatted on the server and patched into the row.
+Process: the upload lands on a temp name in the image's **own folder** and is then **atomically renamed** into place, never written straight onto the original. That way a replace works even when PHP's upload tmp dir sits on a different filesystem (containers, a separate `/tmp` mount) or the original file isn't writable by the web user; the rename only needs directory write, which uploads already have. Then `$img->removeVariations()` drops the now-stale variations and `$page->save($field)` commits. The thumbnail variation the table displays is regenerated server-side and returned in the response so the JS can swap the `<img src>` without a 404 round trip. Dimensions, file size, modified date and the variations counter are re-formatted on the server and patched into the row.
 
 ## Deleting images
 
