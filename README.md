@@ -234,6 +234,8 @@ The toolbar carries a **view toggle** (top-right, next to the per-page picker) o
 
 ![Masonry gallery view of the Image Library: the same toolbar with the size slider and table / gallery toggle, below it a grid of flower thumbnails of varying heights packed into even, height-balanced columns](docs/screenshots/04-masonry.png)
 
+![Grid view of the Image Library: the same flower thumbnails laid out as uniform square tiles (cropped to fill) in a responsive grid, closer to a classic asset browser](docs/screenshots/06-grid.png)
+
 ## The table
 
 - **Thumb** — clickable when the host page is editable; opens the native PW page-edit form for this image in a full-screen iframe (with PW's crop / focus / variations UI).
@@ -338,7 +340,7 @@ These controls are gated by the **`image-library-manage-shared`** permission (su
 
 The Filename cell uses the same inline-edit popup. The input holds the file's stem; the extension shows next to it as a locked chip and is never sent over the wire — the server reattaches it from the original basename.
 
-![Filename rename popup showing the stem input, locked .jpeg chip, and the placeholder syntax hint below the title](docs/screenshots/09-rename.png)
+![Filename rename popup over the table: the stem input holding a batch pattern `rosebud_(n3)`, the locked `.jpeg` chip beside it, and the placeholder hint below the title (counter, padded counter, total, page title, date, page name, field name)](docs/screenshots/09-rename.png)
 
 ### Placeholders
 
@@ -370,7 +372,13 @@ Collision detection runs per-image inside the same Pageimages collection; a name
 
 ### Embeds follow the rename
 
-A rename changes the basename, so any rich-text field that embedded the old URL would otherwise break. Rather than warn you up front, the module fixes them. Right after the file moves, the same Textarea-field scan the delete dialog uses runs over the site, and every embed of the renamed file is rewritten to the new stem:
+A rename changes the basename, so any rich-text field that embedded the old URL would otherwise break. The module handles that in two steps: it warns you first, then fixes the embeds for you.
+
+**Where-used preflight.** Mirroring the delete confirm, a preflight checks before committing: if the file is still embedded on other pages, a dialog lists each reference (page · field) so you can decide up front – *Cancel*, or *Rename anyway*. A file with no embeds renames straight away, no dialog.
+
+![Rename where-used preflight dialog titled "Heads up – still embedded in other pages", listing three rich-text references (page · field) such as "404 Not Found" · body and "Flowers" · testbody, with Cancel and "Rename anyway" buttons](docs/screenshots/29-rename-preflight.png)
+
+**Embeds rewritten.** If you proceed, every embed is fixed so nothing breaks. Right after the file moves, the same Textarea-field scan the delete dialog uses runs over the site, and every embed of the renamed file is rewritten to the new stem:
 
 - **Original and every variation** — `…/{pageId}/{stem}.{ext}`, `…/{stem}.WxH.{ext}`, cropped / hidpi suffixes — all follow along; only the stem changes, the extension and variation suffix are preserved.
 - **All languages** of a multilang Textarea are rewritten in place; untouched translations stay put.
@@ -380,7 +388,7 @@ A rename changes the basename, so any rich-text field that embedded the old URL 
 
 When a single rename touched at least one embed, a summary dialog confirms the new filename and lists each reference that was updated, with a link to its page. A plain rename with no embeds applies silently — the cell just flashes green. Batch rename rewrites embeds the same way and reports through its usual result summary.
 
-![Post-rename summary dialog titled "Renamed": a monospace chip reads "img_6426.jpeg → daisy-white.jpeg", and below an "Updated embedded references" list links "Flowers" · body, with a single Close button](docs/screenshots/12-rename-done.png)
+![Post-rename summary dialog titled "Renamed": a monospace chip reads "rosebud_01.jpeg → rosebud_rename.jpeg", and below an "Updated embedded references" list links three pages (e.g. "Flowers" · testbody), with a single Close button](docs/screenshots/12-rename-done.png)
 
 ## Replacing files
 
