@@ -37,6 +37,7 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
   - [Embeds follow the rename](#embeds-follow-the-rename)
 - [Replacing files](#replacing-files)
 - [Deleting images](#deleting-images)
+- [Downloading](#downloading)
 - [Deduplication](#deduplication)
   - [Browsing duplicates](#browsing-duplicates)
 - [Export / Import](#export--import)
@@ -58,6 +59,7 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
 - **Bulk edits as a paintbrush** — tick rows, edit any cell on a selected one, and the change broadcasts to the whole selection (description, tags, customs, filenames).
 - **Replace in place** — drop a file on the row; the basename and every URL stay intact, variations regenerate, metadata is preserved (same format only).
 - **Delete (single + batch)** — confirm-gated trash icon; with rows ticked it removes the whole selection.
+- **Download (single + ZIP)** — a download icon on every thumbnail saves the original file; with rows ticked it streams the whole selection (cross-page included) as one ZIP.
 - **Automatic de-duplication** — byte-identical copies collapse onto one hardlinked file (lossless, reversible), so they cost disk once; a *Duplicates* filter and cluster view surface them.
 - **Where-used column** (opt-in) — how many pages embed an image in rich text (CKEditor / TinyMCE), with click-through; content-based, via a cached index.
 - **Bookmarks & collections** — a team-wide tab strip: bookmarks save a *filter*, collections save a *hand-picked set* (recalled via a short `?coll=` link). Both support folders / nesting and are managed in one dialog (managers only).
@@ -382,9 +384,9 @@ When a single rename touched at least one embed, a summary dialog confirms the n
 
 ## Replacing files
 
-Each editable row carries an upload icon in the **top-right** corner of the thumb cell, visible on row hover, plus the row itself is a drop target for files dragged from the OS. Both paths swap the file bytes of an existing image while keeping the basename, every URL pointing at it, and the Pagefile metadata (description, tags, customs, multilang) intact.
+Each editable row carries a replace icon in the **top-right** corner of the thumb cell, visible on row hover, plus the row itself is a drop target for files dragged from the OS. Both paths swap the file bytes of an existing image while keeping the basename, every URL pointing at it, and the Pagefile metadata (description, tags, customs, multilang) intact.
 
-- **Click-to-pick** — the upload icon opens a file picker pre-filtered to the row's existing extension.
+- **Click-to-pick** — the replace icon opens a file picker pre-filtered to the row's existing extension.
 - **Drag-and-drop** — drop a file onto the row. Every editable row tints in the inline-edit colour while the drop target is hovered. A non-editable row (no `page-edit` permission) gets a `not-allowed` cursor and rejects the drop.
 
 The server enforces an extension match — a `.jpg` slot stays a `.jpg`. Format conversions (jpg ↔ png) would change the basename, which would break references in CKEditor content, sitemaps, OG tags etc.; for those, delete + re-upload.
@@ -393,13 +395,21 @@ Process: `move_uploaded_file()` → `$img->removeVariations()` → `$page->save(
 
 ## Deleting images
 
-The trash icon hangs in the **top-left** corner of each thumb cell — opposite the upload icon, so finger-taps on mobile can't fire the wrong action. Also hover-visible. Same selection-as-paintbrush as the rest of the module: with N rows ticked, clicking the trash on any selected row deletes the whole selection; without a selection or when the click landed on an unselected row, it deletes just that one.
+The trash icon hangs in the **top-left** corner of each thumb cell — opposite the replace icon, so finger-taps on mobile can't fire the wrong action. Also hover-visible. Same selection-as-paintbrush as the rest of the module: with N rows ticked, clicking the trash on any selected row deletes the whole selection; without a selection or when the click landed on an unselected row, it deletes just that one.
 
 A confirm dialog always intervenes — count in the header, first eight filenames listed inline, `+N more` if the batch is larger, plus a hard warning that the operation can't be undone. Successful rows fade out then drop from the DOM; the persistent selection set follows. Per-row failures (page no longer editable, file already gone) surface through the same result modal the bulk edits use.
 
 ![Delete confirm dialog for a batch of 4 images: the header counts the selection, the files are listed inline, and a red "Still referenced in rich-text fields" block names img_6426.jpeg with a link to the "Flowers" page body field that still embeds it](docs/screenshots/11-delete.png)
 
 **Where-used preflight.** Before you confirm, the dialog runs a server-side scan over every Textarea field and lists the pages that still embed each image in their rich text. CKEditor and TinyMCE both insert images through the same `pwimage` plugin with the deterministic URL shape `/site/assets/files/{pageId}/{basename}` (or a sized variation `…/{stem}.WxH.{ext}`), so a single PW selector — `field%='/pageId/stem.'` — catches the original AND every PW-derived variation. The selector route is multilang-, repeater- and access-aware out of the box. Each reference is rendered as a link straight to that page's edit screen (new tab) so you can fix the embed before — or instead of — deleting. The list is advisory; you can still confirm the delete.
+
+## Downloading
+
+A download icon sits in the **bottom-right** corner of each thumb cell — clear of the top-corner replace / delete actions and the bottom-left selection checkbox. Hover-visible, and present on **every** row regardless of edit rights (downloading is read-only). It's a native `<a download>` pointing at the **original** full-size file, so a single click saves the real image, not the table thumbnail.
+
+Same selection-as-paintbrush as the rest of the module: with several rows ticked, clicking the download icon on a selected row streams the **whole selection as one ZIP** (`images.zip`, built server-side via PHP's `ZipArchive`) instead of a single file. The item list is resolved on the server, so a **cross-page** selection — images ticked across several pages of results — is included in full (the browser only ever sees the current page's URLs). Basenames that collide across pages are disambiguated in the archive (`hero.jpg`, `hero (2).jpg`).
+
+Like the other bulk actions, a download **consumes the selection**: once the file (or zip) is delivered, the ticked rows clear. A click on an *unselected* row stays a plain single download and leaves the selection alone. **Duplicates carry no download icon** — a duplicate tile stands for N byte-identical copies, so a single "download this one" would be ambiguous (open the [cluster](#deduplication) instead).
 
 ## Deduplication
 

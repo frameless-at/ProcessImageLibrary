@@ -46,6 +46,20 @@
 		var isReplacing = false;
 		var isBulking   = false;
 		var selection   = new Set();
+		// Pure collections/bookmarks tree model — implementations live in
+		// assets/collections-model.js (window.MLCollectionsModel), unit-tested
+		// separately. Aliased here so every existing call site stays unchanged.
+		var collKey = MLCollectionsModel.collKey,
+			collIndexOf = MLCollectionsModel.collIndexOf,
+			collById = MLCollectionsModel.collById,
+			collChildren = MLCollectionsModel.collChildren,
+			collIsParent = MLCollectionsModel.collIsParent,
+			collDepth = MLCollectionsModel.collDepth,
+			collHeight = MLCollectionsModel.collHeight,
+			collIsDescendant = MLCollectionsModel.collIsDescendant,
+			collSubtreeSet = MLCollectionsModel.collSubtreeSet,
+			collFlatten = MLCollectionsModel.collFlatten,
+			collPrevSibling = MLCollectionsModel.collPrevSibling;
 
 		// Write a value back into a cell. Textarea-backed cells
 		// (description + custom textareas) render their text inside a
@@ -389,11 +403,11 @@
 		// element is absolutely positioned in document space so it scrolls with
 		// the row; left is clamped so a right-edge thumbnail (grid view) can't
 		// push it off-screen. type: 'error' | 'ok'.
-		function rowToast(tr, msg, type) {
-			if (!msg) return;
+		function rowToast(tr, msg, type, sticky) {
+			if (!msg) return function () {};
 			announce(msg);
 			var anchor = (tr && tr.querySelector && tr.querySelector('.ml-cell-thumb')) || tr;
-			if (!anchor || !anchor.getBoundingClientRect) return;
+			if (!anchor || !anchor.getBoundingClientRect) return function () {};
 			var rect = anchor.getBoundingClientRect();
 			var t = document.createElement('div');
 			t.className = 'ml-row-toast ' + (type === 'error' ? 'ml-row-toast-error' : 'ml-row-toast-ok');
@@ -412,11 +426,78 @@
 			t.style.top  = (window.scrollY + rect.top + rect.height / 2) + 'px';
 			t.style.left = left + 'px';
 			requestAnimationFrame(function () { t.classList.add('ml-row-toast-show'); });
-			setTimeout(function () {
+			var dismissed = false;
+			function dismiss() {
+				if (dismissed) return;
+				dismissed = true;
 				t.classList.remove('ml-row-toast-show');
 				setTimeout(function () { if (t.parentNode) t.parentNode.removeChild(t); }, 250);
-			}, type === 'error' ? 6000 : 2500);
+			}
+			// Sticky toasts (e.g. "Preparing ZIP…") stay until the caller dismisses
+			// them; everything else auto-dismisses. Always return a dismiss handle.
+			if (!sticky) setTimeout(dismiss, type === 'error' ? 6000 : 2500);
+			return dismiss;
 		}
+
+		// --- Tooltips: one styled pill, event-delegated on document so it covers
+		// the admin page AND the body-level <dialog>s. Reads data-tip; the per-row
+		// action icons get batch-aware text from the live selection. aria-label
+		// stays the accessible name; native title= was dropped so there's no double
+		// (slow, unstyled) browser tooltip.
+		(function () {
+			var tip = null, timer = null, current = null;
+			function el() {
+				if (!tip) { tip = document.createElement('div'); tip.className = 'ml-tip'; tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip); }
+				return tip;
+			}
+			function textFor(node) {
+				var base = node.getAttribute('data-tip') || '';
+				var row = node.closest && node.closest('.ml-row[data-page-id]');
+				if (row && selection.size > 1 && selection.has(itemKey(rowItem(row)))) {
+					if (node.classList.contains('ml-download-btn')) return (labels.tipDownloadBatch || 'Download %d as ZIP').replace('%d', selection.size);
+					if (node.classList.contains('ml-delete-btn'))   return (labels.tipDeleteBatch || 'Delete %d').replace('%d', selection.size);
+				}
+				return base;
+			}
+			function place(node) {
+				var t = el(), r = node.getBoundingClientRect();
+				var tw = t.offsetWidth, th = t.offsetHeight;
+				var left = window.scrollX + r.left + r.width / 2 - tw / 2;
+				var top  = window.scrollY + r.top - th - 8;
+				if (r.top - th - 8 < 4) top = window.scrollY + r.bottom + 8;
+				var maxL = window.scrollX + document.documentElement.clientWidth - tw - 6;
+				left = Math.max(window.scrollX + 6, Math.min(left, maxL));
+				t.style.left = left + 'px';
+				t.style.top  = top + 'px';
+			}
+			function show(node) {
+				var txt = textFor(node);
+				if (!txt) return;
+				var t = el();
+				t.textContent = txt;
+				place(node);
+				t.classList.add('ml-tip-show');
+			}
+			function hide() { clearTimeout(timer); timer = null; current = null; if (tip) tip.classList.remove('ml-tip-show'); }
+			document.addEventListener('mouseover', function (e) {
+				var node = e.target.closest && e.target.closest('[data-tip]');
+				if (!node) { if (current) hide(); return; }
+				if (node === current) return;
+				current = node; clearTimeout(timer);
+				timer = setTimeout(function () { show(node); }, 350);
+			});
+			document.addEventListener('mouseout', function (e) {
+				var node = e.target.closest && e.target.closest('[data-tip]');
+				if (node && node === current) hide();
+			});
+			document.addEventListener('focusin', function (e) {
+				var node = e.target.closest && e.target.closest('[data-tip]');
+				if (node) { current = node; show(node); }
+			});
+			document.addEventListener('focusout', hide);
+			window.addEventListener('scroll', hide, true);
+			document.addEventListener('keydown', function (e) { if (e.key === 'Escape') hide(); });
+		})();
 
 		// Column header text for the cell, used as the popup dialog's
 		// label. Falls back to the raw subfield name if the <th> isn't
@@ -900,7 +981,7 @@
 			var b = document.createElement('button');
 			b.type = 'button';
 			b.className = 'ml-tag-manage ' + cls;
-			b.title = title;
+			b.dataset.tip = title;
 			b.setAttribute('aria-label', title);
 			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
 			// mousedown preventDefault keeps focus on the inline-edit input so a
@@ -1014,7 +1095,7 @@
 
 				function setIcon(btn, name, title) {
 					var i = btn.querySelector('i'); if (i) i.className = 'fa ' + name;
-					btn.title = title; btn.setAttribute('aria-label', title);
+					btn.dataset.tip = title; btn.setAttribute('aria-label', title);
 				}
 				function setRenIcon(name, title) {
 					setIcon(renBtn, name, title);
@@ -2763,6 +2844,61 @@
 			openDeleteConfirm(items, function () { deleteItems(items); });
 		});
 
+		// Download button. A single file is a native <a download> and needs no
+		// JS. But when the clicked row is part of a MULTI-selection, the click
+		// instead streams the whole selection as one ZIP (cross-page selections
+		// included — the client can't see off-page URLs, so the server resolves
+		// the item list) — same paintbrush semantics as batch delete.
+		function downloadSelectionZip(items, tr) {
+			if (!config.zipUrl || !items.length) return;
+			// Sticky toast: building the zip server-side (and, on iOS, the OS
+			// "download?" prompt) can lag well past the normal toast lifetime, so
+			// keep it up until the blob is actually in hand — otherwise the toast
+			// vanishes mid-wait and reads as a failure.
+			var dismiss = rowToast(tr, labels.preparingZip || 'Preparing ZIP…', 'ok', true);
+			var fd = new FormData();
+			fd.append('items', JSON.stringify(items));
+			postForm(config.zipUrl, fd).then(function (res) {
+				if (!res.ok) throw new Error('HTTP ' + res.status);
+				return res.blob();
+			}).then(function (blob) {
+				var url = URL.createObjectURL(blob);
+				var a = document.createElement('a');
+				a.href = url;
+				a.download = 'images.zip';
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+				setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+				dismiss();   // zip delivered → drop the "preparing" toast
+				// Download is a terminal "consume the selection" action (like
+				// assigning to a collection) — clear it once the zip is delivered.
+				clearSelectionConfirm();
+			}).catch(function (err) {
+				dismiss();
+				rowToast(tr, (labels.error || 'Download failed') + ': ' + (err && err.message ? err.message : 'network error'), 'error');
+			});
+		}
+		results && results.addEventListener('click', function (e) {
+			var btn = e.target.closest && e.target.closest('.ml-download-btn');
+			if (!btn) return;
+			var tr = btn.closest('.ml-row');
+			var rowItm = tr && rowItem(tr);
+			if (!rowItm || !rowItm.pageId) return;        // non-editable row → native single, no selection
+			if (!selection.has(itemKey(rowItm))) return;  // not part of the selection → native single, leave it
+			// The clicked row IS selected → the download consumes the selection.
+			if (selection.size > 1) {
+				// 2+ selected → one ZIP of all; clears the selection on success.
+				e.preventDefault();
+				e.stopImmediatePropagation();
+				downloadSelectionZip(selectionItems(), tr);
+			} else {
+				// Exactly this one selected → native single download; clear it too,
+				// so a selected single behaves the same as a selected batch.
+				clearSelectionConfirm();
+			}
+		});
+
 		// -- AJAX re-render --------------------------------------------
 
 		function replaceFromHref(href) {
@@ -3040,7 +3176,9 @@
 					// editable, so unauthorised users just see the thumb
 					// without a clickable cursor.
 					var nativeTd = e.target.closest('.ml-cell-thumb[data-file-hash], .ml-cell-native[data-file-hash]');
-					if (nativeTd) {
+					// A link / button inside the thumb (the download <a>, …) must do
+					// its own thing — don't open the editor or preventDefault its click.
+					if (nativeTd && !e.target.closest('a, button')) {
 						e.preventDefault();
 						openImageEditor(nativeTd);
 						return;
@@ -3991,7 +4129,7 @@
 				del.type = 'button';
 				del.className = 'ml-bookmark-del';
 				del.setAttribute('aria-label', label);
-				del.title = label;
+				del.dataset.tip = label;
 				del.innerHTML = '<i class="fa fa-times" aria-hidden="true"></i>';
 				return del;
 			}
@@ -4121,7 +4259,7 @@
 				var ma = document.createElement('a');
 				ma.href = '#';
 				ma.setAttribute('role', 'button');
-				ma.title = labels.collectionsManage || 'Manage bookmarks & collections';
+				ma.dataset.tip = labels.collectionsManage || 'Manage bookmarks & collections';
 				ma.setAttribute('aria-label', ma.title);
 				ma.innerHTML = '<i class="fa fa-sliders" aria-hidden="true"></i>';
 				manageLi.appendChild(ma);
@@ -4173,49 +4311,6 @@
 		// May `item` hold children? Collections always can; a bookmark only if it's
 		// a FOLDER (no qs). Used to gate nest / indent / drag-into for bookmarks.
 		function mgrCanParent(kind, item) { return kind === 'bm' ? !(item && (item.qs || '')) : true; }
-		function collKey(kind, id) { return kind + ':' + id; }
-		function collIndexOf(arr, id) {
-			for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].id === id) return i;
-			return -1;
-		}
-		function collById(arr, id) { var i = collIndexOf(arr, id); return i < 0 ? null : arr[i]; }
-		function collChildren(arr, id) { return arr.filter(function (c) { return c && (c.parent || '') === id; }); }
-		function collIsParent(arr, id) { return arr.some(function (c) { return c && (c.parent || '') === id; }); }
-		function collDepth(arr, id) {
-			var d = 0, c = collById(arr, id), g = 0;
-			while (c && (c.parent || '') !== '' && g++ < 64) { d++; c = collById(arr, c.parent); }
-			return d;
-		}
-		function collHeight(arr, id) {
-			var ch = collChildren(arr, id);
-			if (!ch.length) return 0;
-			var m = 0;
-			ch.forEach(function (c) { m = Math.max(m, collHeight(arr, c.id)); });
-			return 1 + m;
-		}
-		function collIsDescendant(arr, id, ofId) {
-			var c = collById(arr, id), g = 0;
-			while (c && (c.parent || '') !== '' && g++ < 64) { if (c.parent === ofId) return true; c = collById(arr, c.parent); }
-			return false;
-		}
-		function collSubtreeSet(arr, id) {
-			var s = {}; s[id] = true; var changed = true;
-			while (changed) { changed = false; arr.forEach(function (c) { if (c && c.parent && s[c.parent] && !s[c.id]) { s[c.id] = true; changed = true; } }); }
-			return s;
-		}
-		// DFS flatten by parent, preserving sibling array order; promote orphans / cycles.
-		function collFlatten(arr) {
-			var byId = {};
-			arr.forEach(function (c) { if (c && c.id) byId[c.id] = c; });
-			arr.forEach(function (c) { if (c && (c.parent || '') !== '' && !byId[c.parent]) c.parent = ''; });
-			var roots = [], cm = {};
-			arr.forEach(function (c) { if (!c) return; var p = c.parent || ''; (p === '' ? roots : (cm[p] = cm[p] || [])).push(c); });
-			var out = [], seen = {};
-			function walk(n) { if (seen[n.id]) return; seen[n.id] = true; out.push(n); (cm[n.id] || []).forEach(walk); }
-			roots.forEach(walk);
-			arr.forEach(function (c) { if (c && !seen[c.id]) { c.parent = ''; seen[c.id] = true; out.push(c); } });
-			return out;
-		}
 		function collPersist(kind) {
 			var arr = collStoreArr(kind);
 			var flat = collFlatten(arr);
@@ -4226,81 +4321,30 @@
 		}
 		// Make `id` a child of `parentId` (cycle-safe, depth-capped). For bookmarks
 		// the parent must be a FOLDER (filter bookmarks can't hold children).
+		// Tree mutators: the pure transform (validation + reorder, depth-capped)
+		// lives in MLCollectionsModel and is unit-tested; here we resolve the
+		// store, run it, and persist only when it actually changed.
+		function nestOpts(kind) {
+			return { canParent: function (item) { return mgrCanParent(kind, item); }, maxDepth: COLL_MAX_DEPTH };
+		}
 		function collNest(kind, id, parentId) {
-			var arr = collStoreArr(kind);
-			var c = collById(arr, id), p = collById(arr, parentId);
-			if (!c || !p || id === parentId) return;
-			if (!mgrCanParent(kind, p)) return;                                          // bookmarks: folders only
-			if (collIsDescendant(arr, parentId, id)) return;                              // no cycle
-			if (collDepth(arr, parentId) + 1 + collHeight(arr, id) > COLL_MAX_DEPTH - 1) return;  // depth cap
-			c.parent = parentId;
-			collPersist(kind);
+			if (MLCollectionsModel.collNest(collStoreArr(kind), id, parentId, nestOpts(kind))) collPersist(kind);
 		}
 		// Indent: become a child of the previous sibling.
 		function collIndent(kind, id) {
-			var arr = collStoreArr(kind);
-			var prev = collPrevSibling(arr, id);
-			if (prev) collNest(kind, id, prev.id);
+			if (MLCollectionsModel.collIndent(collStoreArr(kind), id, nestOpts(kind))) collPersist(kind);
 		}
 		// Outdent: rise one level (become a sibling of the current parent).
 		function collOutdent(kind, id) {
-			var arr = collStoreArr(kind);
-			var c = collById(arr, id);
-			if (!c || (c.parent || '') === '') return;
-			var p = collById(arr, c.parent);
-			c.parent = p ? (p.parent || '') : '';
-			collPersist(kind);
-		}
-		function collPrevSibling(arr, id) {
-			var i = collIndexOf(arr, id);
-			if (i <= 0) return null;
-			var c = arr[i], d = collDepth(arr, id);
-			for (var j = i - 1; j >= 0; j--) {
-				var dj = collDepth(arr, arr[j].id);
-				if (dj < d) break;
-				if (dj === d && (arr[j].parent || '') === (c.parent || '')) return arr[j];
-			}
-			return null;
+			if (MLCollectionsModel.collOutdent(collStoreArr(kind), id)) collPersist(kind);
 		}
 		// Reorder: swap with the adjacent sibling (subtrees move together).
 		function collMove(kind, id, dir) {
-			var arr = collStoreArr(kind);
-			var c = collById(arr, id);
-			if (!c) return;
-			var p = c.parent || '';
-			var sibs = arr.filter(function (x) { return (x.parent || '') === p; });
-			var i = sibs.indexOf(c), j = dir === 'up' ? i - 1 : i + 1;
-			if (j < 0 || j >= sibs.length) return;
-			var roots = [], cm = {};
-			arr.forEach(function (x) { var pp = x.parent || ''; (pp === '' ? roots : (cm[pp] = cm[pp] || [])).push(x); });
-			var lst = p === '' ? roots : cm[p];
-			var a = lst.indexOf(c), b = lst.indexOf(sibs[j]);
-			var t = lst[a]; lst[a] = lst[b]; lst[b] = t;
-			var out = [];
-			(function () { function walk(n) { out.push(n); (cm[n.id] || []).forEach(walk); } roots.forEach(walk); })();
-			arr.length = 0; Array.prototype.push.apply(arr, out);
-			collPersist(kind);
+			if (MLCollectionsModel.collMove(collStoreArr(kind), id, dir)) collPersist(kind);
 		}
 		// Drag-place: make `id` a sibling of `targetId`, before / after its subtree.
 		function collPlace(kind, id, targetId, after) {
-			var arr = collStoreArr(kind);
-			var c = collById(arr, id), t = collById(arr, targetId);
-			if (!c || !t || id === targetId) return;
-			if (collIsDescendant(arr, targetId, id)) return;                          // not into own subtree
-			if (collDepth(arr, targetId) + collHeight(arr, id) > COLL_MAX_DEPTH - 1) return;
-			var set = collSubtreeSet(arr, id);
-			var blk = arr.filter(function (x) { return set[x.id]; });
-			var rest = arr.filter(function (x) { return !set[x.id]; });
-			c.parent = t.parent || '';
-			var ti = collIndexOf(rest, targetId);
-			if (ti < 0) { Array.prototype.push.apply(rest, blk); }
-			else {
-				var at = after ? ti + 1 : ti;
-				if (after) { var td = collDepth(rest, targetId); while (at < rest.length && collDepth(rest, rest[at].id) > td) at++; }
-				rest.splice.apply(rest, [at, 0].concat(blk));
-			}
-			arr.length = 0; Array.prototype.push.apply(arr, rest);
-			collPersist(kind);
+			if (MLCollectionsModel.collPlace(collStoreArr(kind), id, targetId, after, { maxDepth: COLL_MAX_DEPTH })) collPersist(kind);
 		}
 
 		function mkCollBtn(act, icon, title) {
@@ -4308,7 +4352,7 @@
 			b.type = 'button';
 			b.className = 'ml-coll-move';
 			b.dataset.act = act;
-			b.title = title || '';
+			b.dataset.tip = title || '';
 			b.setAttribute('aria-label', title || '');
 			b.innerHTML = '<i class="fa ' + icon + '" aria-hidden="true"></i>';
 			// Keep focus on the inline-rename input when its ✓ (or any control) is
@@ -4319,7 +4363,7 @@
 		// Inline delete-confirm for a manager row (tag-manager pattern).
 		function collDelSetIcon(btn, icon, title) {
 			var i = btn.querySelector('i'); if (i) i.className = 'fa ' + icon;
-			btn.title = title; btn.setAttribute('aria-label', title);
+			btn.dataset.tip = title; btn.setAttribute('aria-label', title);
 		}
 		function collDelArm(btn, li) {
 			collDelArmedBtn = btn;
@@ -4447,7 +4491,7 @@
 				car.type = 'button';
 				car.className = 'ml-coll-caret';
 				car.dataset.act = 'toggle';
-				car.title = collapsed ? (labels.collExpand || 'Expand') : (labels.collCollapse || 'Collapse');
+				car.dataset.tip = collapsed ? (labels.collExpand || 'Expand') : (labels.collCollapse || 'Collapse');
 				car.setAttribute('aria-label', car.title);
 				car.innerHTML = '<i class="fa ' + (collapsed ? 'fa-caret-right' : 'fa-caret-down') + '" aria-hidden="true"></i>';
 				li.appendChild(car);

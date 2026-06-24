@@ -32,6 +32,22 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 			$session->redirect($this->wire('config')->urls->admin . 'module/edit?name=ProcessImageLibrary');
 		}
 
+		$this->addAddonsFieldset($inputfields);
+		$this->addThumbnailFieldset($inputfields);
+		$this->addPaginationFieldset($inputfields);
+		$this->addSortFieldset($inputfields);
+		$this->addColumnsFieldset($inputfields);
+		$this->addScopeFieldset($inputfields);
+		$this->addDeduplicationFieldset($inputfields, $instance, $tokenName, $tokenValue);
+
+		return $inputfields;
+	}
+
+	/**
+	 * addons config fieldset.
+	 */
+	protected function addAddonsFieldset(InputfieldWrapper $inputfields): void {
+		$modules = $this->wire('modules');
 		// --- Picker add-ons (collapsed, OFF by default) ---
 		// Optional integrations that surface the library elsewhere in the admin.
 		// The core library (browse / edit / dedup / export-import) works
@@ -61,7 +77,13 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$addons->add($cbRichtext);
 
 		$inputfields->add($addons);
+	}
 
+	/**
+	 * thumb config fieldset.
+	 */
+	protected function addThumbnailFieldset(InputfieldWrapper $inputfields): void {
+		$modules = $this->wire('modules');
 		// --- Thumbnail rendering ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Thumbnail');
@@ -136,7 +158,13 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$fs->add($f);
 
 		$inputfields->add($fs);
+	}
 
+	/**
+	 * pag config fieldset.
+	 */
+	protected function addPaginationFieldset(InputfieldWrapper $inputfields): void {
+		$modules = $this->wire('modules');
 		// --- Pagination ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Pagination');
@@ -173,7 +201,13 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$fs->add($f);
 
 		$inputfields->add($fs);
+	}
 
+	/**
+	 * sort config fieldset.
+	 */
+	protected function addSortFieldset(InputfieldWrapper $inputfields): void {
+		$modules = $this->wire('modules');
 		// --- Default sort ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Default sort');
@@ -204,7 +238,13 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$fs->add($f);
 
 		$inputfields->add($fs);
+	}
 
+	/**
+	 * cols config fieldset.
+	 */
+	protected function addColumnsFieldset(InputfieldWrapper $inputfields): void {
+		$modules = $this->wire('modules');
 		// --- Columns ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Columns');
@@ -223,7 +263,13 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$fs->add($f);
 
 		$inputfields->add($fs);
+	}
 
+	/**
+	 * scope config fieldset.
+	 */
+	protected function addScopeFieldset(InputfieldWrapper $inputfields): void {
+		$modules = $this->wire('modules');
 		// --- Scope ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Scope');
@@ -278,7 +324,13 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$fs->add($f);
 
 		$inputfields->add($fs);
+	}
 
+	/**
+	 * dedup config fieldset.
+	 */
+	protected function addDeduplicationFieldset(InputfieldWrapper $inputfields, $instance, string $tokenName, string $tokenValue): void {
+		$modules = $this->wire('modules');
 		// --- Deduplication ---
 		$fs = $modules->get('InputfieldFieldset');
 		$fs->label = $this->_('Deduplication');
@@ -400,8 +452,6 @@ class ProcessImageLibraryConfig extends ModuleConfig {
 		$fs->add($tools);
 
 		$inputfields->add($fs);
-
-		return $inputfields;
 	}
 
 	/**

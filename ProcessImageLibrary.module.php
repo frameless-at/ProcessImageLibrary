@@ -560,6 +560,20 @@ class ProcessImageLibrary extends Process {
 	 */
 	public function init() {
 		parent::init();
+
+		// Anonymous requests — practically the entire public front-end traffic —
+		// never need this module, so bail before the config read and any hooks:
+		// the public front end carries zero overhead, while the admin and any
+		// signed-in editor still get the full behaviour. The gate is login state,
+		// not the admin template, for two reasons: the only front-end work (the
+		// rich-text insert glue) renders solely for logged-in editors, since
+		// PageFrontEdit emits no editable markup to a guest; and $page isn't
+		// resolved yet at init() (ProcessPageView sets it after module init),
+		// whereas $user is already established here. Saves left to a logged-in /
+		// admin request reconcile the dedup + where-used index via the LazyCron
+		// maintenance pass.
+		if (!$this->wire('user')->isLoggedin()) return;
+
 		// Pull the saved module config onto this instance so the
 		// runtime helpers ($this->get('thumbWidth') etc.) actually
 		// see the values the admin saved. PW does this for
@@ -1367,58 +1381,9 @@ class ProcessImageLibrary extends Process {
 		$tagFilterPool = $this->flatUsedTags($this->loadRows($filters));
 		$resultsHtml  = $this->renderResultsHtml($filters, $sort, $dir, $requestedPg, $customCols);
 
-		$session   = $this->wire('session');
 		$sanitizer = $this->wire('sanitizer');
-		$thumbDims = $this->getThumbDims();
-		// CSS custom properties carry the configured thumb dims so the
-		// stylesheet's --ml-thumb-w / --ml-thumb-h / --ml-thumb-longer
-		// references reflect the user's settings without inline width
-		// / height per image. The "longer" variable drives keep-ratio
-		// display (proportional, capped to that side), the W / H pair
-		// drives the crop variant (exact box with object-fit: cover).
-		// --ml-thumb-cell-width pins the THUMB column width to the
-		// configured maximum so cells stay uniform regardless of
-		// each image's actual orientation. Keep-ratio mode caps both
-		// axes at longerSide (bounding square); crop mode is exactly
-		// width × height. Without this pin, the table's auto layout
-		// stretches the column to the widest single row.
-		$cellWidth = $thumbDims['keepRatio']
-			? (int) $thumbDims['longerSide']
-			: (int) $thumbDims['width'];
-		// --ml-thumb-scale is the per-user size-slider multiplier on top
-		// of the configured dims; server-rendered here so the initial
-		// paint already reflects the saved scale (no flash), then updated
-		// live by the slider.
-		$rootStyle = sprintf(
-			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;--ml-thumb-cell-width:%dpx;--ml-thumb-scale:%s;',
-			(int) $thumbDims['width'], (int) $thumbDims['height'],
-			(int) $thumbDims['longerSide'], $cellWidth,
-			rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.')
-		);
-		$pickerAttrs = '';
-		if ($this->pickerMode) {
-			$pickerAttrs = sprintf(
-				' data-picker="1" data-target-page="%d" data-target-field="%s"',
-				$this->pickerTargetPage, $sanitizer->entities($this->pickerTargetField)
-			);
-			if ($this->pickerTargetVersion > 0) {
-				$pickerAttrs .= ' data-target-version="' . $this->pickerTargetVersion . '"';
-			}
-			if ($this->pickerInsertMode) $pickerAttrs .= ' data-pick-mode="insert"';
-		}
-		$rootAttrs = sprintf(
-			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-assign-url="%s"'
-			. ' data-cluster-url="%s" data-csrf-name="%s" data-csrf-value="%s"%s style="%s"',
-			$sanitizer->entities($this->wire('page')->url . 'save/'),
-			$sanitizer->entities($this->wire('page')->url . 'data/'),
-			$sanitizer->entities($this->wire('page')->url . 'bulk/'),
-			$sanitizer->entities($this->wire('page')->url . 'assign/'),
-			$sanitizer->entities($this->wire('page')->url . 'cluster-table/'),
-			$sanitizer->entities($session->CSRF->getTokenName()),
-			$sanitizer->entities($session->CSRF->getTokenValue()),
-			$pickerAttrs,
-			$sanitizer->entities($rootStyle)
-		);
+		$rootStyle = $this->buildRootStyleVars();
+		$rootAttrs = $this->buildRootAttrs($rootStyle);
 
 		$out  = '<div class="ml-root' . ($this->pickerMode ? ' ml-root--picker' : '') . '"' . $rootAttrs . '>';
 		// Visually-hidden status region for JS to announce inline-edit
@@ -1441,7 +1406,7 @@ class ProcessImageLibrary extends Process {
 			$cfgTitle = $this->_('Module settings');
 			$cfgLabel = $this->_('Config');
 			$out .= '<a class="ml-config-link" href="' . $sanitizer->entities($cfgUrl) . '"'
-				. ' title="' . $sanitizer->entities($cfgTitle) . '"'
+				. ' data-tip="' . $sanitizer->entities($cfgTitle) . '"'
 				. ' aria-label="' . $sanitizer->entities($cfgTitle) . '">'
 				. $sanitizer->entities($cfgLabel)
 				. '</a>';
@@ -1484,6 +1449,76 @@ class ProcessImageLibrary extends Process {
 		$out .= '</div>';
 
 		return $out;
+	}
+
+	/**
+	 * Build the root element's CSS custom-property string (--ml-thumb-* dims +
+	 * the per-user size-slider scale), so the initial paint reflects the saved
+	 * thumbnail config without a flash. See the inline notes for each var.
+	 */
+	protected function buildRootStyleVars(): string {
+		$thumbDims = $this->getThumbDims();
+		// CSS custom properties carry the configured thumb dims so the
+		// stylesheet's --ml-thumb-w / --ml-thumb-h / --ml-thumb-longer
+		// references reflect the user's settings without inline width
+		// / height per image. The "longer" variable drives keep-ratio
+		// display (proportional, capped to that side), the W / H pair
+		// drives the crop variant (exact box with object-fit: cover).
+		// --ml-thumb-cell-width pins the THUMB column width to the
+		// configured maximum so cells stay uniform regardless of
+		// each image's actual orientation. Keep-ratio mode caps both
+		// axes at longerSide (bounding square); crop mode is exactly
+		// width × height. Without this pin, the table's auto layout
+		// stretches the column to the widest single row.
+		$cellWidth = $thumbDims['keepRatio']
+			? (int) $thumbDims['longerSide']
+			: (int) $thumbDims['width'];
+		// --ml-thumb-scale is the per-user size-slider multiplier on top
+		// of the configured dims; server-rendered here so the initial
+		// paint already reflects the saved scale (no flash), then updated
+		// live by the slider.
+		$rootStyle = sprintf(
+			'--ml-thumb-w:%dpx;--ml-thumb-h:%dpx;--ml-thumb-longer:%dpx;--ml-thumb-cell-width:%dpx;--ml-thumb-scale:%s;',
+			(int) $thumbDims['width'], (int) $thumbDims['height'],
+			(int) $thumbDims['longerSide'], $cellWidth,
+			rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.')
+		);
+		return $rootStyle;
+	}
+
+	/**
+	 * Build the .ml-root data-* attributes (endpoint URLs, CSRF token, picker
+	 * target, and the style vars) the JS reads to bootstrap. $rootStyle comes
+	 * from buildRootStyleVars().
+	 */
+	protected function buildRootAttrs(string $rootStyle): string {
+		$session = $this->wire('session');
+		$sanitizer = $this->wire('sanitizer');
+		$pickerAttrs = '';
+		if ($this->pickerMode) {
+			$pickerAttrs = sprintf(
+				' data-picker="1" data-target-page="%d" data-target-field="%s"',
+				$this->pickerTargetPage, $sanitizer->entities($this->pickerTargetField)
+			);
+			if ($this->pickerTargetVersion > 0) {
+				$pickerAttrs .= ' data-target-version="' . $this->pickerTargetVersion . '"';
+			}
+			if ($this->pickerInsertMode) $pickerAttrs .= ' data-pick-mode="insert"';
+		}
+		$rootAttrs = sprintf(
+			' data-save-url="%s" data-render-url="%s" data-bulk-url="%s" data-assign-url="%s"'
+			. ' data-cluster-url="%s" data-csrf-name="%s" data-csrf-value="%s"%s style="%s"',
+			$sanitizer->entities($this->wire('page')->url . 'save/'),
+			$sanitizer->entities($this->wire('page')->url . 'data/'),
+			$sanitizer->entities($this->wire('page')->url . 'bulk/'),
+			$sanitizer->entities($this->wire('page')->url . 'assign/'),
+			$sanitizer->entities($this->wire('page')->url . 'cluster-table/'),
+			$sanitizer->entities($session->CSRF->getTokenName()),
+			$sanitizer->entities($session->CSRF->getTokenValue()),
+			$pickerAttrs,
+			$sanitizer->entities($rootStyle)
+		);
+		return $rootAttrs;
 	}
 
 	/**
@@ -1559,10 +1594,10 @@ class ProcessImageLibrary extends Process {
 				// Up / Down buttons for keyboard users — same effect as
 				// drag-reorder. JS wires them; the icons stay decorative.
 				. '<button type="button" class="ml-col-move ml-col-move-up"'
-				. ' data-dir="up" aria-label="' . $upLabel . '" title="' . $upLabel . '">'
+				. ' data-dir="up" aria-label="' . $upLabel . '" data-tip="' . $upLabel . '">'
 				. '<i class="fa fa-chevron-up" aria-hidden="true"></i></button>'
 				. '<button type="button" class="ml-col-move ml-col-move-down"'
-				. ' data-dir="down" aria-label="' . $downLabel . '" title="' . $downLabel . '">'
+				. ' data-dir="down" aria-label="' . $downLabel . '" data-tip="' . $downLabel . '">'
 				. '<i class="fa fa-chevron-down" aria-hidden="true"></i></button>'
 				. '</li>';
 		}
@@ -1802,7 +1837,7 @@ class ProcessImageLibrary extends Process {
 		$label = $san->entities(sprintf(
 			$this->_('%d identical copies'), $count
 		));
-		return '<span class="ml-dup-count" title="' . $label . '" aria-label="' . $label . '">'
+		return '<span class="ml-dup-count" data-tip="' . $label . '" aria-label="' . $label . '">'
 			. (int) $count . '</span>';
 	}
 
@@ -1821,7 +1856,7 @@ class ProcessImageLibrary extends Process {
 		));
 		return '<span class="ml-dup-count ml-dup-toggle" data-dup-hash="' . $san->entities($hash) . '"'
 			. ' role="button" tabindex="0" aria-expanded="false"'
-			. ' title="' . $label . '" aria-label="' . $label . '">'
+			. ' data-tip="' . $label . '" aria-label="' . $label . '">'
 			. (int) $count . '</span>';
 	}
 
@@ -1994,15 +2029,16 @@ class ProcessImageLibrary extends Process {
 				$replaceLabel = $san->entities(sprintf($this->_('Replace %s'), (string) $row['basename']));
 				$deleteLabel  = $san->entities(sprintf($this->_('Delete %s'),  (string) $row['basename']));
 				$out .= '<button type="button" class="ml-replace-btn"'
-					. ' title="' . $replaceLabel . '" aria-label="' . $replaceLabel . '">'
-					. '<i class="fa fa-upload" aria-hidden="true"></i></button>';
+					. ' data-tip="' . $replaceLabel . '" aria-label="' . $replaceLabel . '">'
+					. '<i class="ml-vicon ml-vicon-rotate" aria-hidden="true"></i></button>';
 				$out .= '<button type="button" class="ml-delete-btn"'
-					. ' title="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
+					. ' data-tip="' . $deleteLabel . '" aria-label="' . $deleteLabel . '">'
 					. '<i class="fa fa-trash-o" aria-hidden="true"></i></button>';
 			}
 			if (!$this->pickerMode) {
 				$out .= $this->renderDupBadge((int) ($row['dupCount'] ?? 0), (string) ($row['dupHash'] ?? ''));
 			}
+			$out .= $this->renderDownloadButton($row);
 			$out .= '</div>'; // .ml-cell-thumb
 			$out .= '</div>'; // .ml-card
 		}
@@ -2040,7 +2076,7 @@ class ProcessImageLibrary extends Process {
 			$out .= '<a class="ml-view-btn' . ($active ? ' ml-view-active' : '') . '"'
 				. ' href="' . $san->entities($viewBase . $viewSep . 'view=' . $mode) . '"'
 				. ' data-view="' . $mode . '"'
-				. ' title="' . $lbl . '" aria-label="' . $lbl . '"'
+				. ' data-tip="' . $lbl . '" aria-label="' . $lbl . '"'
 				. ($active ? ' aria-current="true"' : '') . '>'
 				. '<i class="' . $icon . '" aria-hidden="true"></i></a>';
 		}
@@ -2446,28 +2482,7 @@ class ProcessImageLibrary extends Process {
 		// / tag handling applies to these.
 		$customType = $this->getCustomTypes()[$subfield] ?? null;
 		if (in_array($customType, ['checkbox', 'date', 'number', 'select', 'page'], true)) {
-			$field   = $this->wire('fields')->get($subfield);
-			$coerced = $this->coerceCustomValue($page, $field, $customType, $value);
-			try {
-				$img->set($subfield, $coerced);
-				$saved = $page->save($fieldName);
-			} catch (\Throwable $e) {
-				return $this->jsonError('Save error: ' . $e->getMessage());
-			}
-			if (!$saved) {
-				return $this->jsonError('Save returned false — value may not have persisted');
-			}
-			$this->wire('cache')->deleteFor($this);
-
-			$key   = $this->rowKey($pageId, $fieldName, $basename);
-			$match = $this->matchTouchedRows([$key]);
-			return $this->jsonResponse([
-				'ok'           => true,
-				'value'        => (string) $this->readCustomValue($img, $subfield),
-				'rawValue'     => $this->readCustomRaw($img, $subfield),
-				'stillMatches' => !in_array($key, $match['vanished'], true),
-				'newTotal'     => $match['newTotal'],
-			]);
+			return $this->saveTypedCustom($page, $img, $fieldName, $subfield, $customType, $value);
 		}
 
 		// Multilang popup ships a per-language map alongside the
@@ -2531,40 +2546,82 @@ class ProcessImageLibrary extends Process {
 		// re-fetch reads it. Matches the behavior in executeBulk.
 		$this->wire('cache')->deleteFor($this);
 
-		// Return the value PW actually stored — may differ from input after
-		// sanitization (e.g. tags lowercased, whitespace normalized, etc.).
-		// Multilang values get reduced to the current-user-language string
-		// so the inline cell display matches what the editor sees.
+		$tagsMode = $subfield === 'tags' ? (int) ($tagsCfg['mode'] ?? 0) : 0;
+		return $this->jsonResponse(
+			$this->buildSaveResponse($img, $subfield, $fieldName, $pageId, $basename, $tagsMode)
+		);
+	}
+
+	/**
+	 * Save a typed custom subfield (checkbox / date / number / select / page):
+	 * coerce to the Fieldtype's stored shape, set + save, and return the typed
+	 * display + editor-raw value. No placeholder / multilang / tag handling
+	 * applies to these. Returns the JSON response string.
+	 */
+	protected function saveTypedCustom(Page $page, Pageimage $img, string $fieldName, string $subfield, string $customType, string $value): string {
+		$field   = $this->wire('fields')->get($subfield);
+		$coerced = $this->coerceCustomValue($page, $field, $customType, $value);
+		try {
+			$img->set($subfield, $coerced);
+			$saved = $page->save($fieldName);
+		} catch (\Throwable $e) {
+			return $this->jsonError('Save error: ' . $e->getMessage());
+		}
+		if (!$saved) {
+			return $this->jsonError('Save returned false — value may not have persisted');
+		}
+		$this->wire('cache')->deleteFor($this);
+
+		$key   = $this->rowKey((int) $page->id, $fieldName, (string) $img->basename);
+		$match = $this->matchTouchedRows([$key]);
+		return $this->jsonResponse([
+			'ok'           => true,
+			'value'        => (string) $this->readCustomValue($img, $subfield),
+			'rawValue'     => $this->readCustomRaw($img, $subfield),
+			'stillMatches' => !in_array($key, $match['vanished'], true),
+			'newTotal'     => $match['newTotal'],
+		]);
+	}
+
+	/**
+	 * Assemble the JSON response payload for a (non-typed) inline save: the
+	 * stored value, plus — when relevant — the refreshed predefined-tag list
+	 * (tags mode 3), every-language values for multilang cells, and the match-
+	 * aware stillMatches / newTotal so the client can fade rows that dropped
+	 * out of the active filter.
+	 *
+	 * @return array<string,mixed>
+	 */
+	protected function buildSaveResponse(Pageimage $img, string $subfield, string $fieldName, int $pageId, string $basename, int $tagsMode): array {
+		// The value PW actually stored — may differ from input after
+		// sanitization (tags lowercased / whitespace normalized, etc.).
+		// Multilang values reduce to the current-user-language string.
 		$stored = $this->normalizeDescription($img->get($subfield));
 
 		$response = [
 			'ok'    => true,
 			'value' => (string) $stored,
 		];
-		// Mode 3 ("predefined + can input their own"): make any new tag part of
-		// the field's predefined list so it's offered on every other image too.
-		// Hand the updated list back so the client can refresh open cells without
-		// a reload.
-		if ($subfield === 'tags' && ($tagsCfg['mode'] ?? 0) === 3) {
+		// Mode 3 ("predefined + can input their own"): promote any new tag into
+		// the field's predefined list and hand the updated list back so open
+		// cells can refresh without a reload.
+		if ($subfield === 'tags' && $tagsMode === 3) {
 			$response['tagsAllowed'] = array_values($this->registerFieldTags($fieldName, (string) $stored));
 			$response['field']       = $fieldName;
 		}
-		// Multilang fields: also hand back every language's value so
-		// the client can refresh the cell's data-lang-<id> attrs in
-		// place. Without this the next popup-open reads stale
-		// pre-save attrs and shows the old text in every tab.
+		// Multilang fields: hand back every language's value so the client can
+		// refresh the cell's data-lang-<id> attrs in place (else the next popup
+		// reads stale pre-save attrs).
 		$langValues = $this->readLangValues($img, $subfield);
 		if ($langValues !== null) {
 			$response['langValues'] = $langValues;
 		}
-		// Match-aware UX: tell the client whether the saved row still
-		// passes the active filter set, so it can fade rows out that
-		// dropped out of scope (e.g. "missing tags" → user adds a tag).
+		// Match-aware UX: does the saved row still pass the active filter set?
 		$key   = $this->rowKey($pageId, $fieldName, $basename);
 		$match = $this->matchTouchedRows([$key]);
 		$response['stillMatches'] = !in_array($key, $match['vanished'], true);
 		$response['newTotal']     = $match['newTotal'];
-		return $this->jsonResponse($response);
+		return $response;
 	}
 
 	/**
@@ -3749,6 +3806,108 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * Emit a short plain-text error + status and exit. Used by the binary
+	 * download endpoint, which streams a file rather than JSON.
+	 */
+	protected function emitDownloadError(int $status, string $message): void {
+		while (ob_get_level() > 0) ob_end_clean();
+		http_response_code($status);
+		if (!headers_sent()) header('Content-Type: text/plain; charset=utf-8');
+		echo $message;
+		exit;
+	}
+
+	/**
+	 * Pick a collision-free entry name for a zip. Basenames are unique within
+	 * one page/field but can repeat across a multi-page selection, so a second
+	 * "hero.jpg" becomes "hero (2).jpg" rather than silently overwriting.
+	 *
+	 * @param array<string,bool> $used  names already taken, by reference
+	 */
+	protected function uniqueZipEntry(string $basename, array &$used): string {
+		if (!isset($used[$basename])) { $used[$basename] = true; return $basename; }
+		$dot  = strrpos($basename, '.');
+		$stem = $dot === false ? $basename : substr($basename, 0, $dot);
+		$ext  = $dot === false ? '' : substr($basename, $dot);
+		$i = 2;
+		do { $cand = $stem . ' (' . $i . ')' . $ext; $i++; } while (isset($used[$cand]));
+		$used[$cand] = true;
+		return $cand;
+	}
+
+	/**
+	 * Bulk download: stream the selected images as a single ZIP. POSTed the
+	 * same { pageId, fieldName, basename } item list the bulk endpoints use, so
+	 * a cross-page selection is resolved server-side (the client can't see
+	 * off-page file URLs). Read-only — no per-page edit check, only the
+	 * module's image-library-access permission (already enforced on this page)
+	 * plus POST + CSRF. Streams binary, so it does NOT go through beginJsonPost.
+	 */
+	public function ___executeDownloadZip() {
+		$input = $this->wire('input');
+		if (strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? '')) !== 'POST') {
+			$this->emitDownloadError(405, 'POST required');
+		}
+		if (!$this->wire('session')->CSRF->hasValidToken()) {
+			$this->emitDownloadError(403, 'Invalid CSRF token');
+		}
+		if (!class_exists('\ZipArchive')) {
+			$this->emitDownloadError(500, 'ZipArchive is not available on this server');
+		}
+
+		$sanitizer = $this->wire('sanitizer');
+		$items = json_decode((string) $input->post('items'), true);
+		if (!is_array($items) || !$items) {
+			$this->emitDownloadError(400, 'No items selected');
+		}
+
+		$imageFields = $this->discoverImageFields();
+		$paths = [];   // entryName => absolute path
+		$used  = [];
+		foreach ($items as $item) {
+			$pid = (int) ($item['pageId'] ?? 0);
+			$fn  = $sanitizer->fieldName((string) ($item['fieldName'] ?? ''));
+			$bn  = basename((string) ($item['basename'] ?? ''));
+			if (!$pid || !$fn || !$bn) continue;
+			if (!in_array($fn, $imageFields, true)) continue;
+			$page = $this->wire('pages')->get($pid);
+			if (!$page->id) continue;
+			$img = $this->resolvePageimage($page, $fn, $bn);
+			if (!$img) continue;
+			$path = (string) $img->filename;
+			if ($path === '' || !is_file($path)) continue;
+			$paths[$this->uniqueZipEntry($bn, $used)] = $path;
+		}
+		if (!$paths) {
+			$this->emitDownloadError(404, 'No downloadable files found');
+		}
+
+		$tmp = (string) @tempnam(sys_get_temp_dir(), 'mlzip');
+		if ($tmp === '') {
+			$this->emitDownloadError(500, 'Could not allocate a temp file');
+		}
+		$zip = new \ZipArchive();
+		if ($zip->open($tmp, \ZipArchive::OVERWRITE) !== true) {
+			@unlink($tmp);
+			$this->emitDownloadError(500, 'Could not create the archive');
+		}
+		foreach ($paths as $entry => $path) {
+			$zip->addFile($path, $entry);
+		}
+		$zip->close();
+
+		while (ob_get_level() > 0) ob_end_clean();
+		if (!headers_sent()) {
+			header('Content-Type: application/zip');
+			header('Content-Length: ' . (string) filesize($tmp));
+			header('Content-Disposition: attachment; filename="images.zip"');
+		}
+		readfile($tmp);
+		@unlink($tmp);
+		exit;
+	}
+
+	/**
 	 * AJAX endpoint: apply one action to a batch of selected images.
 	 *
 	 * Action:
@@ -3943,38 +4102,18 @@ class ProcessImageLibrary extends Process {
 					: $this->resolveRenamePattern((string) $value, $ctx);
 
 				if ($subfield === 'tags') {
-					$tokens = $this->splitTags($itemValue);
-					// Whitelist gate per item: tag whitelist can differ per
-					// field, so we check per item rather than rejecting the
-					// whole batch up front.
-					$tagCfg = $tagsCfg[$fn] ?? ['mode' => 0, 'allowed' => []];
-					if ($tagCfg['mode'] === 2) {
-						$disallowed = array_diff($tokens, $tagCfg['allowed']);
-						if ($disallowed) {
-							$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $disallowed));
-							continue;
-						}
-					} elseif ($tagCfg['mode'] === 3 && $mode !== 'remove') {
-						// Remember newly-entered tags to promote into the field's
-						// predefined list after the batch (so they're offered on
-						// every image, not just this one).
-						foreach ($tokens as $t) $mode3TagTokens[$fn][$t] = true;
+					// Whitelist gate per item: tag config can differ per field,
+					// so resolve per row rather than rejecting the whole batch.
+					$tagCfg   = $tagsCfg[$fn] ?? ['mode' => 0, 'allowed' => []];
+					$resolved = $this->resolveBulkTagValue((string) $img->tags, $itemValue, $mode, $tagCfg);
+					if ($resolved['rejected']) {
+						$failed[] = sprintf('Tag(s) not in whitelist for %s: %s', $fn, implode(', ', $resolved['rejected']));
+						continue;
 					}
-					if ($mode === 'add') {
-						// Union with the row's existing tags, dedup.
-						$existing = $this->splitImageTags((string) $img->tags);
-						$tokens   = array_values(array_unique(array_merge($existing, $tokens)));
-					} elseif ($mode === 'remove') {
-						// Set difference: drop every token the user
-						// listed from the row's existing tag set. No-op
-						// for rows that don't carry any of them.
-						$existing = $this->splitImageTags((string) $img->tags);
-						$drop     = array_flip($tokens);
-						$tokens   = array_values(array_filter($existing, function ($t) use ($drop) {
-							return !isset($drop[$t]);
-						}));
-					}
-					$itemValue = implode(' ', $tokens);
+					// Promote newly-entered mode-3 tags into the field's
+					// predefined list after the batch (offered on every image).
+					foreach ($resolved['newTags'] as $t) $mode3TagTokens[$fn][$t] = true;
+					$itemValue = $resolved['value'];
 				} elseif ($mode === 'add') {
 					// Add of an empty delta is a no-op — don't append a
 					// trailing space to every selected row.
@@ -4054,6 +4193,41 @@ class ProcessImageLibrary extends Process {
 			'renamed'   => (object) $renamed,
 			'tagsAllowed' => (object) $tagsAllowed,
 		]);
+	}
+
+	/**
+	 * Pure resolver for a bulk tag write on one row: given the row's existing
+	 * tag string, the user's input, the mode (replace / add / remove) and the
+	 * field's tag config, return the final tag-string value, the new tokens to
+	 * promote into a mode-3 predefined list, and any whitelist-rejected tokens
+	 * (mode 2). The caller owns the side effects (fail on rejected, accumulate
+	 * newTags); no DOM / save / page state here.
+	 *
+	 * @param array{mode:int,allowed:array<int,string>} $tagCfg
+	 * @return array{value:string,newTags:array<int,string>,rejected:array<int,string>}
+	 */
+	protected function resolveBulkTagValue(string $existingTags, string $input, string $mode, array $tagCfg): array {
+		$tokens   = $this->splitTags($input);
+		$rejected = [];
+		$newTags  = [];
+		if ($tagCfg['mode'] === 2) {
+			$rejected = array_values(array_diff($tokens, $tagCfg['allowed']));
+		} elseif ($tagCfg['mode'] === 3 && $mode !== 'remove') {
+			$newTags = $tokens;
+		}
+		if ($mode === 'add') {
+			// Union with the row's existing tags, dedup.
+			$existing = $this->splitImageTags($existingTags);
+			$tokens   = array_values(array_unique(array_merge($existing, $tokens)));
+		} elseif ($mode === 'remove') {
+			// Set difference: drop every listed token from the row's set.
+			$existing = $this->splitImageTags($existingTags);
+			$drop     = array_flip($tokens);
+			$tokens   = array_values(array_filter($existing, function ($t) use ($drop) {
+				return !isset($drop[$t]);
+			}));
+		}
+		return ['value' => implode(' ', $tokens), 'newTags' => $newTags, 'rejected' => $rejected];
 	}
 
 	/**
@@ -5865,6 +6039,7 @@ class ProcessImageLibrary extends Process {
 
 		foreach ($slice as &$row) {
 			$row['thumbUrl']        = '';
+			$row['downloadUrl']     = '';
 			$row['pageUrl']         = '';
 			$row['pageEditUrl']     = '';
 			$row['variationsCount'] = 0;
@@ -5908,6 +6083,8 @@ class ProcessImageLibrary extends Process {
 			$row['thumbUrl']    = $thumbInfo['url'];
 			$row['thumbWidth']  = $thumbInfo['width'];
 			$row['thumbHeight'] = $thumbInfo['height'];
+			// Original (full-size) file URL for the per-thumbnail download button.
+			$row['downloadUrl'] = (string) $img->url;
 			// Variations count — Phase 2 column from the concept,
 			// useful for pre-warm diagnosis and cleanup. getVariations()
 			// does a filesystem scan per image, but only for the 50-ish
@@ -6046,6 +6223,10 @@ class ProcessImageLibrary extends Process {
 		$cssVer  = @filemtime($baseDir . 'ProcessImageLibrary.css') ?: $version;
 		$jsVer   = @filemtime($baseDir . 'ProcessImageLibrary.js')  ?: $version;
 		$config->styles->add($baseUrl . 'ProcessImageLibrary.css?v=' . $cssVer);
+		// The pure tree model must load BEFORE the main script, which aliases
+		// window.MLCollectionsModel at IIFE-init time (see collections-model.js).
+		$modelVer = @filemtime($baseDir . 'assets/collections-model.js') ?: $version;
+		$config->scripts->add($baseUrl . 'assets/collections-model.js?v=' . $modelVer);
 		$config->scripts->add($baseUrl . 'ProcessImageLibrary.js?v=' . $jsVer);
 
 		$imageFields = $this->discoverImageFields();
@@ -6058,6 +6239,7 @@ class ProcessImageLibrary extends Process {
 			'renameUrl'  => $this->wire('page')->url . 'rename/',
 			'replaceUrl' => $this->wire('page')->url . 'replace/',
 			'deleteUrl'  => $this->wire('page')->url . 'delete/',
+			'zipUrl'     => $this->wire('page')->url . 'download-zip/',
 			'usageUrl'   => $this->wire('page')->url . 'usage/',
 			'usageDetailUrl' => $this->wire('page')->url . 'usage-detail/',
 			'widgetUrl'  => $this->wire('page')->url . 'widget/',
@@ -6110,6 +6292,10 @@ class ProcessImageLibrary extends Process {
 			'labels' => [
 				'saving'           => $this->_('Saving…'),
 				'loading'          => $this->_('Loading…'),
+				'preparingZip'     => $this->_('Preparing ZIP…'),
+				// %d is filled in client-side with the live selection count.
+				'tipDownloadBatch' => $this->_('Download %d selected as ZIP'),
+				'tipDeleteBatch'   => $this->_('Delete %d selected'),
 				'saved'            => $this->_('Saved'),
 				'error'            => $this->_('Save failed'),
 				'done'             => $this->_('Done'),
@@ -6345,7 +6531,7 @@ class ProcessImageLibrary extends Process {
 				. '</a>'
 				. ($canManageShared
 					? '<button type="button" class="ml-bookmark-del"'
-						. ' aria-label="' . $delTitle . '" title="' . $delTitle . '">'
+						. ' aria-label="' . $delTitle . '" data-tip="' . $delTitle . '">'
 						. '<i class="fa fa-times" aria-hidden="true"></i></button>'
 					: '')
 				. '</li>';
@@ -6386,7 +6572,7 @@ class ProcessImageLibrary extends Process {
 		if ($canManageShared) {
 			$manageTitle = $this->_('Manage bookmarks & collections');   // literal &, no entities (see renderCollectionsDialog)
 			$out .= '<li class="ml-collections-manage"><a href="#" role="button"'
-				. ' title="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
+				. ' data-tip="' . $manageTitle . '" aria-label="' . $manageTitle . '">'
 				. '<i class="ml-vicon ml-vicon-sliders" aria-hidden="true"></i></a></li>';
 		}
 
@@ -6395,7 +6581,7 @@ class ProcessImageLibrary extends Process {
 		// whenever a checkbox selection exists (→ "save as collection").
 		$addHidden = (!$canManageShared || $currentCanon === '' || $bookmarkMatched) ? ' hidden' : '';
 		$out .= '<li class="ml-bookmarks-add"' . $addHidden . '><a href="#" role="button"'
-			. ' title="' . $addTitle . '">'
+			. ' data-tip="' . $addTitle . '">'
 			. '<i class="fa fa-plus" aria-hidden="true"></i> ' . $addLabel
 			. '</a></li>';
 
@@ -6485,6 +6671,45 @@ class ProcessImageLibrary extends Process {
 			: $this->_('Filters');
 		$outer->collapsed = Inputfield::collapsedYes;
 
+		$this->addSearchRow($outer, $filters, $imageFields, $eligibleTemplates);
+
+		$this->addTagsFieldset($outer, $filters, $tagFilterPool);
+
+		$this->addMissingCheckboxes($outer, $filters, $customCols);
+
+		// Apply + Reset as raw UIkit buttons inside an InputfieldMarkup.
+		// PW's InputfieldSubmit / InputfieldButton render their <button>
+		// with jQuery-UI heritage classes (ui-button …) that
+		// AdminThemeUikit styles with enough weight to override any
+		// uk-button class added alongside — so adding uk classes to the
+		// core fields has no visual effect. Hand-rendering is the only
+		// way to get true UIkit buttons that match the module's own
+		// dialog buttons (uk-button-secondary = grey, like Cancel /
+		// Close). Apply is type=submit so the form's submit handler
+		// still fires; Reset stays a real <a href="./"> the JS
+		// intercepts for the AJAX reset. Flex-left layout via
+		// .ml-filter-actions.
+		$san = $this->wire('sanitizer');
+		$actions = $modules->get('InputfieldMarkup');
+		$actions->name        = 'mlActions';
+		$actions->skipLabel   = Inputfield::skipLabelHeader;
+		$actions->columnWidth = 100;
+		$actions->value =
+			'<div class="ml-filter-actions">'
+			. '<button type="submit" name="apply" class="uk-button uk-button-primary">'
+			. $san->entities($this->_('Apply')) . '</button>'
+			. '<a href="./" class="ml-reset uk-button uk-button-secondary">'
+			. $san->entities($this->_('Reset')) . '</a>'
+			. '</div>';
+		$outer->add($actions);
+
+		$form->add($outer);
+
+		return $form->render();
+	}
+
+	protected function addSearchRow(InputfieldFieldset $outer, array $filters, array $imageFields, array $eligibleTemplates): void {
+		$modules = $this->wire('modules');
 		// Row 1: Search + Template + Image field, 33/33/34 — except in the picker,
 		// where Template / Image field are developer concepts a normal author
 		// can't use, so only Search remains (full width). Authors narrow via the
@@ -6525,7 +6750,10 @@ class ProcessImageLibrary extends Process {
 			$fld->columnWidth = 34;
 			$outer->add($fld);
 		}
+	}
 
+	protected function addTagsFieldset(InputfieldFieldset $outer, array $filters, array $tagFilterPool): void {
+		$modules = $this->wire('modules');
 		// Tags fieldset (full width, always open when present). Rendered
 		// unconditionally so the JS field-capability filter has DOM to
 		// toggle — same pattern as the template→field narrowing: PHP
@@ -6559,7 +6787,10 @@ class ProcessImageLibrary extends Process {
 
 			$outer->add($tagsFs);
 		}
+	}
 
+	protected function addMissingCheckboxes(InputfieldFieldset $outer, array $filters, array $customCols): void {
+		$modules = $this->wire('modules');
 		// Missing-X + Duplicates are AUDIT filters (find images that need
 		// metadata, or byte-identical copies). When you're picking an image to
 		// insert into a field they're just noise — skip them in the picker.
@@ -6599,36 +6830,6 @@ class ProcessImageLibrary extends Process {
 			if (!empty($filters['dupes'])) $dupCb->attr('checked', 'checked');
 			$outer->add($dupCb);
 		}
-
-		// Apply + Reset as raw UIkit buttons inside an InputfieldMarkup.
-		// PW's InputfieldSubmit / InputfieldButton render their <button>
-		// with jQuery-UI heritage classes (ui-button …) that
-		// AdminThemeUikit styles with enough weight to override any
-		// uk-button class added alongside — so adding uk classes to the
-		// core fields has no visual effect. Hand-rendering is the only
-		// way to get true UIkit buttons that match the module's own
-		// dialog buttons (uk-button-secondary = grey, like Cancel /
-		// Close). Apply is type=submit so the form's submit handler
-		// still fires; Reset stays a real <a href="./"> the JS
-		// intercepts for the AJAX reset. Flex-left layout via
-		// .ml-filter-actions.
-		$san = $this->wire('sanitizer');
-		$actions = $modules->get('InputfieldMarkup');
-		$actions->name        = 'mlActions';
-		$actions->skipLabel   = Inputfield::skipLabelHeader;
-		$actions->columnWidth = 100;
-		$actions->value =
-			'<div class="ml-filter-actions">'
-			. '<button type="submit" name="apply" class="uk-button uk-button-primary">'
-			. $san->entities($this->_('Apply')) . '</button>'
-			. '<a href="./" class="ml-reset uk-button uk-button-secondary">'
-			. $san->entities($this->_('Reset')) . '</a>'
-			. '</div>';
-		$outer->add($actions);
-
-		$form->add($outer);
-
-		return $form->render();
 	}
 
 	/**
@@ -6746,38 +6947,7 @@ class ProcessImageLibrary extends Process {
 			$headers = array_values(array_filter($headers, fn($h) => $h[0] !== 'tags'));
 		}
 
-		// Outer scroller so the wide table can overflow horizontally
-		// on narrow viewports without breaking the table layout.
-		// pw-table-responsive + uk-overflow-auto handle horizontal
-		// scroll on narrow viewports the same way every other PW
-		// data table does. pw-table-sortable is included because
-		// the inner table carries .AdminDataTableSortable; the
-		// wrapper class is what some PW-side JS hooks check.
-		$out  = '<div class="ml-table-scroll pw-table-responsive uk-overflow-auto pw-table-sortable">';
-		// Class set is intentional, every entry carries weight:
-		//   ml-table         — module-side hooks
-		//   AdminDataTable   — non-Uikit themes (Reno, Default) pick
-		//                      up their own admin-table chrome here
-		//   AdminDataTableSortable — paired with tablesorter-* classes
-		//                      below to inherit the theme's sort
-		//                      styling (active-asc / desc colour,
-		//                      FontAwesome arrow glyphs) without
-		//                      re-implementing it module-side
-		//   uk-table*        — active styling under AdminThemeUikit
-		$out .= '<table class="ml-table AdminDataTable AdminDataTableSortable uk-table uk-table-divider uk-table-small">';
-		// tablesorter-headerRow matches AdminThemeUikit's compound
-		// selector for the sort-state visuals.
-		$out .= '<thead><tr class="tablesorter-headerRow">';
-		$out .= '<th class="ml-cell-select">'
-			. '<input type="checkbox" class="uk-checkbox ml-select-all" title="'
-			. $san->entities($this->_('Select all on page')) . '"></th>';
-		foreach ($headers as [$colKey, $label, $sortKey]) {
-			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters);
-		}
-		foreach ($customCols as $name) {
-			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters);
-		}
-		$out .= '</tr></thead><tbody>';
+		$out = $this->renderTableHead($headers, $customCols, $sort, $dir, $filters);
 
 		// Collections column: index every team collection's row-keys once, so each
 		// row can list (and link) the collections it appears under in O(1). UNION
@@ -6878,94 +7048,7 @@ class ProcessImageLibrary extends Process {
 				. '<input type="checkbox" class="uk-checkbox ml-select-row" data-key="'
 				. $san->entities($selKey) . '"></td>';
 
-			// Thumbnail cell becomes clickable when the host page is
-			// editable — JS opens the PW page editor for just this
-			// image field in a modal iframe so the user gets the
-			// native crop / focus / variations UI. The file-hash
-			// (md5 of basename, matching Pagefile::hash()) lets the
-			// iframe filter find the matching gridImage via id
-			// selector instead of string-matching URLs.
-			// Thumb td only carries the hash + identity attrs when the
-			// host page is editable — that's what gates the click-
-			// through to the per-image editor iframe.
-			// Thumb td picks up the edit attrs (and a button role) only
-			// when the host page is editable — the click / keyboard
-			// activator opens the per-image editor modal.
-			if (!empty($row['pageEditUrl'])) {
-				$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-					$this->_('Open editor for %s'), (string) $row['basename']
-				)));
-				$thumbAttrs = ' ' . $editAttrs . $editA11y . $thumbAria;
-			} else {
-				$thumbAttrs = '';
-			}
-			$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
-			if (!empty($row['thumbUrl'])) {
-				// Display dimensions are derived from the user's
-				// configured target, NOT the source file. In keep-
-				// ratio mode the longer axis is capped to the
-				// configured longerSide; the other axis follows the
-				// source's aspect. In crop mode the visible box is
-				// exactly W × H and CSS object-fit: cover handles
-				// any overflow from the admin-variation source.
-				// Pre-computed here so the <img> width / height
-				// attributes prevent layout shift before the bytes
-				// land.
-				$srcW = (int) ($row['thumbWidth']  ?? 0);
-				$srcH = (int) ($row['thumbHeight'] ?? 0);
-				if ($thumb['keepRatio']) {
-					$longer = (int) $thumb['longerSide'];
-					if ($srcW >= $srcH) {
-						$dispW = $srcW > 0 ? min($longer, $srcW) : $longer;
-						$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
-					} else {
-						$dispH = $srcH > 0 ? min($longer, $srcH) : $longer;
-						$dispW = $srcH > 0 ? (int) round($srcW * $dispH / $srcH) : $srcW;
-					}
-					$cls = 'ml-thumb';
-				} else {
-					$dispW = (int) $thumb['width'];
-					$dispH = (int) $thumb['height'];
-					$cls   = 'ml-thumb ml-thumb-crop';
-				}
-				$out .= '<img class="' . $cls . '"'
-					. ' src="' . $san->entities($row['thumbUrl']) . '"'
-					. ' alt="' . $san->entities($row['basename']) . '"'
-					. ' loading="lazy"'
-					. ' width="' . $dispW . '"'
-					. ' height="' . $dispH . '">';
-			}
-			// Per-row actions — both icons hang in the top-right of the
-			// thumb cell and are visible only on row hover. Replace
-			// triggers the file picker / accepts a row DnD; Delete
-			// opens a confirm dialog. Batch semantics for Delete
-			// follow the existing paintbrush: when N rows are
-			// selected, clicking Delete on any selected row's icon
-			// deletes the whole selection.
-			if (!empty($row['pageEditUrl'])) {
-				$replaceLabel = $san->entities(sprintf(
-					$this->_('Replace %s'), (string) $row['basename']
-				));
-				$deleteLabel = $san->entities(sprintf(
-					$this->_('Delete %s'), (string) $row['basename']
-				));
-				$out .= '<button type="button" class="ml-replace-btn"'
-					. ' title="' . $replaceLabel . '"'
-					. ' aria-label="' . $replaceLabel . '">'
-					. '<i class="fa fa-upload" aria-hidden="true"></i>'
-					. '</button>';
-				$out .= '<button type="button" class="ml-delete-btn"'
-					. ' title="' . $deleteLabel . '"'
-					. ' aria-label="' . $deleteLabel . '">'
-					. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
-					. '</button>';
-			}
-			// Head of a duplicate cluster → expand/collapse toggle. Copy rows
-			// and unique images carry no indicator.
-			if ($isDupHead) {
-				$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
-			}
-			$out .= '</td>';
+			$out .= $this->renderThumbCell($row, $editAttrs, $editA11y, $isDupHead, $rowDupHash, $thumb);
 
 			$pageTitle = $this->normalizeDescription($row['pageTitle']);
 			$out .= '<td class="ml-cell-page" data-col="page">';
@@ -6993,7 +7076,7 @@ class ProcessImageLibrary extends Process {
 			$fid = $fieldIdCache[$fname];
 			$out .= '<td data-col="field"><code>';
 			if ($fid) {
-				$out .= '<a href="' . $san->entities($fieldEditBase . $fid) . '" title="'
+				$out .= '<a href="' . $san->entities($fieldEditBase . $fid) . '" data-tip="'
 					. $san->entities(sprintf($this->_('Edit the “%s” field'), $fname)) . '">'
 					. $fieldLabel . '</a>';
 			} else {
@@ -7030,7 +7113,7 @@ class ProcessImageLibrary extends Process {
 					// some OTHER image field in the union has tags on. This
 					// row's cell can't be edited; render as N/A to match
 					// the custom-field "not configured" treatment.
-					$out .= '<td class="ml-cell-na" data-col="tags" title="'
+					$out .= '<td class="ml-cell-na" data-col="tags" data-tip="'
 						. $san->entities(sprintf(
 							$this->_('tags is not configured on %s'),
 							(string) $row['fieldName']
@@ -7077,7 +7160,7 @@ class ProcessImageLibrary extends Process {
 					. ' data-page-id="' . (int) $row['pageId'] . '"'
 					. ' data-field="' . $san->entities((string) $row['fieldName']) . '"'
 					. ' data-basename="' . $san->entities((string) $row['basename']) . '"'
-					. ' title="' . $san->entities(sprintf(
+					. ' data-tip="' . $san->entities(sprintf(
 						$this->_('Embedded on %d page(s) — click to list'), $usageCount
 					)) . '">' . $usageCount . '</a>';
 			} else {
@@ -7091,7 +7174,7 @@ class ProcessImageLibrary extends Process {
 			// tree to assign / unassign the image (JS reads the row identity attrs).
 			$out .= '<td class="ml-cell-collections' . ($canAssignColl ? ' ml-cell-coll-edit' : '') . '" data-col="collections"';
 			if ($canAssignColl) {
-				$out .= ' ' . $editAttrs . ' role="button" tabindex="0" title="'
+				$out .= ' ' . $editAttrs . ' role="button" tabindex="0" data-tip="'
 					. $san->entities($this->_('Assign to collections')) . '"';
 			}
 			$out .= '>';
@@ -7115,97 +7198,7 @@ class ProcessImageLibrary extends Process {
 
 			$rowCustoms = $customByField[$row['fieldName']] ?? [];
 			foreach ($customCols as $name) {
-				$colAttr = ' data-col="custom:' . $san->entities($name) . '"';
-				// Type-class lives on every custom cell (NA + editable
-				// alike) so column-level width rules apply uniformly
-				// regardless of whether a given row has that subfield.
-				// Keyed by Inputfield type, not by field name, so the
-				// CSS scales to new custom subfields without per-name
-				// rules.
-				$inputType = $customInputTypes[$name] ?? 'text';
-				$typeClass = 'ml-cell-' . $san->entities($inputType);
-				// When the customCols list is the union across image
-				// fields (no field filter), some rows won't host every
-				// listed subfield — render those as visually disabled
-				// instead of editable so a click can't trigger an editor
-				// for a field the server would reject anyway.
-				if (!in_array($name, $rowCustoms, true)) {
-					$out .= '<td class="ml-cell-na ' . $typeClass . '"' . $colAttr . ' title="'
-						. $san->entities(sprintf(
-							$this->_('%1$s is not configured on %2$s'),
-							$name,
-							(string) $row['fieldName']
-						)) . '">—</td>';
-					continue;
-				}
-				$raw = $row['custom'][$name] ?? '';
-				$val = $this->normalizeDescription($raw);
-				// Page-reference fields render PW's configured inputfield
-				// (PageAutocomplete / PageListSelect / ASMSelect / …) in
-				// the popup — JS fetches the rendered HTML from
-				// ___executeWidget, injects it, fires the 'reloaded' DOM
-				// event so each inputfield's own JS initialises on the
-				// new nodes. No more inline checkbox-list / multi-select.
-				$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select', 'page'], true);
-				if (in_array($inputType, ['text', 'textarea'], true)) {
-					// Inline-editable prose cell.
-					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
-					)));
-					// Only textarea-backed customs get the clamp box; single-
-					// line text customs are short and stay a plain text node.
-					$customInner = $inputType === 'textarea'
-						? $this->clampCell((string) $val)
-						: $san->entities((string) $val);
-					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
-						. ' data-subfield="' . $san->entities($name) . '"'
-						. ' data-input="' . $san->entities($inputType) . '"'
-						. $this->buildLangAttrs($raw) . '>'
-						. $customInner . '</td>';
-				} elseif ($inlineTyped && !empty($row['pageEditUrl'])) {
-					// Inline-editable typed cell. Display shows the typed
-					// value (glyph / date / label); data-value carries
-					// the editor-RAW value. select + date carry their
-					// type-specific config attrs. page-ref defers the
-					// inputfield render to ___executeWidget; the cell
-					// just needs the rawVal for change-detection.
-					$rawVal = (string) ($row['customRaw'][$name] ?? '');
-					$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
-					if ($inputType === 'select') {
-						$typedExtra .= " data-options='" . $san->entities(
-							json_encode($this->getCustomOptions($name), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-						) . "'";
-						$sf = $this->wire('fields')->get($name);
-						if ($sf instanceof Field && !$this->isSingleValueInput($sf)) {
-							$typedExtra .= ' data-multiple="1"';
-						}
-					} elseif ($inputType === 'date') {
-						$df = $this->wire('fields')->get($name);
-						if ($df instanceof Field && $this->dateHasTime($df)) $typedExtra .= ' data-datetime="1"';
-					}
-					$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-						$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
-					)));
-					$out .= '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
-						. ' data-subfield="' . $san->entities($name) . '"'
-						. ' data-input="' . $san->entities($inputType) . '"' . $typedExtra . '>'
-						. $san->entities((string) $val) . '</td>';
-				} elseif (!empty($row['pageEditUrl'])) {
-					// Only page-refs whose selectable set can't be a bounded
-					// inline select (autocomplete / huge / custom find code)
-					// fall back to the native per-image editor.
-					$nativeAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
-						$this->_('Edit %1$s of %2$s in the image editor'), $name, (string) $row['basename']
-					)));
-					$out .= '<td class="ml-cell-native ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . ' role="button" tabindex="0"' . $nativeAria
-						. ' data-subfield="' . $san->entities($name) . '"'
-						. ' data-input="' . $san->entities($inputType) . '">'
-						. $san->entities((string) $val) . '</td>';
-				} else {
-					// Typed subfield on a non-editable page → display only.
-					$out .= '<td class="' . $typeClass . '"' . $colAttr . '>'
-						. $san->entities((string) $val) . '</td>';
-				}
+				$out .= $this->renderCustomCell($name, $row, $rowCustoms, $customInputTypes, $editAttrs, $editA11y);
 			}
 
 			$out .= '</tr>';
@@ -7213,6 +7206,286 @@ class ProcessImageLibrary extends Process {
 
 		$out .= '</tbody></table></div>';
 		return $out;
+	}
+
+	/**
+	 * Render one custom-subfield <td> for a row. Branches: text/textarea inline-
+	 * editable, other typed inputs inline-editable (on editable pages), page-ref
+	 * fallback to the native editor, else display-only. A subfield the row's field
+	 * doesn't declare renders as a disabled N/A cell.
+	 */
+	protected function renderCustomCell(string $name, array $row, array $rowCustoms, array $customInputTypes, string $editAttrs, string $editA11y): string {
+		$san = $this->wire('sanitizer');
+		$colAttr = ' data-col="custom:' . $san->entities($name) . '"';
+		// Type-class lives on every custom cell (NA + editable
+		// alike) so column-level width rules apply uniformly
+		// regardless of whether a given row has that subfield.
+		// Keyed by Inputfield type, not by field name, so the
+		// CSS scales to new custom subfields without per-name
+		// rules.
+		$inputType = $customInputTypes[$name] ?? 'text';
+		$typeClass = 'ml-cell-' . $san->entities($inputType);
+		// When the customCols list is the union across image
+		// fields (no field filter), some rows won't host every
+		// listed subfield — render those as visually disabled
+		// instead of editable so a click can't trigger an editor
+		// for a field the server would reject anyway.
+		if (!in_array($name, $rowCustoms, true)) {
+			return '<td class="ml-cell-na ' . $typeClass . '"' . $colAttr . ' data-tip="'
+				. $san->entities(sprintf(
+					$this->_('%1$s is not configured on %2$s'),
+					$name,
+					(string) $row['fieldName']
+				)) . '">—</td>';
+		}
+		$raw = $row['custom'][$name] ?? '';
+		$val = $this->normalizeDescription($raw);
+		// Page-reference fields render PW's configured inputfield
+		// (PageAutocomplete / PageListSelect / ASMSelect / …) in
+		// the popup — JS fetches the rendered HTML from
+		// ___executeWidget, injects it, fires the 'reloaded' DOM
+		// event so each inputfield's own JS initialises on the
+		// new nodes. No more inline checkbox-list / multi-select.
+		$inlineTyped = in_array($inputType, ['checkbox', 'date', 'number', 'select', 'page'], true);
+		if (in_array($inputType, ['text', 'textarea'], true)) {
+			// Inline-editable prose cell.
+			$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+			)));
+			// Only textarea-backed customs get the clamp box; single-
+			// line text customs are short and stay a plain text node.
+			$customInner = $inputType === 'textarea'
+				? $this->clampCell((string) $val)
+				: $san->entities((string) $val);
+			return '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+				. ' data-subfield="' . $san->entities($name) . '"'
+				. ' data-input="' . $san->entities($inputType) . '"'
+				. $this->buildLangAttrs($raw) . '>'
+				. $customInner . '</td>';
+		} elseif ($inlineTyped && !empty($row['pageEditUrl'])) {
+			// Inline-editable typed cell. Display shows the typed
+			// value (glyph / date / label); data-value carries
+			// the editor-RAW value. select + date carry their
+			// type-specific config attrs. page-ref defers the
+			// inputfield render to ___executeWidget; the cell
+			// just needs the rawVal for change-detection.
+			$rawVal = (string) ($row['customRaw'][$name] ?? '');
+			$typedExtra = ' data-value="' . $san->entities($rawVal) . '"';
+			if ($inputType === 'select') {
+				$typedExtra .= " data-options='" . $san->entities(
+					json_encode($this->getCustomOptions($name), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+				) . "'";
+				$sf = $this->wire('fields')->get($name);
+				if ($sf instanceof Field && !$this->isSingleValueInput($sf)) {
+					$typedExtra .= ' data-multiple="1"';
+				}
+			} elseif ($inputType === 'date') {
+				$df = $this->wire('fields')->get($name);
+				if ($df instanceof Field && $this->dateHasTime($df)) $typedExtra .= ' data-datetime="1"';
+			}
+			$customAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Edit %1$s of %2$s'), $name, (string) $row['basename']
+			)));
+			return '<td class="ml-cell-editable ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . $editA11y . $customAria
+				. ' data-subfield="' . $san->entities($name) . '"'
+				. ' data-input="' . $san->entities($inputType) . '"' . $typedExtra . '>'
+				. $san->entities((string) $val) . '</td>';
+		} elseif (!empty($row['pageEditUrl'])) {
+			// Only page-refs whose selectable set can't be a bounded
+			// inline select (autocomplete / huge / custom find code)
+			// fall back to the native per-image editor.
+			$nativeAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Edit %1$s of %2$s in the image editor'), $name, (string) $row['basename']
+			)));
+			return '<td class="ml-cell-native ' . $typeClass . '"' . $colAttr . ' ' . $editAttrs . ' role="button" tabindex="0"' . $nativeAria
+				. ' data-subfield="' . $san->entities($name) . '"'
+				. ' data-input="' . $san->entities($inputType) . '">'
+				. $san->entities((string) $val) . '</td>';
+		} else {
+			// Typed subfield on a non-editable page → display only.
+			return '<td class="' . $typeClass . '"' . $colAttr . '>'
+				. $san->entities((string) $val) . '</td>';
+		}
+	}
+
+	/**
+	 * Hover-revealed download button (bottom-right of the thumb) for one row —
+	 * a native <a download> pointing at the ORIGINAL file. Read-only, so it's
+	 * shown on every row regardless of edit rights; suppressed in the picker
+	 * (you're choosing an image there, not managing files) and when the row
+	 * carries no resolved file URL. Shared by the table + tile renderers.
+	 */
+	protected function renderDownloadButton(array $row): string {
+		if ($this->pickerMode || empty($row['downloadUrl'])) return '';
+		// Duplicates carry no per-file download: the tile / row represents N
+		// byte-identical copies, so a single "download this one" is ambiguous
+		// (and the masonry dup tile opens the cluster modal instead).
+		if ((int) ($row['dupCount'] ?? 0) >= 2) return '';
+		$san   = $this->wire('sanitizer');
+		$label = $san->entities(sprintf($this->_('Download %s'), (string) $row['basename']));
+		return '<a class="ml-download-btn" href="' . $san->entities((string) $row['downloadUrl']) . '"'
+			. ' download="' . $san->entities((string) $row['basename']) . '"'
+			. ' data-tip="' . $label . '" aria-label="' . $label . '">'
+			. '<i class="fa fa-arrow-down" aria-hidden="true"></i></a>';
+	}
+
+	/**
+	 * Render the thumbnail <td> for one table row. Clickable (opens the
+	 * per-image editor modal) with hover replace / delete actions when the host
+	 * page is editable; a duplicate-cluster head also carries the expand toggle.
+	 * <img> dimensions come from thumbDisplayDims() so the box is reserved
+	 * before the bytes land.
+	 */
+	protected function renderThumbCell(array $row, string $editAttrs, string $editA11y, bool $isDupHead, string $rowDupHash, array $thumb): string {
+		$san = $this->wire('sanitizer');
+		$out = '';
+		// Thumbnail cell becomes clickable when the host page is
+		// editable — JS opens the PW page editor for just this
+		// image field in a modal iframe so the user gets the
+		// native crop / focus / variations UI. The file-hash
+		// (md5 of basename, matching Pagefile::hash()) lets the
+		// iframe filter find the matching gridImage via id
+		// selector instead of string-matching URLs.
+		// Thumb td only carries the hash + identity attrs when the
+		// host page is editable — that's what gates the click-
+		// through to the per-image editor iframe.
+		// Thumb td picks up the edit attrs (and a button role) only
+		// when the host page is editable — the click / keyboard
+		// activator opens the per-image editor modal.
+		if (!empty($row['pageEditUrl'])) {
+			$thumbAria = sprintf(' aria-label="%s"', $san->entities(sprintf(
+				$this->_('Open editor for %s'), (string) $row['basename']
+			)));
+			$thumbAttrs = ' ' . $editAttrs . $editA11y . $thumbAria;
+		} else {
+			$thumbAttrs = '';
+		}
+		$out .= '<td class="ml-cell-thumb" data-col="thumb"' . $thumbAttrs . '>';
+		if (!empty($row['thumbUrl'])) {
+			// Display dimensions are derived from the user's
+			// configured target, NOT the source file. In keep-
+			// ratio mode the longer axis is capped to the
+			// configured longerSide; the other axis follows the
+			// source's aspect. In crop mode the visible box is
+			// exactly W × H and CSS object-fit: cover handles
+			// any overflow from the admin-variation source.
+			// Pre-computed here so the <img> width / height
+			// attributes prevent layout shift before the bytes
+			// land.
+			[$dispW, $dispH, $cls] = $this->thumbDisplayDims(
+				$thumb,
+				(int) ($row['thumbWidth']  ?? 0),
+				(int) ($row['thumbHeight'] ?? 0)
+			);
+			$out .= '<img class="' . $cls . '"'
+				. ' src="' . $san->entities($row['thumbUrl']) . '"'
+				. ' alt="' . $san->entities($row['basename']) . '"'
+				. ' loading="lazy"'
+				. ' width="' . $dispW . '"'
+				. ' height="' . $dispH . '">';
+		}
+		// Per-row actions — both icons hang in the top-right of the
+		// thumb cell and are visible only on row hover. Replace
+		// triggers the file picker / accepts a row DnD; Delete
+		// opens a confirm dialog. Batch semantics for Delete
+		// follow the existing paintbrush: when N rows are
+		// selected, clicking Delete on any selected row's icon
+		// deletes the whole selection.
+		if (!empty($row['pageEditUrl'])) {
+			$replaceLabel = $san->entities(sprintf(
+				$this->_('Replace %s'), (string) $row['basename']
+			));
+			$deleteLabel = $san->entities(sprintf(
+				$this->_('Delete %s'), (string) $row['basename']
+			));
+			$out .= '<button type="button" class="ml-replace-btn"'
+				. ' data-tip="' . $replaceLabel . '"'
+				. ' aria-label="' . $replaceLabel . '">'
+				. '<i class="ml-vicon ml-vicon-rotate" aria-hidden="true"></i>'
+				. '</button>';
+			$out .= '<button type="button" class="ml-delete-btn"'
+				. ' data-tip="' . $deleteLabel . '"'
+				. ' aria-label="' . $deleteLabel . '">'
+				. '<i class="fa fa-trash-o" aria-hidden="true"></i>'
+				. '</button>';
+		}
+		// Head of a duplicate cluster → expand/collapse toggle. Copy rows
+		// and unique images carry no indicator.
+		if ($isDupHead) {
+			$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
+		}
+		$out .= $this->renderDownloadButton($row);
+		$out .= '</td>';
+		return $out;
+	}
+
+	/**
+	 * Render the table's opening chrome: the responsive scroller wrapper, the
+	 * <table>, and the <thead> (select-all box + sortable column headers, base
+	 * and custom), through the opening <tbody>. The caller appends the rows.
+	 *
+	 * @param array<int,array{0:string,1:string,2:?string}> $headers
+	 * @param array<int,string> $customCols
+	 */
+	protected function renderTableHead(array $headers, array $customCols, string $sort, string $dir, array $filters): string {
+		$san = $this->wire('sanitizer');
+		// Outer scroller so the wide table can overflow horizontally
+		// on narrow viewports without breaking the table layout.
+		// pw-table-responsive + uk-overflow-auto handle horizontal
+		// scroll on narrow viewports the same way every other PW
+		// data table does. pw-table-sortable is included because
+		// the inner table carries .AdminDataTableSortable; the
+		// wrapper class is what some PW-side JS hooks check.
+		$out  = '<div class="ml-table-scroll pw-table-responsive uk-overflow-auto pw-table-sortable">';
+		// Class set is intentional, every entry carries weight:
+		//   ml-table         — module-side hooks
+		//   AdminDataTable   — non-Uikit themes (Reno, Default) pick
+		//                      up their own admin-table chrome here
+		//   AdminDataTableSortable — paired with tablesorter-* classes
+		//                      below to inherit the theme's sort
+		//                      styling (active-asc / desc colour,
+		//                      FontAwesome arrow glyphs) without
+		//                      re-implementing it module-side
+		//   uk-table*        — active styling under AdminThemeUikit
+		$out .= '<table class="ml-table AdminDataTable AdminDataTableSortable uk-table uk-table-divider uk-table-small">';
+		// tablesorter-headerRow matches AdminThemeUikit's compound
+		// selector for the sort-state visuals.
+		$out .= '<thead><tr class="tablesorter-headerRow">';
+		$out .= '<th class="ml-cell-select">'
+			. '<input type="checkbox" class="uk-checkbox ml-select-all" data-tip="'
+			. $san->entities($this->_('Select all on page')) . '"></th>';
+		foreach ($headers as [$colKey, $label, $sortKey]) {
+			$out .= $this->renderSortableHeader($colKey, $label, $sortKey, $sort, $dir, $filters);
+		}
+		foreach ($customCols as $name) {
+			$out .= $this->renderSortableHeader('custom:' . $name, $name, 'custom:' . $name, $sort, $dir, $filters);
+		}
+		$out .= '</tr></thead><tbody>';
+		return $out;
+	}
+
+	/**
+	 * Display width / height (px) + <img> class for one table thumbnail.
+	 * Keep-ratio mode caps the longer axis to the configured longerSide and
+	 * scales the other to the source aspect; crop mode is a fixed W×H box (CSS
+	 * object-fit absorbs any overflow). Returns [width, height, cssClass].
+	 *
+	 * @param array<string,mixed> $thumb
+	 * @return array{0:int,1:int,2:string}
+	 */
+	protected function thumbDisplayDims(array $thumb, int $srcW, int $srcH): array {
+		if ($thumb['keepRatio']) {
+			$longer = (int) $thumb['longerSide'];
+			if ($srcW >= $srcH) {
+				$dispW = $srcW > 0 ? min($longer, $srcW) : $longer;
+				$dispH = $srcW > 0 ? (int) round($srcH * $dispW / $srcW) : $srcH;
+			} else {
+				$dispH = $srcH > 0 ? min($longer, $srcH) : $longer;
+				$dispW = $srcH > 0 ? (int) round($srcW * $dispH / $srcH) : $srcW;
+			}
+			return [$dispW, $dispH, 'ml-thumb'];
+		}
+		return [(int) $thumb['width'], (int) $thumb['height'], 'ml-thumb ml-thumb-crop'];
 	}
 
 	/**
@@ -7317,7 +7590,7 @@ class ProcessImageLibrary extends Process {
 		// saved value ride in data-* so the slider is configured before
 		// init; the JS reads them.
 		$sizeLabel = $san->entities($this->_('Thumbnail size'));
-		$out .= '<span class="ml-thumb-size" title="' . $sizeLabel . '">'
+		$out .= '<span class="ml-thumb-size" data-tip="' . $sizeLabel . '">'
 			. '<span class="ml-thumb-size-slider"'
 			. ' data-min="' . self::THUMB_SCALE_MIN . '" data-max="' . self::THUMB_SCALE_MAX . '" data-step="0.1"'
 			. ' data-value="' . rtrim(rtrim(number_format($this->getThumbScale(), 2, '.', ''), '0'), '.') . '"'
@@ -7356,7 +7629,7 @@ class ProcessImageLibrary extends Process {
 		if ($currentView === self::VIEW_TABLE) {
 			$colsLabel = $san->entities($this->_('Columns'));
 			$out .= '<a class="ml-columns-toggle"'
-				. ' title="' . $colsLabel . '"'
+				. ' data-tip="' . $colsLabel . '"'
 				. ' aria-label="' . $colsLabel . '">'
 				. '<i class="ml-vicon ml-vicon-columns" aria-hidden="true"></i>'
 				. '</a>';
