@@ -1587,9 +1587,7 @@ class ProcessImageLibrary extends Process {
 				: !isset($defaultHidden[$key]);
 			$checked = $isVisible ? ' checked' : '';
 			$colKey = $san->entities($key);
-			// No native draggable: the JS drives a pointer-based drag instead, so it
-			// can hold a grabbing cursor (native DnD lets the browser own the cursor).
-			$items .= '<li class="ml-col-item">'
+			$items .= '<li class="ml-col-item" draggable="true">'
 				. '<label><input type="checkbox" class="uk-checkbox ml-col-toggle" data-col="'
 				. $colKey . '"' . $checked . '> '
 				. $san->entities($label) . '</label>'
