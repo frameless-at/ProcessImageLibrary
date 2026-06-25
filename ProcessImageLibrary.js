@@ -446,8 +446,19 @@
 		// (slow, unstyled) browser tooltip.
 		(function () {
 			var tip = null, timer = null, current = null;
-			function el() {
-				if (!tip) { tip = document.createElement('div'); tip.className = 'ml-tip'; tip.setAttribute('role', 'tooltip'); document.body.appendChild(tip); }
+			// A modal <dialog> (showModal) paints in the top layer, above every
+			// body-level node, so a tip appended to <body> would hide BEHIND the
+			// cluster modal. Park the tip inside the open dialog the anchor lives
+			// in (also top layer) when there is one, else on <body>; .ml-tip is
+			// position:fixed so the coordinates stay viewport-relative either way.
+			function host(node) {
+				var dlg = node && node.closest && node.closest('dialog');
+				return (dlg && dlg.open) ? dlg : document.body;
+			}
+			function el(node) {
+				if (!tip) { tip = document.createElement('div'); tip.className = 'ml-tip'; tip.setAttribute('role', 'tooltip'); }
+				var h = host(node);
+				if (tip.parentNode !== h) h.appendChild(tip);
 				return tip;
 			}
 			function textFor(node) {
@@ -460,20 +471,21 @@
 				return base;
 			}
 			function place(node) {
-				var t = el(), r = node.getBoundingClientRect();
+				var t = el(node), r = node.getBoundingClientRect();
 				var tw = t.offsetWidth, th = t.offsetHeight;
-				var left = window.scrollX + r.left + r.width / 2 - tw / 2;
-				var top  = window.scrollY + r.top - th - 8;
-				if (r.top - th - 8 < 4) top = window.scrollY + r.bottom + 8;
-				var maxL = window.scrollX + document.documentElement.clientWidth - tw - 6;
-				left = Math.max(window.scrollX + 6, Math.min(left, maxL));
+				// position:fixed → viewport coordinates, no scroll offset.
+				var left = r.left + r.width / 2 - tw / 2;
+				var top  = r.top - th - 8;
+				if (r.top - th - 8 < 4) top = r.bottom + 8;
+				var maxL = document.documentElement.clientWidth - tw - 6;
+				left = Math.max(6, Math.min(left, maxL));
 				t.style.left = left + 'px';
 				t.style.top  = top + 'px';
 			}
 			function show(node) {
 				var txt = textFor(node);
 				if (!txt) return;
-				var t = el();
+				var t = el(node);
 				t.textContent = txt;
 				place(node);
 				t.classList.add('ml-tip-show');
