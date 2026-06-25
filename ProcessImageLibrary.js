@@ -5251,38 +5251,91 @@
 			});
 		}
 
-		// Native HTML5 drag-drop on the column-picker <li>s. On drop
-		// we re-read the list order from the DOM into columnsOrder,
-		// persist + re-sort the table to match.
-		function wireColumnDragDrop() {
-			var list = document.querySelector('.ml-columns-list');
-			if (!list) return;
-			var dragged = null;
-			Array.prototype.forEach.call(list.querySelectorAll('li'), function (li) {
-				li.addEventListener('dragstart', function (e) {
-					dragged = li;
-					li.classList.add('ml-dragging');
-					if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+			// Pointer-driven drag-reorder of the column rows. We deliberately do
+			// NOT use native HTML5 draggable: during a native drag the browser owns
+			// the cursor (it follows dropEffect), so a CSS grab/grabbing can't hold
+			// and it flips to an arrow. Driving the drag with pointer events lets us
+			// pin cursor:grabbing (body.ml-col-dragging) for the whole gesture.
+			// Touch keeps the up/down arrow buttons as its reorder path, so we only
+			// start a drag for mouse / pen.
+			function wireColumnDragDrop() {
+				var list = document.querySelector('.ml-columns-list');
+				if (!list) return;
+				var dragLi = null, startY = 0, active = false, didDrag = false;
+				var THRESH = 4;
+
+				// First row whose vertical midpoint sits below the pointer becomes
+				// the insert-before target; past the last row we append.
+				function rowUnder(clientY) {
+					var rows = list.querySelectorAll('li');
+					for (var i = 0; i < rows.length; i++) {
+						var r = rows[i].getBoundingClientRect();
+						if (clientY < r.top + r.height / 2) return rows[i];
+					}
+					return null;
+				}
+				function begin() {
+					active = true; didDrag = true;
+					dragLi.classList.add('ml-dragging');
+					document.body.classList.add('ml-col-dragging');
+				}
+				function move(clientY) {
+					var over = rowUnder(clientY);
+					if (over === dragLi) return;
+					if (over) list.insertBefore(dragLi, over); else list.appendChild(dragLi);
+				}
+				function finish() {
+					if (active) {
+						dragLi.classList.remove('ml-dragging');
+						document.body.classList.remove('ml-col-dragging');
+						columnsOrder = Array.prototype.map.call(
+							list.querySelectorAll('li input[type="checkbox"]'),
+							function (cb) { return cb.dataset.col; }
+						);
+						saveUserPrefs();
+						applyColumnOrder();
+					}
+					active = false; dragLi = null;
+				}
+
+				list.addEventListener('pointerdown', function (e) {
+					if (e.pointerType === 'touch') return;          // touch reorders via the arrows
+					if (e.button != null && e.button !== 0) return; // left button only
+					// Let the checkbox toggle and the arrow buttons work normally.
+					if (e.target.closest('.ml-col-toggle, .ml-col-move')) return;
+					var li = e.target.closest('.ml-col-item');
+					if (!li) return;
+					dragLi = li; startY = e.clientY; active = false; didDrag = false;
+					try { li.setPointerCapture(e.pointerId); } catch (err) {}
 				});
-				li.addEventListener('dragend', function () {
-					li.classList.remove('ml-dragging');
-					dragged = null;
-					columnsOrder = Array.prototype.map.call(
-						list.querySelectorAll('li input[type="checkbox"]'),
-						function (cb) { return cb.dataset.col; }
-					);
-					saveUserPrefs();
-					applyColumnOrder();
-				});
-				li.addEventListener('dragover', function (e) {
-					if (!dragged || dragged === li) return;
+				list.addEventListener('pointermove', function (e) {
+					if (!dragLi) return;
+					if (!active) {
+						if (Math.abs(e.clientY - startY) < THRESH) return;  // not a drag yet
+						begin();
+					}
 					e.preventDefault();
-					var rect = li.getBoundingClientRect();
-					var before = (e.clientY - rect.top) < rect.height / 2;
-					list.insertBefore(dragged, before ? li : li.nextSibling);
+					move(e.clientY);
 				});
-			});
-		}
+				function end() {
+					if (!dragLi) return;
+					var wasDrag = didDrag;
+					finish();
+					// Clear didDrag on the next tick: the synthetic click (if any)
+					// fires before it, so the swallow below still catches that one
+					// click, but a later keyboard Enter on an arrow button never
+					// inherits a stale didDrag.
+					if (wasDrag) setTimeout(function () { didDrag = false; }, 0);
+				}
+				list.addEventListener('pointerup', end);
+				list.addEventListener('pointercancel', end);
+				// A drag ends with a synthetic click on the label, which would toggle
+				// the checkbox. Swallow exactly that one post-drag click (capture
+				// phase).
+				list.addEventListener('click', function (e) {
+					if (didDrag) { didDrag = false; e.preventDefault(); e.stopImmediatePropagation(); }
+				}, true);
+			}
 
 		syncColumnListOrder();
 
