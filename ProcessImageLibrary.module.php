@@ -7315,12 +7315,13 @@ class ProcessImageLibrary extends Process {
 	 * (you're choosing an image there, not managing files) and when the row
 	 * carries no resolved file URL. Shared by the table + tile renderers.
 	 */
-	protected function renderDownloadButton(array $row): string {
+	protected function renderDownloadButton(array $row, bool $allowDuplicate = false): string {
 		if ($this->pickerMode || empty($row['downloadUrl'])) return '';
-		// Duplicates carry no per-file download: the tile / row represents N
-		// byte-identical copies, so a single "download this one" is ambiguous
-		// (and the masonry dup tile opens the cluster modal instead).
-		if ((int) ($row['dupCount'] ?? 0) >= 2) return '';
+		// A duplicate HEAD row / masonry-grid tile stands for N byte-identical
+		// copies and opens the cluster instead, so it shows no single-file
+		// download. The EXPANDED copy rows ($allowDuplicate) each map to one real
+		// file on one page, so they DO get a download, as do unique images.
+		if (!$allowDuplicate && (int) ($row['dupCount'] ?? 0) >= 2) return '';
 		$san   = $this->wire('sanitizer');
 		$label = $san->entities(sprintf($this->_('Download %s'), (string) $row['basename']));
 		return '<a class="ml-download-btn" href="' . $san->entities((string) $row['downloadUrl']) . '"'
@@ -7414,7 +7415,9 @@ class ProcessImageLibrary extends Process {
 		if ($isDupHead) {
 			$out .= $this->renderDupToggle((int) ($row['dupCount'] ?? 0), $rowDupHash);
 		}
-		$out .= $this->renderDownloadButton($row);
+		// Expanded duplicate copies (dup hash set, not the head) are individual
+		// files and get a download; the head keeps only the toggle.
+		$out .= $this->renderDownloadButton($row, ($rowDupHash !== '' && !$isDupHead));
 		$out .= '</td>';
 		return $out;
 	}

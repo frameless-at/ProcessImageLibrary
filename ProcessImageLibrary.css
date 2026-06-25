@@ -1794,7 +1794,10 @@ textarea.ml-langtabs-pane {
    Replaces the slow / unstyled native title= on the action icons, toggles and
    manager controls; appears fast, themes to the admin, and works on focus. */
 .ml-tip {
-	position: absolute;
+	/* fixed (viewport-relative) so the pill can live inside an open top-layer
+	   <dialog> (the cluster modal) and still position correctly; appended to
+	   <body> a tip would otherwise render BEHIND a showModal() dialog. */
+	position: fixed;
 	z-index: 100000;
 	max-width: 280px;
 	padding: 4px 8px;
