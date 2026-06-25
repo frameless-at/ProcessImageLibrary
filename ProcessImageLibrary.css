@@ -1450,10 +1450,13 @@ textarea.ml-langtabs-pane {
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
-	cursor: pointer;
+	/* The row is draggable (li: grab / :active grabbing); the label fills most
+	   of it, so it must show the same grab affordance, not a pointer. */
+	cursor: grab;
 	padding: 0.2rem 0.3rem;
 	min-width: 0;
 }
+.ml-columns-list li:active label { cursor: grabbing; }
 .ml-col-move,
 .ml-coll-move {
 	flex: 0 0 auto;
