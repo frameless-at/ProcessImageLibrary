@@ -1439,9 +1439,6 @@ textarea.ml-langtabs-pane {
 	padding: 0.15rem 0.3rem;
 	border-radius: 3px;
 }
-.ml-columns-list li:active {
-	cursor: grabbing;
-}
 .ml-columns-list li.ml-dragging {
 	opacity: 0.35;
 }
@@ -1450,19 +1447,12 @@ textarea.ml-langtabs-pane {
 	display: flex;
 	align-items: center;
 	gap: 0.4rem;
-	/* The row is draggable (li: grab / :active grabbing); the label fills most
-	   of it, so it must show the same grab affordance, not a pointer. */
+	/* The row is drag-to-reorder; the label fills most of it, so it shows the
+	   same grab affordance as the row, not a pointer. No grabbing state. */
 	cursor: grab;
 	padding: 0.2rem 0.3rem;
 	min-width: 0;
 }
-.ml-columns-list li:active label { cursor: grabbing; }
-/* The column reorder is a pointer-driven drag (not native HTML5 DnD, where the
-   browser would own the cursor and flip it back to an arrow). While a drag is
-   in progress the JS adds .ml-col-dragging to <body>; force grabbing across the
-   whole page so the cursor holds wherever the pointer goes. */
-body.ml-col-dragging,
-body.ml-col-dragging * { cursor: grabbing !important; }
 .ml-col-move,
 .ml-coll-move {
 	flex: 0 0 auto;
