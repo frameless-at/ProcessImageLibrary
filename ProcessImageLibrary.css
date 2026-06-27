@@ -997,10 +997,13 @@ textarea.ml-cell-input {
 	font-size: 0.85em;
 }
 /* Assign popover: every collection is a checkable row (folder model), indented
-   by depth. Rows reuse .ml-popup-checklist styling. */
-.ml-coll-assign-list {
-	max-height: 50vh;
-	overflow-y: auto;
+   by depth. Rows reuse .ml-popup-checklist styling — which itself caps height at
+   18rem, the real limit here. Don't cap this list at all: let the whole dialog
+   (max-height 90vh) be the only scroller, so the collections tree gets full
+   height. The two-class selector beats .ml-popup-checklist's 18rem. */
+.ml-coll-assign-list.ml-popup-checklist {
+	max-height: none;
+	overflow: visible;
 }
 
 /* Mobile tweaks. Filter controls already stack via the admin theme's
