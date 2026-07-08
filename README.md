@@ -580,3 +580,10 @@ ProcessImageLibrary/
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Differences from `main` (branch `dev`)
+
+`dev` is the integration branch. It currently matches the released `main`
+(v1.1.1) exactly – there are no unreleased changes on it right now. As work
+lands here ahead of a release, this section lists what `dev` carries over
+`main`; when it is empty, the two are in sync.
