@@ -6007,6 +6007,59 @@ class ProcessImageLibrary extends Process {
 	}
 
 	/**
+	 * The "Page" column reference for one table row: which page its link points
+	 * at, plus the title / front-end URL / edit URL shown for it. HOOKABLE.
+	 *
+	 * Default is the display page the module already resolved: the
+	 * repeater/matrix OWNER page for repeater-hosted images, otherwise the
+	 * storage page the image field physically lives on. Third-party code can
+	 * hook this to retarget images that sit on INFRASTRUCTURE pages an editor
+	 * never opens via page/edit, e.g.:
+	 *
+	 *   // MediaHub: keep the id, send the link to the asset screen
+	 *   $wire->addHookAfter('ProcessImageLibrary::resolvePageRef', function($e) {
+	 *       $storage = $e->arguments(1);
+	 *       if ($storage->template->name !== 'pkd-mediahub-asset') return;
+	 *       $ref = $e->return;
+	 *       $ref['editUrl'] = $e->wire('config')->urls->admin
+	 *           . 'setup/media-hub/asset/?id=' . $storage->id;
+	 *       $e->return = $ref;
+	 *   });
+	 *
+	 *   // RockPageBuilder: repoint the whole reference to the parent content page
+	 *   $wire->addHookAfter('ProcessImageLibrary::resolvePageRef', function($e) {
+	 *       $p = $e->arguments(1);
+	 *       if (strncmp((string) $p->template->name, 'rockpagebuilderblock-', 21) !== 0) return;
+	 *       $owner = $p->parent;
+	 *       while ($owner->id && strncmp((string) $owner->template->name, 'rockpagebuilderblock-', 21) === 0) {
+	 *           $owner = $owner->parent;
+	 *       }
+	 *       if (!$owner->id) return;
+	 *       $e->return = ['pageId' => $owner->id, 'title' => (string) $owner->title,
+	 *           'url' => (string) $owner->url, 'editUrl' => (string) $owner->editUrl,
+	 *           'name' => (string) $owner->name];
+	 *   });
+	 *
+	 * Scope: ONLY the "Page" column (link + title). The per-image editor modal
+	 * (thumbnail click) is intentionally NOT routed through here: it edits the
+	 * real image-field slot on the storage page and must keep targeting it.
+	 *
+	 * @param Page  $displayPage the module's resolved display page (== $storagePage unless repeater)
+	 * @param Page  $storagePage the page whose image field physically holds the file
+	 * @param array<string,mixed> $row the flat row (pageId, fieldName, basename, …)
+	 * @return array{pageId:int,title:string,url:string,editUrl:string,name:string}
+	 */
+	public function ___resolvePageRef(Page $displayPage, Page $storagePage, array $row): array {
+		return [
+			'pageId'  => (int) $displayPage->id,
+			'title'   => (string) $displayPage->title,
+			'url'     => (string) $displayPage->url,
+			'editUrl' => (string) $displayPage->editUrl,
+			'name'    => (string) $displayPage->name,
+		];
+	}
+
+	/**
 	 * Hydrate the visible row slice with thumbnail URLs and page links.
 	 *
 	 * Only this slice triggers Pageimage hydration — the bulk row list stays
@@ -6053,8 +6106,16 @@ class ProcessImageLibrary extends Process {
 			if (!empty($row['ownerPageId']) && isset($pagesById[(int) $row['ownerPageId']])) {
 				$displayPage = $pagesById[(int) $row['ownerPageId']];
 			}
-			$row['pageUrl']     = $displayPage->url;
-			$row['pageEditUrl'] = $displayPage->editUrl;
+			// Page-column reference (link target + title). Hookable so
+			// integrations can retarget images stored on infrastructure pages:
+			// MediaHub asset pages (custom editUrl into the MediaHub asset
+			// screen), RockPageBuilder block pages (repoint to the parent
+			// content page). Default = the display page (repeater owner, else
+			// storage). The thumb-editor modal below is NOT routed through here:
+			// it deliberately still targets the storage page's real image slot.
+			$ref = $this->resolvePageRef($displayPage, $page, $row);
+			$row['pageUrl']     = (string) ($ref['url'] ?? $displayPage->url);
+			$row['pageEditUrl'] = (string) ($ref['editUrl'] ?? $displayPage->editUrl);
 			// Base URL for the per-image editor modal. It edits the STORAGE
 			// page (where the field lives — the repeater page for a repeater
 			// image), NOT the display/owner page, so use $page (not
@@ -6070,11 +6131,11 @@ class ProcessImageLibrary extends Process {
 			// the cached pageTitle is intentionally default-language
 			// (so sort / filter / search stay consistent across
 			// editors); this override flips display to user-language.
-			$row['pageTitle']   = (string) $displayPage->title;
-			// Page name (slug) for the (p) placeholder; owner-page-
-			// resolved like pageTitle so repeater rows expand to
-			// something meaningful.
-			$row['pageName']    = (string) $displayPage->name;
+			$row['pageTitle']   = (string) ($ref['title'] ?? $displayPage->title);
+			// Page name (slug) for the (p) placeholder; owner-/hook-
+			// resolved like pageTitle so repeater / retargeted rows
+			// expand to something meaningful.
+			$row['pageName']    = (string) ($ref['name'] ?? $displayPage->name);
 
 			$img = $this->resolvePageimage($page, (string) $row['fieldName'], (string) $row['basename']);
 			if (!$img) continue;
