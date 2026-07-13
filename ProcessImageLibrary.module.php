@@ -6011,38 +6011,30 @@ class ProcessImageLibrary extends Process {
 	 * at, plus the title / front-end URL / edit URL shown for it. HOOKABLE.
 	 *
 	 * Default is the display page the module already resolved: the
-	 * repeater/matrix OWNER page for repeater-hosted images, otherwise the
-	 * storage page the image field physically lives on. Third-party code can
-	 * hook this to retarget images that sit on INFRASTRUCTURE pages an editor
-	 * never opens via page/edit, e.g.:
+	 * repeater/matrix owner page for repeater-hosted images, otherwise the
+	 * storage page the image field lives on. Return an array with any of
+	 * pageId / title / url / editUrl / name to change what the column shows and
+	 * links to for a given row; with no hook attached the default above is used
+	 * unchanged.
 	 *
-	 *   // MediaHub: keep the id, send the link to the asset screen
+	 * A hook is useful when the storage page is not the page an editor should be
+	 * sent to, or when its editor lives at a non-standard URL. What the right
+	 * target is remains entirely the site's decision; this method makes no
+	 * assumptions about any particular setup. Example, sending the link to a
+	 * different admin URL for pages of a given template:
+	 *
 	 *   $wire->addHookAfter('ProcessImageLibrary::resolvePageRef', function($e) {
-	 *       $storage = $e->arguments(1);
-	 *       if ($storage->template->name !== 'pkd-mediahub-asset') return;
+	 *       $storage = $e->arguments(1);              // storage page
+	 *       if ($storage->template->name !== 'my-template') return;
 	 *       $ref = $e->return;
-	 *       $ref['editUrl'] = $e->wire('config')->urls->admin
-	 *           . 'setup/media-hub/asset/?id=' . $storage->id;
+	 *       $ref['editUrl'] = '/path/to/editor/?id=' . $storage->id;
 	 *       $e->return = $ref;
-	 *   });
-	 *
-	 *   // RockPageBuilder: repoint the whole reference to the parent content page
-	 *   $wire->addHookAfter('ProcessImageLibrary::resolvePageRef', function($e) {
-	 *       $p = $e->arguments(1);
-	 *       if (strncmp((string) $p->template->name, 'rockpagebuilderblock-', 21) !== 0) return;
-	 *       $owner = $p->parent;
-	 *       while ($owner->id && strncmp((string) $owner->template->name, 'rockpagebuilderblock-', 21) === 0) {
-	 *           $owner = $owner->parent;
-	 *       }
-	 *       if (!$owner->id) return;
-	 *       $e->return = ['pageId' => $owner->id, 'title' => (string) $owner->title,
-	 *           'url' => (string) $owner->url, 'editUrl' => (string) $owner->editUrl,
-	 *           'name' => (string) $owner->name];
 	 *   });
 	 *
 	 * Scope: ONLY the "Page" column (link + title). The per-image editor modal
 	 * (thumbnail click) is intentionally NOT routed through here: it edits the
 	 * real image-field slot on the storage page and must keep targeting it.
+	 * "Used in" (rich-text embeds) is unaffected.
 	 *
 	 * @param Page  $displayPage the module's resolved display page (== $storagePage unless repeater)
 	 * @param Page  $storagePage the page whose image field physically holds the file
@@ -6106,11 +6098,10 @@ class ProcessImageLibrary extends Process {
 			if (!empty($row['ownerPageId']) && isset($pagesById[(int) $row['ownerPageId']])) {
 				$displayPage = $pagesById[(int) $row['ownerPageId']];
 			}
-			// Page-column reference (link target + title). Hookable so
-			// integrations can retarget images stored on infrastructure pages:
-			// MediaHub asset pages (custom editUrl into the MediaHub asset
-			// screen), RockPageBuilder block pages (repoint to the parent
-			// content page). Default = the display page (repeater owner, else
+			// Page-column reference (link target + title). Hookable
+			// (resolvePageRef) so site code can retarget the reference when the
+			// storage page isn't the right target, or reaches its editor at a
+			// non-standard URL. Default = the display page (repeater owner, else
 			// storage). The thumb-editor modal below is NOT routed through here:
 			// it deliberately still targets the storage page's real image slot.
 			$ref = $this->resolvePageRef($displayPage, $page, $row);
