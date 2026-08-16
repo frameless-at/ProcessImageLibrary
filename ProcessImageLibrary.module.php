@@ -894,6 +894,16 @@ class ProcessImageLibrary extends Process {
 	public function autoIndexUsageOnPageSave(HookEvent $event): void {
 		$page = $event->arguments(0);
 		if (!$page instanceof Page || !$page->id || !$page->template) return;
+		// Repeater / RepeaterMatrix create AND save "ready" item pages while
+		// merely RENDERING a page-edit form (FieldtypeRepeater::getNextReadyPage
+		// fires a real $page->save() during the GET). That made this hook run
+		// several times per page view, each time rebuilding the where-used
+		// index. Those saves are an editor implementation detail, not a content
+		// change, so skip them. Embeds that live inside a repeater rich-text
+		// field are still indexed by the hourly LazyCron usage pass (scanUsage
+		// enumerates repeater item pages via include=all); the instant per-save
+		// path only covers top-level pages, which is where it matters.
+		if ($page instanceof RepeaterPage) return;
 		$textareaFields = $this->discoverTextareaFields();
 		if (!$textareaFields) return;
 		$hosts = false;
@@ -4633,6 +4643,32 @@ class ProcessImageLibrary extends Process {
 
 		$ownerByRepeaterId = [];
 		$repeaterPages = $this->wire('pages')->getById(array_keys($repeaterPageIds));
+
+		// Pre-warm the page cache for the owner resolution below. getForPageRoot()
+		// walks the parent chain with an individual Pages::get() per level, so on
+		// a site with many repeater rows it fired hundreds of single-page queries.
+		// Repeater items sit under a container page named "for-page-<ownerId>"
+		// (or "…-v<n>" for a version); parent_id is already on the loaded page (no
+		// query), so we batch-load the containers, parse the owner ids from their
+		// names, and batch-load the owners too. After this the ->parent access and
+		// getForPageRoot() below hit the warm cache instead of querying per row.
+		// This only PRE-LOADS pages; the actual resolution still goes through
+		// getForPageRoot(), so it can't change the result (nested repeaters just
+		// fall back to getForPageRoot's own loads for the deeper levels).
+		$containerIds = [];
+		foreach ($repeaterPages as $rp) {
+			$cpid = (int) $rp->parent_id;
+			if ($cpid) $containerIds[$cpid] = true;
+		}
+		if ($containerIds) {
+			$ownerIds = [];
+			foreach ($this->wire('pages')->getById(array_keys($containerIds)) as $c) {
+				if (preg_match('/^for-page-(\d+)(?:-v\d+)?$/', (string) $c->name, $m)) {
+					$ownerIds[(int) $m[1]] = true;
+				}
+			}
+			if ($ownerIds) $this->wire('pages')->getById(array_keys($ownerIds));
+		}
 
 		// Page Versions: a versioned page keeps a SEPARATE set of repeater-item
 		// pages per version, under a version-specific container named

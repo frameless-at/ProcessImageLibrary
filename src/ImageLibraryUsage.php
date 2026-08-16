@@ -42,6 +42,12 @@ trait ImageLibraryUsage {
 	 *  complete, so a large site never blocks a single request past this. */
 	const USAGE_SCAN_BUDGET_MS = 8000;
 
+	/** Per-request memo for buildImageStemIndex(). The index is derived from
+	 *  the whole-site image row set; building it more than once per request is
+	 *  pure waste. Several code paths (a save that reindexes usage, then a
+	 *  render) would otherwise rebuild it each time. null = not built yet. */
+	protected ?array $stemIndexCache = null;
+
 	/**
 	 * Create the usage table if it isn't there yet. Runs its CREATE at most
 	 * once per request (static guard) and only when an indexing path is
@@ -115,6 +121,7 @@ trait ImageLibraryUsage {
 	 * @return array<int,array<string,bool>>
 	 */
 	protected function buildImageStemIndex(): array {
+		if ($this->stemIndexCache !== null) return $this->stemIndexCache;
 		$idx = [];
 		foreach ($this->loadImageRowsAll() as $r) {
 			$pid = (int) ($r['pageId'] ?? 0);
@@ -124,7 +131,7 @@ trait ImageLibraryUsage {
 			if ($stem === '') continue;
 			$idx[$pid][$stem] = true;
 		}
-		return $idx;
+		return $this->stemIndexCache = $idx;
 	}
 
 	/**
@@ -272,6 +279,10 @@ trait ImageLibraryUsage {
 	protected function reindexUsageForRefPages(array $refPageIds): void {
 		$refPageIds = array_values(array_unique(array_map('intval', $refPageIds)));
 		if (!$refPageIds) return;
+		// This runs AFTER a rename cleared the row cache and must reflect the NEW
+		// basenames. Drop the per-request stem-index memo so buildImageStemIndex()
+		// rebuilds from the updated data instead of returning a pre-rename copy.
+		$this->stemIndexCache = null;
 		$stemIndex = $this->buildImageStemIndex();
 		foreach ($refPageIds as $rid) {
 			$this->reindexPageUsage($rid, $stemIndex);
