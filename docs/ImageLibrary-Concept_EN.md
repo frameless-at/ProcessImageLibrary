@@ -89,7 +89,7 @@ The `src/` traits keep the main module file focused on AJAX endpoints + renderin
 - `___executeBulk()` — AJAX POST: apply an identical cell save to a selection (Add / Replace mode, plus a tags-only Remove mode). Returns `vanished` (list of selection keys that dropped out of the filter) + `newTotal` alongside the success / failure counts. Rows whose image field doesn't carry the broadcast subfield silently succeed as no-ops instead of being counted as failures — a paintbrush hitting heterogeneous selections (e.g. "author" across rows from `images` + `lead_image` where only one carries it) is an editorial reality, not a user error.
 - `___executeRename()` — AJAX POST, renames a single image's file (or every selected image in batch mode) via `Pagefile::rename()` after expanding placeholders and clearing old variation files.
 - `___executeReplace()` — AJAX POST, replaces an image's file bytes via `move_uploaded_file()` onto the existing path, drops old variations, re-generates the thumb variation, returns the refreshed cell payload (thumb URL, dimensions, filesize, modified, variations count). Extension match enforced so the basename stays valid.
-- `___executeDelete()` — AJAX POST with an `items` array; single + batch share the path. Per page `$page->editable()`, then `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed lists so the JS can fade rows out and surface partial failures through the bulk-result dialog.
+- `___executeDelete()` — AJAX POST with an `items` array; single + batch share the path. Per page edit access via the owning content page for Repeater targets, then `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed lists so the JS can fade rows out and surface partial failures through the bulk-result dialog.
 - `___executeExport()` — direct download of JSON or CSV honoring the active filters. Reads `urlVariant` (`original` default; `260` / `512` / `1024` for same-axis variations) and emits the matching URL in the `url` column; the chosen variant is recorded in `meta.urlVariant`.
 - `___executeImport()` — AJAX POST, accepts a previously-exported (and externally edited) JSON / CSV file and writes it back; idempotent (unchanged items are skipped).
 - `___executeUserPrefs()` — AJAX POST, persists columns + page size + view mode + thumbnail scale + bookmarks + **collections** into `$user->meta('imageLibraryPrefs')` (debounced). Bookmarks are validated via `$sanitizer->text(maxLength: 80)` for the name and `canonicalizeBookmarkQs()` for the querystring; collections via `sanitizeCollection()` (alnum id, capped name, sanitised + de-duped + capped row-keys) — so saved + loaded shapes stay in lockstep.
@@ -330,7 +330,7 @@ Two **optional, off-by-default** integrations (config fieldset *Picker add-ons*)
 ## Permissions
 
 - **Admin-page visibility:** user needs `page-edit` on any page hosting an image field (module check at boot)
-- **Per-cell edit:** `$page->editable()` against the concrete target page (verified per request in the save endpoint)
+- **Per-cell edit:** edit access against the target page, resolving internal Repeater / RepeaterMatrix items to their owning content page (verified per request in the save endpoint)
 - Optional separate permission `image-library-access` for tighter control — when present, additionally scopes admin-page visibility
 
 ## Technical constraints

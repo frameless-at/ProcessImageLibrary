@@ -6,11 +6,13 @@ A drop-in **visuals manager** for the ProcessWire admin: install it on any exist
 
 ## Differences from `main` (branch `dev`)
 
-`dev` is the integration branch. It currently carries **two** unreleased changes on top of released `main` (v1.1.1):
+`dev` is the integration branch. It currently carries **three** unreleased changes on top of released `main` (v1.1.1):
 
 - **Hookable `resolvePageRef()`** – a new hookable method that produces the **“Page” column** reference for each row (page id, title, front-end URL, edit URL, name). The default reproduces current behaviour exactly (repeater/matrix owner page, otherwise the storage page), so with no hook attached nothing changes. Site code can hook it to change what the column shows and links to when the storage page isn't the page an editor should be sent to, or when its editor lives at a non-standard URL. A generic example is in the `___resolvePageRef()` doc block. Scope is deliberately the **“Page” column only** (link + title): the per-image editor modal still targets the storage page’s real image-field slot, and “Used in” (rich-text embeds) is unaffected. Known limitation: the hook resolves the *displayed* link/title; sorting and filtering still key off the storage page’s cached title. (Closes #12.)
 
 - **Per-save usage-index performance fix** – `autoIndexUsageOnPageSave` no longer rebuilds the site-wide image stem index on every save: RepeaterPage ready-page saves are skipped entirely (the hourly `scanUsage` pass still covers repeater-embedded usage), a normal save scopes the stem index to just the pages its own text references, and `resolveRepeaterRows` now pre-warms its owner pages so repeater-row resolution hits the cache instead of ~200 single-page queries. Pending real-site verification by the reporter before release. (Addresses #13.)
+
+- **Repeater-aware edit permissions** – write operations keep the internal Repeater / RepeaterMatrix item as the storage target, but resolve edit access to its owning content page. This makes picker assignment, inline metadata editing, rename / replace / delete, bulk operations and JSON import behave like ProcessWire's page editor for non-superusers while preserving server-side permission checks. (Fixes #14.)
 
 ## Contents
 

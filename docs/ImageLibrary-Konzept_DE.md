@@ -89,7 +89,7 @@ Die `src/`-Traits halten das Main-Modul-File auf AJAX-Endpoints + Rendering foku
 - `___executeBulk()` — AJAX-POST: identische Cell-Save auf eine Selektion anwenden (Add-/Replace-Mode, plus ein Tags-only Remove-Mode). Liefert `vanished` (Liste der Selection-Keys, die aus dem Filter gefallen sind) + `newTotal` zusätzlich zu den Succeed/Fail-Counts. Rows deren Image-Field das Broadcast-Subfield nicht trägt zählen als stiller Success (No-op) statt als Failure — eine Paintbrush-Aktion über heterogene Selektionen (z. B. „author" über Rows aus `images` + `lead_image`, wo nur eines davon das Subfield hat) ist redaktioneller Alltag, kein User-Fehler.
 - `___executeRename()` — AJAX-POST, benennt das File eines einzelnen Bildes um (oder im Batch-Modus jedes selektierte Bild) via `Pagefile::rename()` nach Platzhalter-Expansion und Bereinigung alter Variations-Files.
 - `___executeReplace()` — AJAX-POST, ersetzt die File-Bytes eines Bildes via `move_uploaded_file()` auf den existierenden Pfad, droppt alte Variations, regeneriert das Thumb-Variation und gibt den aktualisierten Cell-Payload zurück (Thumb-URL, Dimensions, Filesize, Modified, Variations-Zähler). Extension-Match wird erzwungen, damit der Basename gültig bleibt.
-- `___executeDelete()` — AJAX-POST mit einem `items`-Array; Einzel + Batch teilen denselben Pfad. Pro Page `$page->editable()`, dann `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed-Listen, damit JS die Rows ausfaden lassen und Partial-Failures via Bulk-Result-Dialog reporten kann.
+- `___executeDelete()` — AJAX-POST mit einem `items`-Array; Einzel + Batch teilen denselben Pfad. Pro Page Edit-Zugriff über die besitzende Content-Page bei Repeater-Zielen, dann `$pageimages->delete($img)` + `$page->save($field)`. Returns succeeded / failed-Listen, damit JS die Rows ausfaden lassen und Partial-Failures via Bulk-Result-Dialog reporten kann.
 - `___executeExport()` — Direct-Download von JSON oder CSV unter Berücksichtigung der aktiven Filter. Liest `urlVariant` (`original` Default; `260` / `512` / `1024` für same-axis Variations) und emittiert die passende URL in der `url`-Spalte; die gewählte Variante wird in `meta.urlVariant` festgehalten.
 - `___executeImport()` — AJAX-POST, akzeptiert eine vorher exportierte (und extern bearbeitete) JSON/CSV-Datei und schreibt zurück; idempotent (unverändert gebliebene Items werden geskippt).
 - `___executeUserPrefs()` — AJAX-POST persistiert Spalten + Page-Size + View-Mode + Thumbnail-Scale + Bookmarks + **Collections** in `$user->meta('imageLibraryPrefs')` (debounced). Bookmarks werden via `$sanitizer->text(maxLength: 80)` für den Namen und `canonicalizeBookmarkQs()` für den Querystring validiert; Collections via `sanitizeCollection()` (alnum-id, gekappter Name, sanitisierte + deduplizierte + gekappte Row-Keys) — damit Save- und Load-Shape konsistent bleiben.
@@ -330,7 +330,7 @@ Zwei **optionale, standardmäßig deaktivierte** Integrationen (Config-Fieldset 
 ## Permissions
 
 - **Anzeige der Admin-Page:** User braucht `page-edit` auf irgendeiner Page mit Image-Feld (Modul-Check beim Boot)
-- **Edit pro Cell:** `$page->editable()` auf der konkreten Ziel-Page (im Save-Endpoint pro Request geprüft)
+- **Edit pro Cell:** Edit-Zugriff auf die Ziel-Page; interne Repeater-/RepeaterMatrix-Items werden dafür auf ihre besitzende Content-Page aufgelöst (im Save-Endpoint pro Request geprüft)
 - Optional separate Permission `image-library-access` für engere Steuerung — wenn vorhanden, scopt das Admin-Page-Sichtbarkeit zusätzlich
 
 ## Technische Constraints

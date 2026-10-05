@@ -781,7 +781,7 @@ class ProcessImageLibrary extends Process {
 		$page  = $inputfield->hasPage;
 		$field = $inputfield->hasField;
 		if (!$page instanceof Page || !$page->id || !$field) return;
-		if (!$page->editable()) return;
+		if (!$this->editAccessPage($page)->editable()) return;
 
 		$libUrl = $this->libraryPageUrl();
 		if ($libUrl === '') return;
@@ -811,6 +811,21 @@ class ProcessImageLibrary extends Process {
 
 		$event->return .= '<div class="ml-lib-pick-wrap" style="margin-top:.4rem">'
 			. $btn->render() . '</div>';
+	}
+
+	/**
+	 * Return the user-facing page whose edit permission governs a target page.
+	 *
+	 * Repeater / RepeaterMatrix fields live on internal item pages. Those item
+	 * pages remain the correct storage target, but ordinary editors may not be
+	 * allowed to edit them directly even when they can edit the owning content
+	 * page. Resolve only edit-access checks to the root owner; callers must keep
+	 * using the original target page for field validation and mutations.
+	 */
+	protected function editAccessPage(Page $targetPage): Page {
+		if (!method_exists($targetPage, 'getForPageRoot')) return $targetPage;
+		$owner = $targetPage->getForPageRoot();
+		return ($owner instanceof Page && $owner->id) ? $owner : $targetPage;
 	}
 
 	/**
@@ -1148,10 +1163,13 @@ class ProcessImageLibrary extends Process {
 			return $this->jsonError('Missing parameter');
 		}
 
-		// Target: an editable page whose template carries this image field.
+		// Target: its user-facing owner must be editable, while the actual target
+		// page still carries the image field (Repeater items are internal pages).
 		$tgtPage = $this->wire('pages')->get($tgtPid);
 		if (!$tgtPage->id) return $this->jsonError('Target page not found', 404);
-		if (!$tgtPage->editable()) return $this->jsonError('Target page not editable', 403);
+		if (!$this->editAccessPage($tgtPage)->editable()) {
+			return $this->jsonError('Target page not editable', 403);
+		}
 		$field = $this->wire('fields')->get($tgtField);
 		if (!$field || !($field->type instanceof FieldtypeImage)) {
 			return $this->jsonError('Target field is not an image field');
@@ -1326,9 +1344,10 @@ class ProcessImageLibrary extends Process {
 	 */
 	/**
 	 * Detect picker mode (embedded image-chooser) from ?picker + target_page /
-	 * target_field. Validates the target is an editable page carrying that
-	 * image field. Runs on BOTH the full page render and the AJAX results
-	 * endpoint, so checkboxes survive view switches / pagination in the picker.
+	 * target_field. Validates edit access against the target's user-facing
+	 * owner while keeping the actual target for image-field validation. Runs
+	 * on BOTH the full page render and the AJAX results endpoint, so checkboxes
+	 * survive view switches / pagination in the picker.
 	 */
 	protected function detectPickerMode(): void {
 		$in = $this->wire('input');
@@ -1344,7 +1363,8 @@ class ProcessImageLibrary extends Process {
 		$tf = $this->wire('sanitizer')->fieldName((string) $in->get('target_field'));
 		$tpPage = $tp ? $this->wire('pages')->get($tp) : null;
 		$tFld   = $tf !== '' ? $this->wire('fields')->get($tf) : null;
-		if ($tpPage && $tpPage->id && $tpPage->editable()
+		$accessPage = ($tpPage && $tpPage->id) ? $this->editAccessPage($tpPage) : null;
+		if ($tpPage && $tpPage->id && $accessPage && $accessPage->editable()
 			&& $tFld && $tFld->type instanceof FieldtypeImage
 			&& $tpPage->template->hasField($tf)) {
 			$this->pickerMode          = true;
@@ -2448,7 +2468,7 @@ class ProcessImageLibrary extends Process {
 	 * Expects POST with: pageId, fieldName, basename, subfield, value,
 	 * plus PW's CSRF token. Returns JSON: { ok, value, error? }.
 	 *
-	 * Permission: $page->editable() on the target page. Subfield must be
+	 * Permission: edit access on the target page (or its Repeater owner). Subfield must be
 	 * `description`, `tags`, or one of the custom-fields-on-images declared
 	 * for the field.
 	 */
@@ -2480,7 +2500,7 @@ class ProcessImageLibrary extends Process {
 
 		$page = $this->wire('pages')->get($pageId);
 		if (!$page->id) return $this->jsonError('Page not found', 404);
-		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+		if (!$this->editAccessPage($page)->editable()) return $this->jsonError('Page not editable', 403);
 
 		$img = $this->resolvePageimage($page, $fieldName, $basename);
 		if (!$img) return $this->jsonError('Image not found in field', 404);
@@ -2707,7 +2727,7 @@ class ProcessImageLibrary extends Process {
 
 		$page = $this->wire('pages')->get($pageId);
 		if (!$page->id) return $this->jsonError('Page not found', 404);
-		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+		if (!$this->editAccessPage($page)->editable()) return $this->jsonError('Page not editable', 403);
 
 		$img = $this->resolvePageimage($page, $fieldName, $basename);
 		if (!$img) return $this->jsonError('Image not found in field', 404);
@@ -2798,7 +2818,7 @@ class ProcessImageLibrary extends Process {
 
 		$page = $this->wire('pages')->get($pageId);
 		if (!$page->id) return $this->jsonError('Page not found', 404);
-		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+		if (!$this->editAccessPage($page)->editable()) return $this->jsonError('Page not editable', 403);
 
 		$img = $this->resolvePageimage($page, $fieldName, $oldBasename);
 		if (!$img) return $this->jsonError('Image not found in field', 404);
@@ -2895,7 +2915,7 @@ class ProcessImageLibrary extends Process {
 
 		$page = $this->wire('pages')->get($pageId);
 		if (!$page->id) return $this->jsonError('Page not found', 404);
-		if (!$page->editable()) return $this->jsonError('Page not editable', 403);
+		if (!$this->editAccessPage($page)->editable()) return $this->jsonError('Page not editable', 403);
 
 		$img = $this->resolvePageimage($page, $fieldName, $basename);
 		if (!$img) return $this->jsonError('Image not found in field', 404);
@@ -3051,7 +3071,7 @@ class ProcessImageLibrary extends Process {
 	 * AJAX endpoint: delete one or more images (single + batch share
 	 * the same code path — JS always sends an `items` JSON array).
 	 *
-	 * Items: [{pageId, fieldName, basename}, ...]. Per-page editable()
+	 * Items: [{pageId, fieldName, basename}, ...]. Per-page edit access
 	 * is enforced; failures land in the result list so the UI can
 	 * report them via the existing bulk-result dialog pattern.
 	 *
@@ -3094,7 +3114,7 @@ class ProcessImageLibrary extends Process {
 				foreach ($pageItems as $i) $failed[] = sprintf('Page %d not found', $pid);
 				continue;
 			}
-			if (!$page->editable()) {
+			if (!$this->editAccessPage($page)->editable()) {
 				foreach ($pageItems as $i) $failed[] = sprintf('Page %d not editable', $pid);
 				continue;
 			}
@@ -3345,7 +3365,7 @@ class ProcessImageLibrary extends Process {
 		return [
 			'pageId'    => (int) $target->id,
 			'pageTitle' => (string) $target->get('title|name'),
-			'editUrl'   => $target->editable() ? (string) $target->editUrl() : '',
+			'editUrl'   => $this->editAccessPage($target)->editable() ? (string) $target->editUrl() : '',
 			'fieldName' => ($useOwner && $rfield) ? ($rfield->name . ' › ' . $fieldName) : $fieldName,
 		];
 	}
@@ -3933,7 +3953,7 @@ class ProcessImageLibrary extends Process {
 	 * value (string), subfield (string), plus CSRF token.
 	 *
 	 * Items grouped by pageId → each page is loaded and saved at most once
-	 * per field touched. $page->editable() enforced per page; failures
+	 * per field touched. Edit access is enforced per page (or Repeater owner); failures
 	 * accumulate in the response instead of aborting the batch.
 	 *
 	 * Returns JSON: { ok, succeeded:int, failed:string[] }.
@@ -4023,7 +4043,7 @@ class ProcessImageLibrary extends Process {
 				$failed[] = sprintf('Page %d not found', $pid);
 				continue;
 			}
-			if (!$page->editable()) {
+			if (!$this->editAccessPage($page)->editable()) {
 				$failed[] = sprintf('Page %d not editable', $pid);
 				continue;
 			}
@@ -4247,7 +4267,7 @@ class ProcessImageLibrary extends Process {
 	 * Apply a previously-exported (and externally edited)
 	 * JSON file back to the live pages. Every value goes through the
 	 * same whitelist gates as the inline-edit save endpoint:
-	 * per-page editable() check, image-field whitelist, subfield
+	 * per-page edit-access check, image-field whitelist, subfield
 	 * whitelist (built-ins + per-field declared customs), tag
 	 * whitelist when useTags=2. Items whose values match the page's
 	 * current state are skipped so we don't pile up empty saves.
@@ -4424,7 +4444,7 @@ class ProcessImageLibrary extends Process {
 		$changed = 0;
 		foreach (array_keys($affected) as $pid) {
 			$page = $pages->get((int) $pid);
-			if (!$page->id || !$page->editable()) continue;
+			if (!$page->id || !$this->editAccessPage($page)->editable()) continue;
 			$page->of(false);
 			$val = $page->getUnformatted($field);
 			if (!$val) continue;
@@ -6545,7 +6565,7 @@ class ProcessImageLibrary extends Process {
 		// editable image pages are unpublished must not be locked out.
 		$selector = 'template=' . implode('|', $eligibleTemplates) . ', include=unpublished';
 		foreach ($this->wire('pages')->findMany($selector) as $p) {
-			if ($p->editable()) return true;
+			if ($this->editAccessPage($p)->editable()) return true;
 		}
 		return false;
 	}

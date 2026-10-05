@@ -584,7 +584,7 @@ trait ImageLibraryExportImport {
 		foreach ($byPage as $pid => $items) {
 			$page = $this->wire('pages')->get($pid);
 			if (!$page->id) { $failed[] = "Page $pid not found"; continue; }
-			if (!$page->editable()) { $failed[] = "Page $pid not editable"; continue; }
+			if (!$this->editAccessPage($page)->editable()) { $failed[] = "Page $pid not editable"; continue; }
 			$page->of(false);
 			$fieldsTouched = [];
 
